@@ -1,0 +1,764 @@
+// ========== mod31.js (ZIPLAYAN) - ZİNCİR USTASI ==========
+(function () {
+    'use strict';
+
+    const CHAR_ID = 'ziplayan';
+    const C_MAIN = '#8e44ad';
+    const C_LIGHT = '#bb8fce';
+    const C_SPARK = '#f1c40f';
+    const C_WHITE = '#fff';
+    const CHAR_HP = 2800;
+    const CHAR_SPEED = 3.6;
+
+    // Ana saldırı
+    const DMG_1 = 700;
+    const DMG_2 = 400;
+    const DMG_3 = 100;
+    const BULLET_SPEED = PLAYER_BULLET_SPEED * 0.95;
+    const BULLET_RANGE = 280;
+    const MAX_BOT_HITS = 3;
+    const MAX_WALL_HITS = 6;
+    const WALL_RANGE = 150;
+    const RELOAD_SPEED = 0.012;
+
+    // Aksesuar 1 - Seken Dash
+    const DASH_MAX_BOUNCE = 4;
+    const DASH_DAMAGE = 200;
+    const DASH_SPEED = 16;
+    const DASH_LEG = 120;
+    const DASH_COOLDOWN = 900;
+
+    // Aksesuar 2 - Duvarda Can
+    const HEAL_PER_WALL = 200;
+    const HEAL_MAX = 1000;
+    const HEAL_COOLDOWN = 1200;
+
+    // Ulti
+    const ULTI_RADIUS = 85;
+    const ULTI_DAMAGE = 400;
+    const ULTI_PER_BOT_ULTI = 10;
+    const ULTI_PER_BOT_HEAL = 100;
+    const ULTI_PLACE_MAX = 260;
+    const ULTI_PLACE_MIN = 60;
+    const ULTI_AIR_TIME = 30;
+
+    window.GAME_EXT.characters[CHAR_ID] = { color: C_MAIN, hp: CHAR_HP, speed: CHAR_SPEED };
+
+    let zipBullets = [];
+    let zipTexts = [];
+    let zipParticles = [];
+    let zipSparks = [];
+    let dashState = { active: false, vx: 0, vy: 0, bouncesLeft: 0, hitTargets: new Set(), remainingRange: 0 };
+    let healReady = false;
+    let healThisShot = 0;
+    let ultiState = { active: false, startX: 0, startY: 0, targetX: 0, targetY: 0, progress: 0 };
+    let ultiDrag = { active: false, startX: 0, startY: 0, angle: 0, pull: 0, touchId: null, isMouse: false };
+
+    function chainHook(name, fn) {
+        const prev = window.GAME_EXT.hooks[name];
+        window.GAME_EXT.hooks[name] = function (...args) {
+            let prevResult;
+            if (typeof prev === 'function') prevResult = prev.apply(this, args);
+            const ownResult = fn.apply(this, args);
+            if (typeof prevResult === 'boolean' || typeof ownResult === 'boolean') return !!prevResult || !!ownResult;
+            return ownResult !== undefined ? ownResult : prevResult;
+        };
+    }
+
+    function zipText(x, y, val, isLabel, color) {
+        zipTexts.push({ x, y, val, life: 55, maxLife: 55, isLabel: !!isLabel, color: color || C_LIGHT });
+    }
+
+    function sparkBurst(x, y, n, color) {
+        for (let i = 0; i < (n || 6); i++) {
+            const ang = Math.random() * Math.PI * 2;
+            const sp = 2 + Math.random() * 4;
+            zipParticles.push({
+                x, y,
+                vx: Math.cos(ang) * sp, vy: Math.sin(ang) * sp,
+                size: 1.5 + Math.random() * 2,
+                life: 15 + Math.random() * 15, maxLife: 30,
+                color: color || C_SPARK,
+                gravity: 0.05
+            });
+        }
+    }
+
+    // Karakter kartı
+    const container = document.querySelector('.char-select-container');
+    if (container && !document.getElementById('char-' + CHAR_ID)) {
+        const card = document.createElement('div');
+        card.className = 'char-card';
+        card.id = 'char-' + CHAR_ID;
+        card.innerHTML =
+            '<div class="char-color-preview" style="background:' + C_MAIN + ';"></div>' +
+            '<span>Zıplayan</span>' +
+            '<small>Hasar: 700→400→100<br>Güç: Seken Dash + Can<br>Ulti: Zıplatma</small>';
+        container.appendChild(card);
+        card.addEventListener('click', () => {
+            selectedCharacter = CHAR_ID;
+            document.querySelectorAll('.char-card').forEach(el => el.classList.remove('selected'));
+            card.classList.add('selected');
+        });
+    }
+
+    function clearZipState() {
+        zipBullets = [];
+        zipTexts = [];
+        zipParticles = [];
+        zipSparks = [];
+        dashState = { active: false, vx: 0, vy: 0, bouncesLeft: 0, hitTargets: new Set(), remainingRange: 0 };
+        ultiState = { active: false, startX: 0, startY: 0, targetX: 0, targetY: 0, progress: 0 };
+        healReady = false;
+        healThisShot = 0;
+    }
+
+    const originalSetCharacter = Player.prototype.setCharacter;
+    Player.prototype.setCharacter = function (type) {
+        originalSetCharacter.call(this, type);
+        if (type === CHAR_ID) {
+            clearZipState();
+            this.reloadSpeed = RELOAD_SPEED;
+            if (gadgetBtn) {
+                gadgetBtn.style.display = 'flex';
+                gadgetBtn.innerHTML = 'SEKEN<br>DASH<br><span id="gadget-timer"></span>';
+                gadgetBtn.classList.remove('cooldown');
+            }
+            if (gadgetBtn2) {
+                gadgetBtn2.style.display = 'flex';
+                gadgetBtn2.innerHTML = 'DUVARDA<br>CAN<br><span id="gadget-timer-2"></span>';
+                gadgetBtn2.classList.remove('cooldown');
+            }
+            if (ultiBtn) {
+                ultiBtn.style.display = 'flex';
+                ultiBtn.style.background = 'radial-gradient(circle, ' + C_MAIN + ', #4a235a)';
+            }
+            gadgetTimerText = document.getElementById('gadget-timer');
+            gadgetTimerText2 = document.getElementById('gadget-timer-2');
+        } else {
+            clearZipState();
+            if (ultiBtn) ultiBtn.style.background = '';
+            if (this.reloadSpeed === RELOAD_SPEED) this.reloadSpeed = 0.015;
+        }
+    };
+
+    // ===== Ana saldırı =====
+    const originalFire = Player.prototype.fire;
+    Player.prototype.fire = function (a, pullOverride) {
+        if (this.charType !== CHAR_ID) return originalFire.call(this, a, pullOverride);
+        if (this.ammo < 1 || this.isDead || ultiState.active) return;
+
+        zipBullets.push({
+            x: this.x, y: this.y, sx: this.x, sy: this.y,
+            vx: Math.cos(a) * BULLET_SPEED,
+            vy: Math.sin(a) * BULLET_SPEED,
+            angle: a,
+            botHits: 0,
+            wallHits: 0,
+            hitTargets: new Set(),
+            remainingRange: BULLET_RANGE,
+            rangeUsed: 0,
+            isDead: false,
+            trail: [],
+            healThisShot: healReady ? HEAL_MAX : 0,
+            showHeal: healReady
+        });
+        if (healReady) {
+            healReady = false;
+            zipText(this.x, this.y - 30, "CAN MERMİSİ!", true, C_SPARK);
+        }
+        this.consumeAmmo();
+        this.lastShotTime = Date.now();
+    };
+
+    // ===== Aks 1 — Seken Dash =====
+    const originalActivateGadget = Player.prototype.activateGadget;
+    Player.prototype.activateGadget = function (a, pull) {
+        if (this.charType !== CHAR_ID) return originalActivateGadget.call(this, a, pull);
+        if (!this.gadgetReady || this.isDead || dashState.active || ultiState.active) return;
+
+        const ang = a !== undefined ? a : this.angle;
+        dashState.active = true;
+        dashState.vx = Math.cos(ang) * DASH_SPEED;
+        dashState.vy = Math.sin(ang) * DASH_SPEED;
+        dashState.bouncesLeft = DASH_MAX_BOUNCE;
+        dashState.hitTargets = new Set();
+        dashState.remainingRange = DASH_LEG;
+
+        this.gadgetReady = false;
+        this.gadgetCooldown = DASH_COOLDOWN;
+        if (gadgetBtn) gadgetBtn.classList.add('cooldown');
+        if (gadgetTimerText) gadgetTimerText.innerText = Math.ceil(DASH_COOLDOWN / 60) + "s";
+        zipText(this.x, this.y - 30, "SEKEN DASH!", true, C_MAIN);
+        sparkBurst(this.x, this.y, 8, C_MAIN);
+    };
+
+    // ===== Aks 2 — Duvarda Can =====
+    const originalActivateGadget2 = Player.prototype.activateGadget2;
+    Player.prototype.activateGadget2 = function (a, pull) {
+        if (this.charType !== CHAR_ID) return originalActivateGadget2.call(this, a, pull);
+        if (!this.gadget2Ready || this.isDead) return;
+        healReady = true;
+        this.gadget2Ready = false;
+        this.gadget2Cooldown = HEAL_COOLDOWN;
+        if (gadgetBtn2) gadgetBtn2.classList.add('cooldown');
+        if (gadgetTimerText2) gadgetTimerText2.innerText = Math.ceil(HEAL_COOLDOWN / 60) + "s";
+        zipText(this.x, this.y - 30, "CAN HAZIR!", true, C_SPARK);
+    };
+
+    // ===== Ulti — zıplatma =====
+    const originalFireUlti = Player.prototype.fireUlti;
+    Player.prototype.fireUlti = function (a, pull) {
+        if (this.charType !== CHAR_ID) return originalFireUlti.call(this, a, pull);
+        if (pull === undefined) return;
+        if (!this.ultReady || this.isDead || ultiState.active || dashState.active) return;
+
+        const pullMag = pull > 0.05 ? pull : 1;
+        const dist = ULTI_PLACE_MIN + (ULTI_PLACE_MAX - ULTI_PLACE_MIN) * pullMag;
+        const tx = clampPos(this.x + Math.cos(a) * dist, WALL_THICKNESS + 30, canvas.width - WALL_THICKNESS - 30);
+        const ty = clampPos(this.y + Math.sin(a) * dist, WALL_THICKNESS + 30, canvas.height - WALL_THICKNESS - 30);
+
+        ultiState.active = true;
+        ultiState.startX = this.x;
+        ultiState.startY = this.y;
+        ultiState.targetX = tx;
+        ultiState.targetY = ty;
+        ultiState.progress = 0;
+
+        zipText(this.x, this.y - 40, "ZIPLAT!", true, C_MAIN);
+        this.ultReady = false;
+        this.ultCharge = 0;
+        if (ultFill) ultFill.style.width = "0%";
+        if (ultiBtn) ultiBtn.classList.remove('ready');
+    };
+
+    // ===== Ulti dolumu (%50 yavaş) =====
+    chainHook('onChargeUlti', function (amount) {
+        if (player.charType !== CHAR_ID) return;
+        if (!gameStarted || player.ultReady) return;
+        player.ultCharge = Math.min(100, player.ultCharge + amount * 0.5);
+        if (player.ultCharge >= 100) {
+            player.ultReady = true;
+            if (ultiBtn) ultiBtn.classList.add('ready');
+            zipText(player.x, player.y - 40, "GÜÇ HAZIR!", true, C_SPARK);
+        }
+        if (ultFill) ultFill.style.width = player.ultCharge + "%";
+    });
+
+    chainHook('onReset', function () { clearZipState(); });
+
+    // ===== Ulti drag =====
+    function ultiDragStart(cx, cy) {
+        if (!player.ultReady || player.isDead || player.charType !== CHAR_ID) return;
+        const r = ultiBtn.getBoundingClientRect();
+        ultiDrag.active = true;
+        ultiDrag.startX = r.left + r.width / 2;
+        ultiDrag.startY = r.top + r.height / 2;
+        ultiDrag.angle = player.angle;
+        ultiDrag.pull = 0;
+    }
+    function ultiDragMove(cx, cy) {
+        if (!ultiDrag.active) return;
+        ultiDrag.angle = Math.atan2(cy - ultiDrag.startY, cx - ultiDrag.startX);
+        ultiDrag.pull = Math.min(1, Math.hypot(cx - ultiDrag.startX, cy - ultiDrag.startY) / 160);
+    }
+    function ultiDragEnd() {
+        if (!ultiDrag.active) return;
+        ultiDrag.active = false;
+        player.fireUlti(ultiDrag.angle, ultiDrag.pull);
+    }
+
+    ultiBtn.addEventListener('touchstart', e => {
+        if (player.charType !== CHAR_ID) return;
+        e.preventDefault(); e.stopImmediatePropagation();
+        const t = e.changedTouches[0];
+        ultiDrag.touchId = t.identifier;
+        ultiDragStart(t.clientX, t.clientY);
+    }, { capture: true, passive: false });
+
+    window.addEventListener('touchmove', e => {
+        if (!ultiDrag.active || player.charType !== CHAR_ID) return;
+        for (let i = 0; i < e.changedTouches.length; i++) {
+            if (e.changedTouches[i].identifier === ultiDrag.touchId)
+                ultiDragMove(e.changedTouches[i].clientX, e.changedTouches[i].clientY);
+        }
+    }, { passive: false });
+
+    window.addEventListener('touchend', e => {
+        if (!ultiDrag.active) return;
+        for (let i = 0; i < e.changedTouches.length; i++) {
+            if (e.changedTouches[i].identifier === ultiDrag.touchId) ultiDragEnd();
+        }
+    });
+
+    ultiBtn.addEventListener('mousedown', e => {
+        if (player.charType !== CHAR_ID) return;
+        e.preventDefault(); e.stopImmediatePropagation();
+        ultiDrag.isMouse = true;
+        ultiDragStart(e.clientX, e.clientY);
+    }, { capture: true });
+
+    window.addEventListener('mousemove', e => {
+        if (ultiDrag.active && ultiDrag.isMouse) ultiDragMove(e.clientX, e.clientY);
+    });
+    window.addEventListener('mouseup', () => {
+        if (ultiDrag.active && ultiDrag.isMouse) {
+            ultiDrag.isMouse = false;
+            ultiDragEnd();
+        }
+    });
+
+    // ===== RAF loop =====
+    let lastT = 0;
+    function zipLoop(t) {
+        if (!lastT) lastT = t;
+        const ts = Math.min(3, (t - lastT) / 16.666);
+        lastT = t;
+        if (gameStarted) {
+            try { zipUpdate(ts); } catch (err) { console.error('[ZIP]', err); }
+        }
+        requestAnimationFrame(zipLoop);
+    }
+    requestAnimationFrame(zipLoop);
+
+    function zipUpdate(ts) {
+        if (player.charType === CHAR_ID) {
+            if (ultiBtn && ultiBtn.style.display !== 'flex') ultiBtn.style.display = 'flex';
+            if (gadgetBtn && gadgetBtn.style.display !== 'flex') gadgetBtn.style.display = 'flex';
+            if (gadgetBtn2 && gadgetBtn2.style.display !== 'flex') gadgetBtn2.style.display = 'flex';
+        }
+        // Dash aktifse oyuncu normal hareket edemez
+        if (dashState.active && !player.isDead) {
+            const stepX = dashState.vx * ts;
+            const stepY = dashState.vy * ts;
+            player.x += stepX;
+            player.y += stepY;
+            dashState.remainingRange -= Math.hypot(stepX, stepY);
+
+            // Düşman çarpışması
+            getActiveEnemies().forEach(e => {
+                if (dashState.hitTargets.has(e)) return;
+                if (getDist(player, e) < e.radius + player.radius + 5) {
+                    dashState.hitTargets.add(e);
+                    e.hp -= DASH_DAMAGE;
+                    addFloatingNumber(e.x, e.y, DASH_DAMAGE, C_MAIN);
+                    sparkBurst(e.x, e.y, 5, C_SPARK);
+                }
+            });
+
+            // Duvar sekmesi (fizik tabanlı)
+            let bounced = false;
+            if (player.x < WALL_THICKNESS + player.radius) {
+                player.x = WALL_THICKNESS + player.radius;
+                dashState.vx = Math.abs(dashState.vx);
+                bounced = true;
+            } else if (player.x > canvas.width - WALL_THICKNESS - player.radius) {
+                player.x = canvas.width - WALL_THICKNESS - player.radius;
+                dashState.vx = -Math.abs(dashState.vx);
+                bounced = true;
+            }
+            if (player.y < WALL_THICKNESS + player.radius) {
+                player.y = WALL_THICKNESS + player.radius;
+                dashState.vy = Math.abs(dashState.vy);
+                bounced = true;
+            } else if (player.y > canvas.height - WALL_THICKNESS - player.radius) {
+                player.y = canvas.height - WALL_THICKNESS - player.radius;
+                dashState.vy = -Math.abs(dashState.vy);
+                bounced = true;
+            }
+
+            // Siper çarpışması
+            obstacles.concat(cactusWalls || []).forEach(o => {
+                if (getDist(player, o) < o.radius + player.radius) {
+                    const ang = getAngle(o, player);
+                    const nx = Math.cos(ang), ny = Math.sin(ang);
+                    const dot = dashState.vx * nx + dashState.vy * ny;
+                    dashState.vx -= 2 * dot * nx;
+                    dashState.vy -= 2 * dot * ny;
+                    const overlap = o.radius + player.radius - getDist(player, o);
+                    player.x += nx * overlap;
+                    player.y += ny * overlap;
+                    bounced = true;
+                }
+            });
+
+            if (bounced) {
+                dashState.bouncesLeft--;
+                dashState.remainingRange = DASH_LEG;
+                sparkBurst(player.x, player.y, 6, C_SPARK);
+                if (dashState.bouncesLeft <= 0) {
+                    dashState.active = false;
+                    sparkBurst(player.x, player.y, 10, C_MAIN);
+                }
+            }
+            if (dashState.remainingRange <= 0) {
+                dashState.active = false;
+                sparkBurst(player.x, player.y, 8, C_MAIN);
+            }
+        }
+
+        // Ulti aktifse
+        if (ultiState.active && !player.isDead) {
+            ultiState.progress += ts / ULTI_AIR_TIME;
+            const t = Math.min(1, ultiState.progress);
+            // Yay eğrisi
+            player.x = ultiState.startX + (ultiState.targetX - ultiState.startX) * t;
+            player.y = ultiState.startY + (ultiState.targetY - ultiState.startY) * t;
+            // Havada olduğu için invulnerable
+            player.jumpInvulnerable = true;
+
+            if (ultiState.progress >= 1) {
+                // İniş
+                player.x = ultiState.targetX;
+                player.y = ultiState.targetY;
+                player.jumpInvulnerable = false;
+                ultiState.active = false;
+
+                let hitCount = 0;
+                getActiveEnemies().forEach(e => {
+                    if (getDist(player, e) < ULTI_RADIUS + e.radius) {
+                        e.hp -= ULTI_DAMAGE;
+                        addFloatingNumber(e.x, e.y, ULTI_DAMAGE, C_MAIN);
+                        hitCount++;
+                    }
+                });
+
+                if (hitCount > 0) {
+                    const ultiGain = hitCount * ULTI_PER_BOT_ULTI;
+                    const healGain = hitCount * ULTI_PER_BOT_HEAL;
+                    if (!player.ultReady) {
+                        player.ultCharge = Math.min(100, player.ultCharge + ultiGain);
+                        if (player.ultCharge >= 100) {
+                            player.ultReady = true;
+                            if (ultiBtn) ultiBtn.classList.add('ready');
+                        }
+                        if (ultFill) ultFill.style.width = player.ultCharge + "%";
+                    }
+                    player.hp = Math.min(player.maxHp, player.hp + healGain);
+                    zipText(player.x, player.y - 40, "+" + healGain + " (+%" + ultiGain + ")", true, C_SPARK);
+                }
+
+                zipSparks.push({ x: player.x, y: player.y, radius: 10, targetRadius: ULTI_RADIUS, life: 20, maxLife: 20 });
+                sparkBurst(player.x, player.y, 20, C_MAIN);
+                screenShake = 8;
+                zipText(player.x, player.y - 60, "İNDİ! (" + hitCount + ")", true, C_MAIN);
+            }
+        }
+
+        // Mermiler
+        for (let i = zipBullets.length - 1; i >= 0; i--) {
+            const b = zipBullets[i];
+            if (b.isDead) { zipBullets.splice(i, 1); continue; }
+
+            const stepX = b.vx * ts;
+            const stepY = b.vy * ts;
+            const stepLen = Math.hypot(stepX, stepY);
+            b.x += stepX;
+            b.y += stepY;
+            b.remainingRange -= stepLen;
+
+            // Trail kaydet
+            b.trail.push({ x: b.x, y: b.y, life: 15 });
+            if (b.trail.length > 12) b.trail.shift();
+
+            // Ekran dışı
+            if (b.x < WALL_THICKNESS || b.x > canvas.width - WALL_THICKNESS ||
+                b.y < WALL_THICKNESS || b.y > canvas.height - WALL_THICKNESS) {
+                // Ekran sınırı duvar sayılır — sekme yap
+                let bounced = false;
+                if (b.x < WALL_THICKNESS) { b.x = WALL_THICKNESS; b.vx = Math.abs(b.vx); bounced = true; }
+                if (b.x > canvas.width - WALL_THICKNESS) { b.x = canvas.width - WALL_THICKNESS; b.vx = -Math.abs(b.vx); bounced = true; }
+                if (b.y < WALL_THICKNESS) { b.y = WALL_THICKNESS; b.vy = Math.abs(b.vy); bounced = true; }
+                if (b.y > canvas.height - WALL_THICKNESS) { b.y = canvas.height - WALL_THICKNESS; b.vy = -Math.abs(b.vy); bounced = true; }
+                if (bounced) {
+                    b.wallHits++;
+                    b.angle = Math.atan2(b.vy, b.vx);
+                    b.remainingRange = WALL_RANGE;
+                    sparkBurst(b.x, b.y, 4, C_SPARK);
+                    if (b.showHeal && b.healThisShot > 0) {
+                        const heal = Math.min(HEAL_PER_WALL, b.healThisShot);
+                        b.healThisShot -= heal;
+                        player.hp = Math.min(player.maxHp, player.hp + heal);
+                        zipText(player.x, player.y - 30, "+" + heal, false, C_SPARK);
+                    }
+                    if (b.wallHits >= MAX_WALL_HITS) {
+                        b.isDead = true;
+                        sparkBurst(b.x, b.y, 5, C_MAIN);
+                        continue;
+                    }
+                }
+            }
+
+            // Siper çarpışması
+            let obsHit = false;
+            for (const o of obstacles.concat(cactusWalls || [])) {
+                if (getDist(b, o) < o.radius + 8) {
+                    const ang = getAngle(o, b);
+                    const nx = Math.cos(ang), ny = Math.sin(ang);
+                    const dot = b.vx * nx + b.vy * ny;
+                    b.vx -= 2 * dot * nx;
+                    b.vy -= 2 * dot * ny;
+                    b.angle = Math.atan2(b.vy, b.vx);
+                    b.remainingRange = WALL_RANGE;
+                    b.wallHits++;
+                    obsHit = true;
+                    sparkBurst(b.x, b.y, 4, C_SPARK);
+                    if (b.showHeal && b.healThisShot > 0) {
+                        const heal = Math.min(HEAL_PER_WALL, b.healThisShot);
+                        b.healThisShot -= heal;
+                        player.hp = Math.min(player.maxHp, player.hp + heal);
+                        zipText(player.x, player.y - 30, "+" + heal, false, C_SPARK);
+                    }
+                    if (b.wallHits >= MAX_WALL_HITS) {
+                        b.isDead = true;
+                        sparkBurst(b.x, b.y, 5, C_MAIN);
+                    }
+                    break;
+                }
+            }
+            if (b.isDead) continue;
+
+            // Bot çarpışması
+            let botHit = null;
+            for (const e of getActiveEnemies()) {
+                if (b.hitTargets.has(e)) continue;
+                if (getDist(b, e) < e.radius + 10) {
+                    botHit = e;
+                    break;
+                }
+            }
+
+            if (botHit) {
+                b.hitTargets.add(botHit);
+                b.botHits++;
+                const dmg = b.botHits === 1 ? DMG_1 : b.botHits === 2 ? DMG_2 : DMG_3;
+                botHit.hp -= dmg;
+                addFloatingNumber(botHit.x, botHit.y, dmg, C_MAIN);
+                sparkBurst(botHit.x, botHit.y, 6, C_SPARK);
+
+                if (b.botHits >= MAX_BOT_HITS) {
+                    // Bitti
+                    b.isDead = true;
+                    sparkBurst(b.x, b.y, 8, C_MAIN);
+                    zipText(b.x, b.y - 20, "BİTTİ!", false, C_MAIN);
+                    continue;
+                }
+
+                // En yakın vurulmamış bota yönlendir
+                let nearest = null, nearestDist = Infinity;
+                getActiveEnemies().forEach(e => {
+                    if (b.hitTargets.has(e) || e.isDead) return;
+                    const d = getDist(b, e);
+                    if (d < BULLET_RANGE && d < nearestDist) {
+                        nearestDist = d;
+                        nearest = e;
+                    }
+                });
+
+                if (nearest) {
+                    const ang = Math.atan2(nearest.y - b.y, nearest.x - b.x);
+                    b.vx = Math.cos(ang) * BULLET_SPEED;
+                    b.vy = Math.sin(ang) * BULLET_SPEED;
+                    b.angle = ang;
+                    b.remainingRange = BULLET_RANGE;
+                } else {
+                    // Hedef yok — sekme kaybı
+                    b.isDead = true;
+                    sparkBurst(b.x, b.y, 6, C_MAIN);
+                    zipText(b.x, b.y - 20, "SEKME YOK", false, C_LIGHT);
+                    continue;
+                }
+            }
+
+            // Menzil aşımı
+            if (b.remainingRange <= 0) {
+                b.isDead = true;
+                sparkBurst(b.x, b.y, 4, C_MAIN);
+                zipText(b.x, b.y - 20, "MENZİL", false, C_LIGHT);
+                continue;
+            }
+        }
+
+        // Trail güncelle
+        zipBullets.forEach(b => {
+            for (let i = b.trail.length - 1; i >= 0; i--) {
+                b.trail[i].life -= ts;
+                if (b.trail[i].life <= 0) b.trail.splice(i, 1);
+            }
+        });
+
+        // Partiküller
+        for (let i = zipParticles.length - 1; i >= 0; i--) {
+            const p = zipParticles[i];
+            p.x += p.vx * ts; p.y += p.vy * ts;
+            p.vy += p.gravity * ts;
+            p.vx *= 0.95; p.vy *= 0.95;
+            p.life -= ts;
+            if (p.life <= 0) zipParticles.splice(i, 1);
+        }
+
+        // Yazılar
+        for (let i = zipTexts.length - 1; i >= 0; i--) {
+            const t = zipTexts[i];
+            t.y -= 0.7 * ts;
+            t.life -= ts;
+            if (t.life <= 0) zipTexts.splice(i, 1);
+        }
+
+        // Sparks
+        for (let i = zipSparks.length - 1; i >= 0; i--) {
+            const s = zipSparks[i];
+            const prog = 1 - (s.life / s.maxLife);
+            s.radius = s.targetRadius * prog;
+            s.life -= ts;
+            if (s.life <= 0) zipSparks.splice(i, 1);
+        }
+    }
+
+    // ===== Çizim =====
+    chainHook('onDraw', function (ctx2) {
+        // Dash izleri
+        if (dashState.active && player.charType === CHAR_ID) {
+            ctx2.save();
+            ctx2.globalAlpha = 0.5;
+            ctx2.beginPath();
+            ctx2.arc(player.x, player.y, player.radius + 8, 0, Math.PI * 2);
+            ctx2.strokeStyle = C_SPARK;
+            ctx2.lineWidth = 3;
+            ctx2.stroke();
+            ctx2.restore();
+        }
+
+        // Mermiler ve izler
+        zipBullets.forEach(b => {
+            // İz
+            b.trail.forEach((pt, idx) => {
+                const alpha = (pt.life / 15) * 0.5;
+                ctx2.save();
+                ctx2.globalAlpha = alpha;
+                ctx2.beginPath();
+                ctx2.arc(pt.x, pt.y, 4, 0, Math.PI * 2);
+                ctx2.fillStyle = C_LIGHT;
+                ctx2.fill();
+                ctx2.restore();
+            });
+
+            // Mermi
+            ctx2.save();
+            ctx2.translate(b.x, b.y);
+            // Aura
+            const grad = ctx2.createRadialGradient(0, 0, 0, 0, 0, 12);
+            grad.addColorStop(0, C_WHITE);
+            grad.addColorStop(0.4, C_LIGHT);
+            grad.addColorStop(1, 'rgba(142,68,173,0)');
+            ctx2.beginPath(); ctx2.arc(0, 0, 12, 0, Math.PI * 2);
+            ctx2.fillStyle = grad; ctx2.fill();
+            // Gövde
+            ctx2.rotate(b.angle);
+            ctx2.beginPath();
+            ctx2.moveTo(8, 0); ctx2.lineTo(-6, -4); ctx2.lineTo(-6, 4);
+            ctx2.closePath();
+            ctx2.fillStyle = C_MAIN;
+            ctx2.fill();
+            ctx2.restore();
+
+            // Sayaçlar
+            if (b.botHits > 0 || b.wallHits > 0) {
+                ctx2.save();
+                ctx2.font = 'bold 10px Arial';
+                ctx2.textAlign = 'center';
+                ctx2.fillStyle = C_WHITE;
+                ctx2.strokeStyle = 'rgba(30,10,40,0.9)';
+                ctx2.lineWidth = 2;
+                const label = b.botHits + '/' + MAX_BOT_HITS + ' • ' + b.wallHits + '/' + MAX_WALL_HITS;
+                ctx2.strokeText(label, b.x, b.y - 16);
+                ctx2.fillText(label, b.x, b.y - 16);
+                ctx2.restore();
+            }
+        });
+
+        // Ulti alanı / zıplatma
+        if (ultiState.active && player.charType === CHAR_ID) {
+            ctx2.save();
+            ctx2.globalAlpha = 0.4;
+            ctx2.beginPath();
+            ctx2.arc(ultiState.targetX, ultiState.targetY, ULTI_RADIUS, 0, Math.PI * 2);
+            ctx2.strokeStyle = C_MAIN;
+            ctx2.lineWidth = 3;
+            ctx2.setLineDash([8, 6]);
+            ctx2.stroke();
+            ctx2.setLineDash([]);
+            ctx2.restore();
+        }
+
+        // Sparks (AoE dalgaları)
+        zipSparks.forEach(s => {
+            const alpha = s.life / s.maxLife;
+            ctx2.save();
+            ctx2.globalAlpha = alpha;
+            ctx2.beginPath();
+            ctx2.arc(s.x, s.y, s.radius, 0, Math.PI * 2);
+            ctx2.strokeStyle = C_MAIN;
+            ctx2.lineWidth = 4;
+            ctx2.stroke();
+            ctx2.beginPath();
+            ctx2.arc(s.x, s.y, s.radius * 0.7, 0, Math.PI * 2);
+            ctx2.strokeStyle = C_SPARK;
+            ctx2.lineWidth = 2;
+            ctx2.stroke();
+            ctx2.restore();
+        });
+
+        // Partiküller
+        zipParticles.forEach(p => {
+            const alpha = Math.min(1, p.life / 15);
+            ctx2.save();
+            ctx2.globalAlpha = alpha;
+            ctx2.beginPath();
+            ctx2.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+            ctx2.fillStyle = p.color;
+            ctx2.fill();
+            ctx2.restore();
+        });
+
+        // Yazılar
+        zipTexts.forEach(t => {
+            const alpha = Math.min(1, t.life / 20);
+            ctx2.save();
+            ctx2.globalAlpha = alpha;
+            ctx2.font = t.isLabel ? 'bold 15px Arial' : 'bold 12px Arial';
+            ctx2.textAlign = 'center';
+            ctx2.fillStyle = t.color;
+            ctx2.strokeStyle = 'rgba(30,10,40,0.9)';
+            ctx2.lineWidth = 3;
+            ctx2.strokeText(t.val, t.x, t.y);
+            ctx2.fillText(t.val, t.x, t.y);
+            ctx2.restore();
+        });
+
+        // Ulti drag göstergesi
+        if (player.charType === CHAR_ID && ultiDrag.active && player.ultReady && !player.isDead) {
+            const pullMag = ultiDrag.pull < 0.05 ? 1 : ultiDrag.pull;
+            const dist = ULTI_PLACE_MIN + (ULTI_PLACE_MAX - ULTI_PLACE_MIN) * pullMag;
+            const tx = clampPos(player.x + Math.cos(ultiDrag.angle) * dist, WALL_THICKNESS + 30, canvas.width - WALL_THICKNESS - 30);
+            const ty = clampPos(player.y + Math.sin(ultiDrag.angle) * dist, WALL_THICKNESS + 30, canvas.height - WALL_THICKNESS - 30);
+            ctx2.save();
+            ctx2.beginPath();
+            ctx2.moveTo(player.x, player.y);
+            ctx2.lineTo(tx, ty);
+            ctx2.strokeStyle = 'rgba(142,68,173,0.6)';
+            ctx2.lineWidth = 3;
+            ctx2.setLineDash([8, 6]);
+            ctx2.stroke();
+            ctx2.setLineDash([]);
+            ctx2.beginPath();
+            ctx2.arc(tx, ty, ULTI_RADIUS, 0, Math.PI * 2);
+            ctx2.fillStyle = 'rgba(142,68,173,0.15)';
+            ctx2.fill();
+            ctx2.strokeStyle = C_MAIN;
+            ctx2.lineWidth = 3;
+            ctx2.stroke();
+            ctx2.restore();
+        }
+    });
+})();
