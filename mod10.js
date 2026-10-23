@@ -1,4 +1,4 @@
-// ========== mod31.js (ZIPLAYAN) - ZİNCİR USTASI ==========
+// ========== mod31.js (ZIPLAYAN) - ZİNCİR USTASI v2 ==========
 (function () {
     'use strict';
 
@@ -10,7 +10,6 @@
     const CHAR_HP = 2800;
     const CHAR_SPEED = 3.6;
 
-    // Ana saldırı
     const DMG_1 = 700;
     const DMG_2 = 400;
     const DMG_3 = 100;
@@ -20,6 +19,7 @@
     const MAX_WALL_HITS = 6;
     const WALL_RANGE = 150;
     const RELOAD_SPEED = 0.012;
+    const SIper_HASAR = 80; // mermi sipere çarpınca hasar
 
     // Aksesuar 1 - Seken Dash
     const DASH_MAX_BOUNCE = 4;
@@ -36,11 +36,18 @@
     // Ulti
     const ULTI_RADIUS = 85;
     const ULTI_DAMAGE = 400;
+    const ULTI_JUMP_MAX = 8;
     const ULTI_PER_BOT_ULTI = 10;
     const ULTI_PER_BOT_HEAL = 100;
     const ULTI_PLACE_MAX = 260;
     const ULTI_PLACE_MIN = 60;
     const ULTI_AIR_TIME = 30;
+
+    // Bot zıplatma (ultiden)
+    const BOT_JUMP_FRAMES = 25;
+    const BOT_JUMP_HEIGHT = 40;
+    const BOT_JUMP_AOE_RADIUS = 50;
+    const BOT_JUMP_AOE_DMG = 400;
 
     window.GAME_EXT.characters[CHAR_ID] = { color: C_MAIN, hp: CHAR_HP, speed: CHAR_SPEED };
 
@@ -50,7 +57,6 @@
     let zipSparks = [];
     let dashState = { active: false, vx: 0, vy: 0, bouncesLeft: 0, hitTargets: new Set(), remainingRange: 0 };
     let healReady = false;
-    let healThisShot = 0;
     let ultiState = { active: false, startX: 0, startY: 0, targetX: 0, targetY: 0, progress: 0 };
     let ultiDrag = { active: false, startX: 0, startY: 0, angle: 0, pull: 0, touchId: null, isMouse: false };
 
@@ -65,8 +71,8 @@
         };
     }
 
-    function zipText(x, y, val, isLabel, color) {
-        zipTexts.push({ x, y, val, life: 55, maxLife: 55, isLabel: !!isLabel, color: color || C_LIGHT });
+    function zipText(x, y, val, isLabel) {
+        zipTexts.push({ x, y, val, life: 55, maxLife: 55, isLabel: !!isLabel });
     }
 
     function sparkBurst(x, y, n, color) {
@@ -82,6 +88,17 @@
                 gravity: 0.05
             });
         }
+    }
+
+    // Bot zıplatma başlat
+    function triggerBotJump(bot) {
+        if (!bot || bot.isDead || bot._zipJumpActive) return false;
+        bot._zipJumpActive = true;
+        bot._zipJumpTimer = BOT_JUMP_FRAMES;
+        bot._zipJumpOrigY = bot.y;
+        bot._zipJumpOrigSpeed = bot.speed;
+        bot.speed = 0;
+        return true;
     }
 
     // Karakter kartı
@@ -110,7 +127,14 @@
         dashState = { active: false, vx: 0, vy: 0, bouncesLeft: 0, hitTargets: new Set(), remainingRange: 0 };
         ultiState = { active: false, startX: 0, startY: 0, targetX: 0, targetY: 0, progress: 0 };
         healReady = false;
-        healThisShot = 0;
+        // Bot zıplatma temizliği
+        getActiveEnemies().forEach(b => {
+            if (b._zipJumpActive) {
+                b._zipJumpActive = false;
+                b.y = b._zipJumpOrigY || b.y;
+                b.speed = b._zipJumpOrigSpeed || b.speed;
+            }
+        });
     }
 
     const originalSetCharacter = Player.prototype.setCharacter;
@@ -152,21 +176,14 @@
             x: this.x, y: this.y, sx: this.x, sy: this.y,
             vx: Math.cos(a) * BULLET_SPEED,
             vy: Math.sin(a) * BULLET_SPEED,
-            angle: a,
-            botHits: 0,
-            wallHits: 0,
+            angle: a, botHits: 0, wallHits: 0,
             hitTargets: new Set(),
             remainingRange: BULLET_RANGE,
-            rangeUsed: 0,
-            isDead: false,
-            trail: [],
+            isDead: false, trail: [],
             healThisShot: healReady ? HEAL_MAX : 0,
             showHeal: healReady
         });
-        if (healReady) {
-            healReady = false;
-            zipText(this.x, this.y - 30, "CAN MERMİSİ!", true, C_SPARK);
-        }
+        if (healReady) healReady = false;
         this.consumeAmmo();
         this.lastShotTime = Date.now();
     };
@@ -176,7 +193,6 @@
     Player.prototype.activateGadget = function (a, pull) {
         if (this.charType !== CHAR_ID) return originalActivateGadget.call(this, a, pull);
         if (!this.gadgetReady || this.isDead || dashState.active || ultiState.active) return;
-
         const ang = a !== undefined ? a : this.angle;
         dashState.active = true;
         dashState.vx = Math.cos(ang) * DASH_SPEED;
@@ -184,12 +200,10 @@
         dashState.bouncesLeft = DASH_MAX_BOUNCE;
         dashState.hitTargets = new Set();
         dashState.remainingRange = DASH_LEG;
-
         this.gadgetReady = false;
         this.gadgetCooldown = DASH_COOLDOWN;
         if (gadgetBtn) gadgetBtn.classList.add('cooldown');
         if (gadgetTimerText) gadgetTimerText.innerText = Math.ceil(DASH_COOLDOWN / 60) + "s";
-        zipText(this.x, this.y - 30, "SEKEN DASH!", true, C_MAIN);
         sparkBurst(this.x, this.y, 8, C_MAIN);
     };
 
@@ -203,7 +217,6 @@
         this.gadget2Cooldown = HEAL_COOLDOWN;
         if (gadgetBtn2) gadgetBtn2.classList.add('cooldown');
         if (gadgetTimerText2) gadgetTimerText2.innerText = Math.ceil(HEAL_COOLDOWN / 60) + "s";
-        zipText(this.x, this.y - 30, "CAN HAZIR!", true, C_SPARK);
     };
 
     // ===== Ulti — zıplatma =====
@@ -212,20 +225,17 @@
         if (this.charType !== CHAR_ID) return originalFireUlti.call(this, a, pull);
         if (pull === undefined) return;
         if (!this.ultReady || this.isDead || ultiState.active || dashState.active) return;
-
         const pullMag = pull > 0.05 ? pull : 1;
         const dist = ULTI_PLACE_MIN + (ULTI_PLACE_MAX - ULTI_PLACE_MIN) * pullMag;
         const tx = clampPos(this.x + Math.cos(a) * dist, WALL_THICKNESS + 30, canvas.width - WALL_THICKNESS - 30);
         const ty = clampPos(this.y + Math.sin(a) * dist, WALL_THICKNESS + 30, canvas.height - WALL_THICKNESS - 30);
-
         ultiState.active = true;
         ultiState.startX = this.x;
         ultiState.startY = this.y;
         ultiState.targetX = tx;
         ultiState.targetY = ty;
         ultiState.progress = 0;
-
-        zipText(this.x, this.y - 40, "ZIPLAT!", true, C_MAIN);
+        zipText(this.x, this.y - 40, "ZIPLAT!", true);
         this.ultReady = false;
         this.ultCharge = 0;
         if (ultFill) ultFill.style.width = "0%";
@@ -240,7 +250,6 @@
         if (player.ultCharge >= 100) {
             player.ultReady = true;
             if (ultiBtn) ultiBtn.classList.add('ready');
-            zipText(player.x, player.y - 40, "GÜÇ HAZIR!", true, C_SPARK);
         }
         if (ultFill) ultFill.style.width = player.ultCharge + "%";
     });
@@ -327,7 +336,33 @@
             if (gadgetBtn && gadgetBtn.style.display !== 'flex') gadgetBtn.style.display = 'flex';
             if (gadgetBtn2 && gadgetBtn2.style.display !== 'flex') gadgetBtn2.style.display = 'flex';
         }
-        // Dash aktifse oyuncu normal hareket edemez
+
+        // Bot zıplatma animasyonu
+        getActiveEnemies().forEach(e => {
+            if (e._zipJumpActive) {
+                e._zipJumpTimer -= ts;
+                const prog = 1 - Math.max(0, e._zipJumpTimer / BOT_JUMP_FRAMES);
+                const offset = Math.sin(prog * Math.PI) * BOT_JUMP_HEIGHT;
+                e.y = e._zipJumpOrigY - offset;
+                if (e._zipJumpTimer <= 0) {
+                    e._zipJumpActive = false;
+                    e.y = e._zipJumpOrigY;
+                    e.speed = e._zipJumpOrigSpeed;
+                    // İniş AoE — diğer botlara hasar (onları zıplatma!)
+                    getActiveEnemies().forEach(other => {
+                        if (other === e || other.isDead) return;
+                        if (getDist(e, other) < BOT_JUMP_AOE_RADIUS + other.radius) {
+                            other.hp -= BOT_JUMP_AOE_DMG;
+                            addFloatingNumber(other.x, other.y, BOT_JUMP_AOE_DMG, C_MAIN);
+                        }
+                    });
+                    zipSparks.push({ x: e.x, y: e.y, radius: 5, targetRadius: BOT_JUMP_AOE_RADIUS, life: 15, maxLife: 15 });
+                    sparkBurst(e.x, e.y, 8, C_MAIN);
+                }
+            }
+        });
+
+        // Dash
         if (dashState.active && !player.isDead) {
             const stepX = dashState.vx * ts;
             const stepY = dashState.vy * ts;
@@ -335,7 +370,6 @@
             player.y += stepY;
             dashState.remainingRange -= Math.hypot(stepX, stepY);
 
-            // Düşman çarpışması
             getActiveEnemies().forEach(e => {
                 if (dashState.hitTargets.has(e)) return;
                 if (getDist(player, e) < e.radius + player.radius + 5) {
@@ -346,28 +380,12 @@
                 }
             });
 
-            // Duvar sekmesi (fizik tabanlı)
             let bounced = false;
-            if (player.x < WALL_THICKNESS + player.radius) {
-                player.x = WALL_THICKNESS + player.radius;
-                dashState.vx = Math.abs(dashState.vx);
-                bounced = true;
-            } else if (player.x > canvas.width - WALL_THICKNESS - player.radius) {
-                player.x = canvas.width - WALL_THICKNESS - player.radius;
-                dashState.vx = -Math.abs(dashState.vx);
-                bounced = true;
-            }
-            if (player.y < WALL_THICKNESS + player.radius) {
-                player.y = WALL_THICKNESS + player.radius;
-                dashState.vy = Math.abs(dashState.vy);
-                bounced = true;
-            } else if (player.y > canvas.height - WALL_THICKNESS - player.radius) {
-                player.y = canvas.height - WALL_THICKNESS - player.radius;
-                dashState.vy = -Math.abs(dashState.vy);
-                bounced = true;
-            }
+            if (player.x < WALL_THICKNESS + player.radius) { player.x = WALL_THICKNESS + player.radius; dashState.vx = Math.abs(dashState.vx); bounced = true; }
+            else if (player.x > canvas.width - WALL_THICKNESS - player.radius) { player.x = canvas.width - WALL_THICKNESS - player.radius; dashState.vx = -Math.abs(dashState.vx); bounced = true; }
+            if (player.y < WALL_THICKNESS + player.radius) { player.y = WALL_THICKNESS + player.radius; dashState.vy = Math.abs(dashState.vy); bounced = true; }
+            else if (player.y > canvas.height - WALL_THICKNESS - player.radius) { player.y = canvas.height - WALL_THICKNESS - player.radius; dashState.vy = -Math.abs(dashState.vy); bounced = true; }
 
-            // Siper çarpışması
             obstacles.concat(cactusWalls || []).forEach(o => {
                 if (getDist(player, o) < o.radius + player.radius) {
                     const ang = getAngle(o, player);
@@ -397,35 +415,36 @@
             }
         }
 
-        // Ulti aktifse
+        // Ulti zıplama
         if (ultiState.active && !player.isDead) {
             ultiState.progress += ts / ULTI_AIR_TIME;
             const t = Math.min(1, ultiState.progress);
-            // Yay eğrisi
             player.x = ultiState.startX + (ultiState.targetX - ultiState.startX) * t;
             player.y = ultiState.startY + (ultiState.targetY - ultiState.startY) * t;
-            // Havada olduğu için invulnerable
             player.jumpInvulnerable = true;
 
             if (ultiState.progress >= 1) {
-                // İniş
                 player.x = ultiState.targetX;
                 player.y = ultiState.targetY;
                 player.jumpInvulnerable = false;
                 ultiState.active = false;
 
-                let hitCount = 0;
+                // Alandaki botlara hasar + onları zıplat
+                let jumped = 0;
+                const inRange = [];
                 getActiveEnemies().forEach(e => {
-                    if (getDist(player, e) < ULTI_RADIUS + e.radius) {
-                        e.hp -= ULTI_DAMAGE;
-                        addFloatingNumber(e.x, e.y, ULTI_DAMAGE, C_MAIN);
-                        hitCount++;
-                    }
+                    if (getDist(player, e) < ULTI_RADIUS + e.radius) inRange.push(e);
+                });
+                inRange.sort((a, b) => getDist(player, a) - getDist(player, b));
+                inRange.slice(0, ULTI_JUMP_MAX).forEach(e => {
+                    e.hp -= ULTI_DAMAGE;
+                    addFloatingNumber(e.x, e.y, ULTI_DAMAGE, C_MAIN);
+                    if (triggerBotJump(e)) jumped++;
                 });
 
-                if (hitCount > 0) {
-                    const ultiGain = hitCount * ULTI_PER_BOT_ULTI;
-                    const healGain = hitCount * ULTI_PER_BOT_HEAL;
+                if (jumped > 0) {
+                    const ultiGain = jumped * ULTI_PER_BOT_ULTI;
+                    const healGain = jumped * ULTI_PER_BOT_HEAL;
                     if (!player.ultReady) {
                         player.ultCharge = Math.min(100, player.ultCharge + ultiGain);
                         if (player.ultCharge >= 100) {
@@ -435,13 +454,11 @@
                         if (ultFill) ultFill.style.width = player.ultCharge + "%";
                     }
                     player.hp = Math.min(player.maxHp, player.hp + healGain);
-                    zipText(player.x, player.y - 40, "+" + healGain + " (+%" + ultiGain + ")", true, C_SPARK);
                 }
 
                 zipSparks.push({ x: player.x, y: player.y, radius: 10, targetRadius: ULTI_RADIUS, life: 20, maxLife: 20 });
                 sparkBurst(player.x, player.y, 20, C_MAIN);
                 screenShake = 8;
-                zipText(player.x, player.y - 60, "İNDİ! (" + hitCount + ")", true, C_MAIN);
             }
         }
 
@@ -452,19 +469,16 @@
 
             const stepX = b.vx * ts;
             const stepY = b.vy * ts;
-            const stepLen = Math.hypot(stepX, stepY);
             b.x += stepX;
             b.y += stepY;
-            b.remainingRange -= stepLen;
+            b.remainingRange -= Math.hypot(stepX, stepY);
 
-            // Trail kaydet
             b.trail.push({ x: b.x, y: b.y, life: 15 });
             if (b.trail.length > 12) b.trail.shift();
 
-            // Ekran dışı
+            // Ekran kenarı (duvar gibi davranır)
             if (b.x < WALL_THICKNESS || b.x > canvas.width - WALL_THICKNESS ||
                 b.y < WALL_THICKNESS || b.y > canvas.height - WALL_THICKNESS) {
-                // Ekran sınırı duvar sayılır — sekme yap
                 let bounced = false;
                 if (b.x < WALL_THICKNESS) { b.x = WALL_THICKNESS; b.vx = Math.abs(b.vx); bounced = true; }
                 if (b.x > canvas.width - WALL_THICKNESS) { b.x = canvas.width - WALL_THICKNESS; b.vx = -Math.abs(b.vx); bounced = true; }
@@ -474,12 +488,11 @@
                     b.wallHits++;
                     b.angle = Math.atan2(b.vy, b.vx);
                     b.remainingRange = WALL_RANGE;
-                    sparkBurst(b.x, b.y, 4, C_SPARK);
+                    sparkBurst(b.x, b.y, 3, C_SPARK);
                     if (b.showHeal && b.healThisShot > 0) {
                         const heal = Math.min(HEAL_PER_WALL, b.healThisShot);
                         b.healThisShot -= heal;
                         player.hp = Math.min(player.maxHp, player.hp + heal);
-                        zipText(player.x, player.y - 30, "+" + heal, false, C_SPARK);
                     }
                     if (b.wallHits >= MAX_WALL_HITS) {
                         b.isDead = true;
@@ -489,10 +502,11 @@
                 }
             }
 
-            // Siper çarpışması
+            // Siper çarpışması — hasar ver + sek
             let obsHit = false;
             for (const o of obstacles.concat(cactusWalls || [])) {
                 if (getDist(b, o) < o.radius + 8) {
+                    o.hp -= SIper_HASAR;
                     const ang = getAngle(o, b);
                     const nx = Math.cos(ang), ny = Math.sin(ang);
                     const dot = b.vx * nx + b.vy * ny;
@@ -507,7 +521,6 @@
                         const heal = Math.min(HEAL_PER_WALL, b.healThisShot);
                         b.healThisShot -= heal;
                         player.hp = Math.min(player.maxHp, player.hp + heal);
-                        zipText(player.x, player.y - 30, "+" + heal, false, C_SPARK);
                     }
                     if (b.wallHits >= MAX_WALL_HITS) {
                         b.isDead = true;
@@ -522,10 +535,7 @@
             let botHit = null;
             for (const e of getActiveEnemies()) {
                 if (b.hitTargets.has(e)) continue;
-                if (getDist(b, e) < e.radius + 10) {
-                    botHit = e;
-                    break;
-                }
+                if (getDist(b, e) < e.radius + 10) { botHit = e; break; }
             }
 
             if (botHit) {
@@ -537,10 +547,8 @@
                 sparkBurst(botHit.x, botHit.y, 6, C_SPARK);
 
                 if (b.botHits >= MAX_BOT_HITS) {
-                    // Bitti
                     b.isDead = true;
                     sparkBurst(b.x, b.y, 8, C_MAIN);
-                    zipText(b.x, b.y - 20, "BİTTİ!", false, C_MAIN);
                     continue;
                 }
 
@@ -549,10 +557,7 @@
                 getActiveEnemies().forEach(e => {
                     if (b.hitTargets.has(e) || e.isDead) return;
                     const d = getDist(b, e);
-                    if (d < BULLET_RANGE && d < nearestDist) {
-                        nearestDist = d;
-                        nearest = e;
-                    }
+                    if (d < BULLET_RANGE && d < nearestDist) { nearestDist = d; nearest = e; }
                 });
 
                 if (nearest) {
@@ -562,24 +567,18 @@
                     b.angle = ang;
                     b.remainingRange = BULLET_RANGE;
                 } else {
-                    // Hedef yok — sekme kaybı
                     b.isDead = true;
                     sparkBurst(b.x, b.y, 6, C_MAIN);
-                    zipText(b.x, b.y - 20, "SEKME YOK", false, C_LIGHT);
-                    continue;
                 }
             }
 
-            // Menzil aşımı
-            if (b.remainingRange <= 0) {
+            if (b.remainingRange <= 0 && !b.isDead) {
                 b.isDead = true;
                 sparkBurst(b.x, b.y, 4, C_MAIN);
-                zipText(b.x, b.y - 20, "MENZİL", false, C_LIGHT);
-                continue;
             }
         }
 
-        // Trail güncelle
+        // Trail
         zipBullets.forEach(b => {
             for (let i = b.trail.length - 1; i >= 0; i--) {
                 b.trail[i].life -= ts;
@@ -617,7 +616,20 @@
 
     // ===== Çizim =====
     chainHook('onDraw', function (ctx2) {
-        // Dash izleri
+        // Bot zıplatma görseli
+        getActiveEnemies().forEach(e => {
+            if (e._zipJumpActive) {
+                ctx2.save();
+                ctx2.globalAlpha = 0.4;
+                ctx2.beginPath();
+                ctx2.ellipse(e.x, e._zipJumpOrigY, e.radius * 0.8, e.radius * 0.4, 0, 0, Math.PI * 2);
+                ctx2.fillStyle = 'rgba(0,0,0,0.5)';
+                ctx2.fill();
+                ctx2.restore();
+            }
+        });
+
+        // Dash göstergesi
         if (dashState.active && player.charType === CHAR_ID) {
             ctx2.save();
             ctx2.globalAlpha = 0.5;
@@ -631,8 +643,7 @@
 
         // Mermiler ve izler
         zipBullets.forEach(b => {
-            // İz
-            b.trail.forEach((pt, idx) => {
+            b.trail.forEach(pt => {
                 const alpha = (pt.life / 15) * 0.5;
                 ctx2.save();
                 ctx2.globalAlpha = alpha;
@@ -643,17 +654,14 @@
                 ctx2.restore();
             });
 
-            // Mermi
             ctx2.save();
             ctx2.translate(b.x, b.y);
-            // Aura
             const grad = ctx2.createRadialGradient(0, 0, 0, 0, 0, 12);
             grad.addColorStop(0, C_WHITE);
             grad.addColorStop(0.4, C_LIGHT);
             grad.addColorStop(1, 'rgba(142,68,173,0)');
             ctx2.beginPath(); ctx2.arc(0, 0, 12, 0, Math.PI * 2);
             ctx2.fillStyle = grad; ctx2.fill();
-            // Gövde
             ctx2.rotate(b.angle);
             ctx2.beginPath();
             ctx2.moveTo(8, 0); ctx2.lineTo(-6, -4); ctx2.lineTo(-6, 4);
@@ -661,23 +669,9 @@
             ctx2.fillStyle = C_MAIN;
             ctx2.fill();
             ctx2.restore();
-
-            // Sayaçlar
-            if (b.botHits > 0 || b.wallHits > 0) {
-                ctx2.save();
-                ctx2.font = 'bold 10px Arial';
-                ctx2.textAlign = 'center';
-                ctx2.fillStyle = C_WHITE;
-                ctx2.strokeStyle = 'rgba(30,10,40,0.9)';
-                ctx2.lineWidth = 2;
-                const label = b.botHits + '/' + MAX_BOT_HITS + ' • ' + b.wallHits + '/' + MAX_WALL_HITS;
-                ctx2.strokeText(label, b.x, b.y - 16);
-                ctx2.fillText(label, b.x, b.y - 16);
-                ctx2.restore();
-            }
         });
 
-        // Ulti alanı / zıplatma
+        // Ulti hedef göstergesi
         if (ultiState.active && player.charType === CHAR_ID) {
             ctx2.save();
             ctx2.globalAlpha = 0.4;
@@ -691,7 +685,7 @@
             ctx2.restore();
         }
 
-        // Sparks (AoE dalgaları)
+        // Sparks
         zipSparks.forEach(s => {
             const alpha = s.life / s.maxLife;
             ctx2.save();
@@ -728,13 +722,38 @@
             ctx2.globalAlpha = alpha;
             ctx2.font = t.isLabel ? 'bold 15px Arial' : 'bold 12px Arial';
             ctx2.textAlign = 'center';
-            ctx2.fillStyle = t.color;
+            ctx2.fillStyle = C_LIGHT;
             ctx2.strokeStyle = 'rgba(30,10,40,0.9)';
             ctx2.lineWidth = 3;
             ctx2.strokeText(t.val, t.x, t.y);
             ctx2.fillText(t.val, t.x, t.y);
             ctx2.restore();
         });
+
+        // Dash nişan çizgisi (drag sırasında)
+        if (player.charType === CHAR_ID && gadAim.active && player.gadgetReady && !player.isDead && !dashState.active) {
+            const ang = gadAim.angle;
+            const startX = player.x, startY = player.y;
+            const endX = startX + Math.cos(ang) * DASH_LEG;
+            const endY = startY + Math.sin(ang) * DASH_LEG;
+            ctx2.save();
+            ctx2.beginPath();
+            ctx2.moveTo(startX, startY);
+            ctx2.lineTo(endX, endY);
+            ctx2.strokeStyle = 'rgba(142,68,173,0.8)';
+            ctx2.lineWidth = 3;
+            ctx2.setLineDash([10, 6]);
+            ctx2.stroke();
+            ctx2.setLineDash([]);
+            ctx2.beginPath();
+            ctx2.arc(endX, endY, 8, 0, Math.PI * 2);
+            ctx2.fillStyle = C_MAIN;
+            ctx2.fill();
+            ctx2.strokeStyle = C_SPARK;
+            ctx2.lineWidth = 2;
+            ctx2.stroke();
+            ctx2.restore();
+        }
 
         // Ulti drag göstergesi
         if (player.charType === CHAR_ID && ultiDrag.active && player.ultReady && !player.isDead) {
