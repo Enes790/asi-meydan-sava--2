@@ -7,7 +7,7 @@
     const C_EMBER = '#c0392b';
     const C_FLAME = '#f39c12';
     const C_WHITE = '#fff5e6';
-    const CHAR_HP = 2600;
+    const CHAR_HP = 3200;
     const CHAR_SPEED = 3.4;
 
     // Ana saldırı
@@ -21,7 +21,7 @@
     // Normal patlama (dışa iter)
     const EXPL_RADIUS = 43;
     const EXPL_DAMAGE = 400;
-    const EXPL_PUSH = 20;
+    const EXPL_PUSH = 30;
 
     // Büyük patlama (Aks 1, içe çeker)
     const BIG_RADIUS = 90;
@@ -29,12 +29,12 @@
     const BIG_PULL = 50;
     const BIG_SLOW_FACTOR = 0.7;
     const BIG_SLOW_DURATION = 60;
-    const KOZ_COOLDOWN = 900;
+    const KOZ_COOLDOWN = 960;
 
     // Yanan alan
     const BURN_RADIUS = 60;
     const BURN_DURATION = 180;
-    const BURN_DPS_BOT = 100;
+    const BURN_DPS_BOT = 150;
     const BURN_DPS_PLAYER = 50;
 
     // Alev Saçılımı (Aks 2)
@@ -49,7 +49,7 @@
     const ULTI_DAMAGE = 600;
     const ULTI_STUN_MS = 2000;
     const ULTI_BURN_DURATION = 180;
-    const ULTI_BURN_DPS = 100;
+    const ULTI_BURN_DPS = 250;
 
     window.GAME_EXT.characters[CHAR_ID] = { color: C_FIRE, hp: CHAR_HP, speed: CHAR_SPEED };
 
