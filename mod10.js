@@ -1,4 +1,4 @@
-// ========== mod31.js (ZIPLAYAN) - ZİNCİR USTASI v2 ==========
+// ========== mod31.js (ZIPLAYAN) - ZİNCİR USTASI v3 ==========
 (function () {
     'use strict';
 
@@ -19,21 +19,18 @@
     const MAX_WALL_HITS = 6;
     const WALL_RANGE = 150;
     const RELOAD_SPEED = 0.012;
-    const SIper_HASAR = 80; // mermi sipere çarpınca hasar
+    const SIIPER_HASAR = 80;
 
-    // Aksesuar 1 - Seken Dash
     const DASH_MAX_BOUNCE = 4;
     const DASH_DAMAGE = 200;
     const DASH_SPEED = 16;
     const DASH_LEG = 120;
     const DASH_COOLDOWN = 900;
 
-    // Aksesuar 2 - Duvarda Can
     const HEAL_PER_WALL = 200;
     const HEAL_MAX = 1000;
     const HEAL_COOLDOWN = 1200;
 
-    // Ulti
     const ULTI_RADIUS = 85;
     const ULTI_DAMAGE = 400;
     const ULTI_JUMP_MAX = 8;
@@ -41,11 +38,10 @@
     const ULTI_PER_BOT_HEAL = 100;
     const ULTI_PLACE_MAX = 260;
     const ULTI_PLACE_MIN = 60;
-    const ULTI_AIR_TIME = 30;
+    const ULTI_AIR_TIME = 40;
 
-    // Bot zıplatma (ultiden)
-    const BOT_JUMP_FRAMES = 25;
-    const BOT_JUMP_HEIGHT = 40;
+    const BOT_JUMP_FRAMES = 48;
+    const BOT_JUMP_HEIGHT = 65;
     const BOT_JUMP_AOE_RADIUS = 50;
     const BOT_JUMP_AOE_DMG = 400;
 
@@ -90,18 +86,20 @@
         }
     }
 
-    // Bot zıplatma başlat
     function triggerBotJump(bot) {
         if (!bot || bot.isDead || bot._zipJumpActive) return false;
         bot._zipJumpActive = true;
         bot._zipJumpTimer = BOT_JUMP_FRAMES;
         bot._zipJumpOrigY = bot.y;
         bot._zipJumpOrigSpeed = bot.speed;
+        bot._zipJumpOrigRadius = bot.radius;
+        bot._zipJumpOrigInterval = bot.shootInterval;
         bot.speed = 0;
+        bot.radius = 0.1;
+        bot.shootInterval = 999999;
         return true;
     }
 
-    // Karakter kartı
     const container = document.querySelector('.char-select-container');
     if (container && !document.getElementById('char-' + CHAR_ID)) {
         const card = document.createElement('div');
@@ -127,12 +125,15 @@
         dashState = { active: false, vx: 0, vy: 0, bouncesLeft: 0, hitTargets: new Set(), remainingRange: 0 };
         ultiState = { active: false, startX: 0, startY: 0, targetX: 0, targetY: 0, progress: 0 };
         healReady = false;
-        // Bot zıplatma temizliği
+        player.isJumping = false;
+        player.jumpInvulnerable = false;
         getActiveEnemies().forEach(b => {
             if (b._zipJumpActive) {
                 b._zipJumpActive = false;
                 b.y = b._zipJumpOrigY || b.y;
                 b.speed = b._zipJumpOrigSpeed || b.speed;
+                b.radius = b._zipJumpOrigRadius || b.radius;
+                b.shootInterval = b._zipJumpOrigInterval || b.shootInterval;
             }
         });
     }
@@ -166,12 +167,10 @@
         }
     };
 
-    // ===== Ana saldırı =====
     const originalFire = Player.prototype.fire;
     Player.prototype.fire = function (a, pullOverride) {
         if (this.charType !== CHAR_ID) return originalFire.call(this, a, pullOverride);
         if (this.ammo < 1 || this.isDead || ultiState.active) return;
-
         zipBullets.push({
             x: this.x, y: this.y, sx: this.x, sy: this.y,
             vx: Math.cos(a) * BULLET_SPEED,
@@ -188,7 +187,6 @@
         this.lastShotTime = Date.now();
     };
 
-    // ===== Aks 1 — Seken Dash =====
     const originalActivateGadget = Player.prototype.activateGadget;
     Player.prototype.activateGadget = function (a, pull) {
         if (this.charType !== CHAR_ID) return originalActivateGadget.call(this, a, pull);
@@ -207,7 +205,6 @@
         sparkBurst(this.x, this.y, 8, C_MAIN);
     };
 
-    // ===== Aks 2 — Duvarda Can =====
     const originalActivateGadget2 = Player.prototype.activateGadget2;
     Player.prototype.activateGadget2 = function (a, pull) {
         if (this.charType !== CHAR_ID) return originalActivateGadget2.call(this, a, pull);
@@ -219,7 +216,6 @@
         if (gadgetTimerText2) gadgetTimerText2.innerText = Math.ceil(HEAL_COOLDOWN / 60) + "s";
     };
 
-    // ===== Ulti — zıplatma =====
     const originalFireUlti = Player.prototype.fireUlti;
     Player.prototype.fireUlti = function (a, pull) {
         if (this.charType !== CHAR_ID) return originalFireUlti.call(this, a, pull);
@@ -235,6 +231,18 @@
         ultiState.targetX = tx;
         ultiState.targetY = ty;
         ultiState.progress = 0;
+        // Base jump animasyonu
+        this.isJumping = true;
+        this.jumpInvulnerable = true;
+        this.jumpProgress = 0;
+        this.jumpDuration = 9999999;
+        this.jumpStartX = this.x;
+        this.jumpStartY = this.y;
+        this.jumpTargetX = tx;
+        this.jumpTargetY = ty;
+        this.jumpDamage = 0;
+        this.jumpKnockback = 0;
+        this.jumpLabel = "";
         zipText(this.x, this.y - 40, "ZIPLAT!", true);
         this.ultReady = false;
         this.ultCharge = 0;
@@ -242,7 +250,6 @@
         if (ultiBtn) ultiBtn.classList.remove('ready');
     };
 
-    // ===== Ulti dolumu (%50 yavaş) =====
     chainHook('onChargeUlti', function (amount) {
         if (player.charType !== CHAR_ID) return;
         if (!gameStarted || player.ultReady) return;
@@ -256,7 +263,21 @@
 
     chainHook('onReset', function () { clearZipState(); });
 
-    // ===== Ulti drag =====
+    // Base aim çizgisini blokla
+    chainHook('onPreDraw', function (ctx2) {
+        if (player.charType === CHAR_ID && aimData.active && !player.isDead && !dashState.active) {
+            player._zipHideBaseAim = true;
+            aimData.active = false;
+        }
+    });
+
+    chainHook('onPostDraw', function (ctx2) {
+        if (player._zipHideBaseAim) {
+            aimData.active = true;
+            player._zipHideBaseAim = false;
+        }
+    });
+
     function ultiDragStart(cx, cy) {
         if (!player.ultReady || player.isDead || player.charType !== CHAR_ID) return;
         const r = ultiBtn.getBoundingClientRect();
@@ -317,7 +338,6 @@
         }
     });
 
-    // ===== RAF loop =====
     let lastT = 0;
     function zipLoop(t) {
         if (!lastT) lastT = t;
@@ -337,32 +357,45 @@
             if (gadgetBtn2 && gadgetBtn2.style.display !== 'flex') gadgetBtn2.style.display = 'flex';
         }
 
-        // Bot zıplatma animasyonu
+        // ===== Bot zıplatma — 1. Geçiş: hareket + iniş zamanlaması =====
+        const landingBots = [];
         getActiveEnemies().forEach(e => {
             if (e._zipJumpActive) {
                 e._zipJumpTimer -= ts;
-                const prog = 1 - Math.max(0, e._zipJumpTimer / BOT_JUMP_FRAMES);
-                const offset = Math.sin(prog * Math.PI) * BOT_JUMP_HEIGHT;
-                e.y = e._zipJumpOrigY - offset;
                 if (e._zipJumpTimer <= 0) {
-                    e._zipJumpActive = false;
-                    e.y = e._zipJumpOrigY;
-                    e.speed = e._zipJumpOrigSpeed;
-                    // İniş AoE — diğer botlara hasar (onları zıplatma!)
-                    getActiveEnemies().forEach(other => {
-                        if (other === e || other.isDead) return;
-                        if (getDist(e, other) < BOT_JUMP_AOE_RADIUS + other.radius) {
-                            other.hp -= BOT_JUMP_AOE_DMG;
-                            addFloatingNumber(other.x, other.y, BOT_JUMP_AOE_DMG, C_MAIN);
-                        }
-                    });
-                    zipSparks.push({ x: e.x, y: e.y, radius: 5, targetRadius: BOT_JUMP_AOE_RADIUS, life: 15, maxLife: 15 });
-                    sparkBurst(e.x, e.y, 8, C_MAIN);
+                    landingBots.push(e);
+                } else {
+                    const prog = 1 - (e._zipJumpTimer / BOT_JUMP_FRAMES);
+                    const jumpH = Math.sin(prog * Math.PI);
+                    e.y = Math.max(WALL_THICKNESS + 20, e._zipJumpOrigY - jumpH * BOT_JUMP_HEIGHT);
                 }
             }
         });
+        // ===== Bot zıplatma — 2. Geçiş: iniş restore =====
+        landingBots.forEach(e => {
+            e._zipJumpActive = false;
+            e.y = e._zipJumpOrigY;
+            e.speed = e._zipJumpOrigSpeed;
+            e.radius = e._zipJumpOrigRadius;
+            e.shootInterval = e._zipJumpOrigInterval;
+        });
+        // ===== Bot zıplatma — 3. Geçiş: iniş AoE =====
+        landingBots.forEach(e => {
+            getActiveEnemies().forEach(other => {
+                if (other === e || other.isDead) return;
+                const otherY = other._zipJumpActive ? other._zipJumpOrigY : other.y;
+                const otherRadius = other._zipJumpActive ? other._zipJumpOrigRadius : other.radius;
+                const dist = Math.hypot(e.x - other.x, e.y - otherY);
+                if (dist < BOT_JUMP_AOE_RADIUS + otherRadius) {
+                    other.hp -= BOT_JUMP_AOE_DMG;
+                    addFloatingNumber(other.x, otherY, BOT_JUMP_AOE_DMG, C_MAIN);
+                }
+            });
+            zipSparks.push({ x: e.x, y: e.y, radius: 5, targetRadius: BOT_JUMP_AOE_RADIUS, life: 15, maxLife: 15 });
+            sparkBurst(e.x, e.y, 8, C_MAIN);
+        });
 
-        // Dash
+        // ===== Dash =====
         if (dashState.active && !player.isDead) {
             const stepX = dashState.vx * ts;
             const stepY = dashState.vy * ts;
@@ -415,21 +448,23 @@
             }
         }
 
-        // Ulti zıplama
+        // ===== Ulti zıplama (base flag senkronize) =====
         if (ultiState.active && !player.isDead) {
             ultiState.progress += ts / ULTI_AIR_TIME;
             const t = Math.min(1, ultiState.progress);
+            player.isJumping = true;
+            player.jumpInvulnerable = true;
+            player.jumpProgress = t;
             player.x = ultiState.startX + (ultiState.targetX - ultiState.startX) * t;
             player.y = ultiState.startY + (ultiState.targetY - ultiState.startY) * t;
-            player.jumpInvulnerable = true;
 
             if (ultiState.progress >= 1) {
                 player.x = ultiState.targetX;
                 player.y = ultiState.targetY;
                 player.jumpInvulnerable = false;
+                player.isJumping = false;
                 ultiState.active = false;
 
-                // Alandaki botlara hasar + onları zıplat
                 let jumped = 0;
                 const inRange = [];
                 getActiveEnemies().forEach(e => {
@@ -462,7 +497,7 @@
             }
         }
 
-        // Mermiler
+        // ===== Mermiler =====
         for (let i = zipBullets.length - 1; i >= 0; i--) {
             const b = zipBullets[i];
             if (b.isDead) { zipBullets.splice(i, 1); continue; }
@@ -476,7 +511,6 @@
             b.trail.push({ x: b.x, y: b.y, life: 15 });
             if (b.trail.length > 12) b.trail.shift();
 
-            // Ekran kenarı (duvar gibi davranır)
             if (b.x < WALL_THICKNESS || b.x > canvas.width - WALL_THICKNESS ||
                 b.y < WALL_THICKNESS || b.y > canvas.height - WALL_THICKNESS) {
                 let bounced = false;
@@ -502,11 +536,10 @@
                 }
             }
 
-            // Siper çarpışması — hasar ver + sek
             let obsHit = false;
             for (const o of obstacles.concat(cactusWalls || [])) {
                 if (getDist(b, o) < o.radius + 8) {
-                    o.hp -= SIper_HASAR;
+                    o.hp -= SIIPER_HASAR;
                     const ang = getAngle(o, b);
                     const nx = Math.cos(ang), ny = Math.sin(ang);
                     const dot = b.vx * nx + b.vy * ny;
@@ -531,10 +564,10 @@
             }
             if (b.isDead) continue;
 
-            // Bot çarpışması
             let botHit = null;
             for (const e of getActiveEnemies()) {
                 if (b.hitTargets.has(e)) continue;
+                if (e._zipJumpActive) continue;
                 if (getDist(b, e) < e.radius + 10) { botHit = e; break; }
             }
 
@@ -552,10 +585,9 @@
                     continue;
                 }
 
-                // En yakın vurulmamış bota yönlendir
                 let nearest = null, nearestDist = Infinity;
                 getActiveEnemies().forEach(e => {
-                    if (b.hitTargets.has(e) || e.isDead) return;
+                    if (b.hitTargets.has(e) || e.isDead || e._zipJumpActive) return;
                     const d = getDist(b, e);
                     if (d < BULLET_RANGE && d < nearestDist) { nearestDist = d; nearest = e; }
                 });
@@ -578,7 +610,6 @@
             }
         }
 
-        // Trail
         zipBullets.forEach(b => {
             for (let i = b.trail.length - 1; i >= 0; i--) {
                 b.trail[i].life -= ts;
@@ -586,7 +617,6 @@
             }
         });
 
-        // Partiküller
         for (let i = zipParticles.length - 1; i >= 0; i--) {
             const p = zipParticles[i];
             p.x += p.vx * ts; p.y += p.vy * ts;
@@ -596,7 +626,6 @@
             if (p.life <= 0) zipParticles.splice(i, 1);
         }
 
-        // Yazılar
         for (let i = zipTexts.length - 1; i >= 0; i--) {
             const t = zipTexts[i];
             t.y -= 0.7 * ts;
@@ -604,7 +633,6 @@
             if (t.life <= 0) zipTexts.splice(i, 1);
         }
 
-        // Sparks
         for (let i = zipSparks.length - 1; i >= 0; i--) {
             const s = zipSparks[i];
             const prog = 1 - (s.life / s.maxLife);
@@ -616,20 +644,47 @@
 
     // ===== Çizim =====
     chainHook('onDraw', function (ctx2) {
-        // Bot zıplatma görseli
+        // Zıplayan botlar — shadow + büyük görsel overlay
         getActiveEnemies().forEach(e => {
             if (e._zipJumpActive) {
+                const prog = 1 - Math.max(0, e._zipJumpTimer / BOT_JUMP_FRAMES);
+                const jumpH = Math.sin(prog * Math.PI);
+                const origRadius = e._zipJumpOrigRadius || 20;
+                
+                // Shadow at ground level
                 ctx2.save();
-                ctx2.globalAlpha = 0.4;
+                ctx2.globalAlpha = 0.55 * (1 - jumpH * 0.7);
                 ctx2.beginPath();
-                ctx2.ellipse(e.x, e._zipJumpOrigY, e.radius * 0.8, e.radius * 0.4, 0, 0, Math.PI * 2);
-                ctx2.fillStyle = 'rgba(0,0,0,0.5)';
+                ctx2.ellipse(e.x, e._zipJumpOrigY + origRadius * 0.4,
+                             origRadius * (0.9 + jumpH * 0.3),
+                             origRadius * 0.35, 0, 0, Math.PI * 2);
+                ctx2.fillStyle = 'rgba(0,0,0,0.6)';
                 ctx2.fill();
+                ctx2.restore();
+                
+                // Bot overlay at elevated position
+                const scale = 1 + jumpH * 0.3;
+                ctx2.save();
+                ctx2.translate(e.x, e.y);
+                ctx2.scale(scale, scale);
+                ctx2.rotate(e.angle || 0);
+                ctx2.beginPath();
+                ctx2.arc(0, 0, origRadius, 0, Math.PI * 2);
+                ctx2.fillStyle = e.color || C_MAIN;
+                ctx2.fill();
+                ctx2.beginPath();
+                ctx2.arc(origRadius - 4, 0, 4, 0, Math.PI * 2);
+                ctx2.fillStyle = 'rgba(0,0,0,0.4)';
+                ctx2.fill();
+                ctx2.beginPath();
+                ctx2.arc(0, 0, origRadius, 0, Math.PI * 2);
+                ctx2.strokeStyle = C_SPARK;
+                ctx2.lineWidth = 2.5;
+                ctx2.stroke();
                 ctx2.restore();
             }
         });
 
-        // Dash göstergesi
         if (dashState.active && player.charType === CHAR_ID) {
             ctx2.save();
             ctx2.globalAlpha = 0.5;
@@ -641,7 +696,56 @@
             ctx2.restore();
         }
 
-        // Mermiler ve izler
+        // ===== Ana saldırı ince nişan çizgisi =====
+        if (player.charType === CHAR_ID && player._zipHideBaseAim && !player.isDead && player.ammo >= 1) {
+            const ang = aimData.angle;
+            const endX = player.x + Math.cos(ang) * BULLET_RANGE;
+            const endY = player.y + Math.sin(ang) * BULLET_RANGE;
+            ctx2.save();
+            ctx2.beginPath();
+            ctx2.moveTo(player.x, player.y);
+            ctx2.lineTo(endX, endY);
+            ctx2.strokeStyle = 'rgba(142,68,173,0.65)';
+            ctx2.lineWidth = 1.5;
+            ctx2.setLineDash([12, 8]);
+            ctx2.stroke();
+            ctx2.setLineDash([]);
+            ctx2.beginPath();
+            ctx2.arc(endX, endY, 4, 0, Math.PI * 2);
+            ctx2.fillStyle = C_MAIN;
+            ctx2.fill();
+            ctx2.strokeStyle = C_SPARK;
+            ctx2.lineWidth = 1.5;
+            ctx2.stroke();
+            ctx2.restore();
+        }
+
+        // ===== Dash nişan çizgisi =====
+        if (player.charType === CHAR_ID && gadAim.active && player.gadgetReady && !player.isDead && !dashState.active) {
+            const ang = gadAim.angle;
+            const startX = player.x, startY = player.y;
+            const endX = startX + Math.cos(ang) * DASH_LEG;
+            const endY = startY + Math.sin(ang) * DASH_LEG;
+            ctx2.save();
+            ctx2.beginPath();
+            ctx2.moveTo(startX, startY);
+            ctx2.lineTo(endX, endY);
+            ctx2.strokeStyle = 'rgba(142,68,173,0.7)';
+            ctx2.lineWidth = 1.5;
+            ctx2.setLineDash([12, 8]);
+            ctx2.stroke();
+            ctx2.setLineDash([]);
+            ctx2.beginPath();
+            ctx2.arc(endX, endY, 6, 0, Math.PI * 2);
+            ctx2.fillStyle = C_MAIN;
+            ctx2.fill();
+            ctx2.strokeStyle = C_SPARK;
+            ctx2.lineWidth = 2;
+            ctx2.stroke();
+            ctx2.restore();
+        }
+
+        // Mermiler
         zipBullets.forEach(b => {
             b.trail.forEach(pt => {
                 const alpha = (pt.life / 15) * 0.5;
@@ -703,7 +807,6 @@
             ctx2.restore();
         });
 
-        // Partiküller
         zipParticles.forEach(p => {
             const alpha = Math.min(1, p.life / 15);
             ctx2.save();
@@ -715,7 +818,6 @@
             ctx2.restore();
         });
 
-        // Yazılar
         zipTexts.forEach(t => {
             const alpha = Math.min(1, t.life / 20);
             ctx2.save();
@@ -729,31 +831,6 @@
             ctx2.fillText(t.val, t.x, t.y);
             ctx2.restore();
         });
-
-        // Dash nişan çizgisi (drag sırasında)
-        if (player.charType === CHAR_ID && gadAim.active && player.gadgetReady && !player.isDead && !dashState.active) {
-            const ang = gadAim.angle;
-            const startX = player.x, startY = player.y;
-            const endX = startX + Math.cos(ang) * DASH_LEG;
-            const endY = startY + Math.sin(ang) * DASH_LEG;
-            ctx2.save();
-            ctx2.beginPath();
-            ctx2.moveTo(startX, startY);
-            ctx2.lineTo(endX, endY);
-            ctx2.strokeStyle = 'rgba(142,68,173,0.8)';
-            ctx2.lineWidth = 3;
-            ctx2.setLineDash([10, 6]);
-            ctx2.stroke();
-            ctx2.setLineDash([]);
-            ctx2.beginPath();
-            ctx2.arc(endX, endY, 8, 0, Math.PI * 2);
-            ctx2.fillStyle = C_MAIN;
-            ctx2.fill();
-            ctx2.strokeStyle = C_SPARK;
-            ctx2.lineWidth = 2;
-            ctx2.stroke();
-            ctx2.restore();
-        }
 
         // Ulti drag göstergesi
         if (player.charType === CHAR_ID && ultiDrag.active && player.ultReady && !player.isDead) {
