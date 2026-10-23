@@ -1,22 +1,16 @@
-// ========== mod29.js (BUZCU) - BUZ USTASI v4 ==========
-// Karakter Dili: soğuk, keskin, kristal, sessiz
-// Renk: #e8f6ff (buz beyazı) / #aed6f1 (açık buz) / #5dade2 (ana buz)
-// Şekil: üçgen (buz kırığı), elmas (kristal), tırtıklı daire (çatlamış yüzey)
-// İmza: Buzcu'nun dokunduğu her şey buzlaşır
+// ========== mod29.js (BUZCU) - BUZ USTASI v3 ==========
 (function () {
     'use strict';
 
     const CHAR_ID = 'buzcu';
-    const C_WHITE = '#e8f6ff';
-    const C_LIGHT = '#aed6f1';
-    const C_MAIN = '#5dade2';
+    const CHAR_COLOR = '#5dade2';
     const CHAR_HP = 2600;
     const CHAR_SPEED = 3.8;
 
     const DART_COUNT = 3;
     const DART_DAMAGE = 250;
     const DART_SPEED = PLAYER_BULLET_SPEED * 0.9;
-    const DART_RANGE = 250;
+    const DART_RANGE = 320;
     const DART_SPREAD = Math.PI * 30 / 180;
     const DART_PIERCE = 2;
     const DART_SLOW_FACTOR = 0.70;
@@ -40,7 +34,7 @@
     const NEFES_COOLDOWN = 1000;
 
     const ULTI_RADIUS = 114;
-    const ULTI_PLACE_MAX = 280;
+    const ULTI_PLACE_MAX = 300;
     const ULTI_PLACE_MIN = 80;
     const ULTI_DELAY = 180;
     const ULTI_SLOW_FACTOR = 0.56;
@@ -48,7 +42,7 @@
     const ULTI_PER_BOT = 170;
     const ULTI_MAX_DMG = 2300;
 
-    window.GAME_EXT.characters[CHAR_ID] = { color: C_MAIN, hp: CHAR_HP, speed: CHAR_SPEED };
+    window.GAME_EXT.characters[CHAR_ID] = { color: CHAR_COLOR, hp: CHAR_HP, speed: CHAR_SPEED };
 
     let buzcuDarts = [];
     let buzcuSlows = [];
@@ -56,13 +50,6 @@
     let buzcuZones = [];
     let silencedBots = new Map();
     let buzcuUltiDrag = { active: false, startX: 0, startY: 0, angle: 0, pull: 0, touchId: null, isMouse: false };
-
-    // ===== KENDİ EFEKT SİSTEMLERİ (base kullanılmıyor) =====
-    let buzBursts = [];      // Patlama efektleri (4 katman)
-    let buzShards = [];      // Buz kırıkları (üçgen/elmas)
-    let buzFlashes = [];     // Merkez parlamaları (anticipation)
-    let buzTexts = [];       // Hasar yazıları (kendi)
-    let buzLingers = [];     // Kalıntı buz lekeleri (yerde)
 
     function chainHook(name, fn) {
         const prev = window.GAME_EXT.hooks[name];
@@ -98,76 +85,17 @@
         }
     }
 
-    // ===== EFEKT ÜRETİCİLERİ =====
-    // Hasar yazısı (ulti doldurmaz, kendi renk paletimizde)
-    function buzDamage(x, y, val) {
-        buzTexts.push({
-            x: x + (Math.random() - .5) * 20,
-            y: y - 20,
-            val: val,
-            life: 55, maxLife: 55
-        });
+    function buzcuDamageNoCharge(x, y, val, color) {
+        floatingNumbers.push({ x: x + (Math.random() - .5) * 40, y: y - 20, val: val, color: color, life: 60, opacity: 1 });
     }
 
-    // Merkez parlaması — anticipation (küçük, hızlı, 5 frame)
-    function buzFlash(x, y, size) {
-        buzFlashes.push({ x, y, size: size || 30, life: 5, maxLife: 5 });
-    }
-
-    // Buz kırığı — asimetrik, üçgen veya elmas
-    function buzShard(x, y, baseAngle, speed, isElmas) {
-        const angleJitter = (Math.random() - .5) * 0.35; // ±10°
-        const ang = baseAngle + angleJitter;
-        const sp = speed * (0.6 + Math.random() * 0.8); // 0.6-1.4 çarpanı
-        const life = 22 + Math.random() * 18; // 22-40 frame
-        const upward = Math.random() < 0.3; // %30 yukarı süzülür
-        buzShards.push({
-            x, y,
-            vx: Math.cos(ang) * sp,
-            vy: Math.sin(ang) * sp + (upward ? -0.5 : 0),
-            rot: Math.random() * Math.PI * 2,
-            rotSpeed: (Math.random() - .5) * 0.3,
-            size: 4 + Math.random() * 4,
-            life, maxLife: life,
-            isElmas: isElmas || Math.random() < 0.4,
-            gravity: 0.05
-        });
-    }
-
-    // Yer kalıntısı — soluk buz lekesi
-    function buzLinger(x, y, radius, duration) {
-        buzLingers.push({ x, y, radius: radius * 0.8, life: duration || 90, maxLife: duration || 90 });
-    }
-
-    // Tam patlama efekti (Buz aksesuarı, Nefes patlaması, Ulti için ortak kullanım)
-    function buzExplosion(x, y, radius, intensity) {
-        intensity = intensity || 1;
-        // Faz 1: Merkez parlaması (anticipation)
-        buzFlash(x, y, radius * 0.4);
-        // Faz 2: Buz kırıkları (asimetrik, 10-14 adet)
-        const shardCount = Math.floor(10 + Math.random() * 5) * intensity;
-        for (let i = 0; i < shardCount; i++) {
-            const baseAng = (i / shardCount) * Math.PI * 2;
-            buzShard(x, y, baseAng, 5 + radius / 40, Math.random() < 0.35);
-        }
-        // Faz 3: Şok dalgası (tırtıklı halka) — ayrı efekt nesnesi
-        buzBursts.push({
-            x, y, radius: radius * 0.15, targetRadius: radius,
-            life: 30, maxLife: 30, tırtıklı: true,
-            innerRadius: radius * 0.15, innerLife: 12, innerMaxLife: 12
-        });
-        // Faz 4: Yer kalıntısı
-        buzLinger(x, y, radius, 100);
-    }
-
-    // ===== KARAKTER KARTI =====
     const container = document.querySelector('.char-select-container');
     if (container && !document.getElementById('char-' + CHAR_ID)) {
         const card = document.createElement('div');
         card.className = 'char-card';
         card.id = 'char-' + CHAR_ID;
         card.innerHTML =
-            '<div class="char-color-preview" style="background:' + C_MAIN + ';"></div>' +
+            '<div class="char-color-preview" style="background:' + CHAR_COLOR + ';"></div>' +
             '<span>Buzcu</span>' +
             '<small>Hasar: 3×250 + yavaş<br>Güç: Buz + Nefes<br>Ulti: Buz Delme</small>';
         container.appendChild(card);
@@ -182,11 +110,6 @@
         buzcuDarts = [];
         buzcuZones = [];
         buzcuNefes = [];
-        buzBursts = [];
-        buzShards = [];
-        buzFlashes = [];
-        buzTexts = [];
-        buzLingers = [];
         silencedBots.forEach((v, bot) => { if (bot) bot.shootInterval = v.origInterval; });
         silencedBots.clear();
         buzcuSlows.forEach(s => { if (s.target && !s.target.isDead) s.target.speed = s.origSpeed; });
@@ -210,7 +133,7 @@
             }
             if (ultiBtn) {
                 ultiBtn.style.display = 'flex';
-                ultiBtn.style.background = 'radial-gradient(circle, ' + C_MAIN + ', #2874a6)';
+                ultiBtn.style.background = 'radial-gradient(circle, #5dade2, #2874a6)';
             }
             gadgetTimerText = document.getElementById('gadget-timer');
             gadgetTimerText2 = document.getElementById('gadget-timer-2');
@@ -220,7 +143,7 @@
         }
     };
 
-    // ===== ANA SALDIRI =====
+    // ==== ANA SALDIRI ====
     const originalFire = Player.prototype.fire;
     Player.prototype.fire = function (a, pullOverride) {
         if (this.charType !== CHAR_ID) return originalFire.call(this, a, pullOverride);
@@ -239,7 +162,7 @@
         this.lastShotTime = Date.now();
     };
 
-    // ===== BUZ (Aksesuar 1) =====
+    // ==== BUZ (Aks 1) — alan 90, slow 3s, silence 2s ====
     const originalActivateGadget = Player.prototype.activateGadget;
     Player.prototype.activateGadget = function (a, pull) {
         if (this.charType !== CHAR_ID) return originalActivateGadget.call(this, a, pull);
@@ -252,20 +175,20 @@
                 hit++;
             }
         });
-        // Tam 4 katmanlı buz patlaması (merkez + kırık + halka + kalıntı)
-        buzExplosion(this.x, this.y, BUZ_RADIUS, 1);
-        buzTexts.push({
-            x: this.x, y: this.y - 40,
-            val: hit > 0 ? "BUZ! (" + hit + ")" : "BUZ!",
-            life: 70, maxLife: 70, isLabel: true
-        });
+        explosions.push({ x: this.x, y: this.y, radius: 5, maxRadius: BUZ_RADIUS, life: 24, maxLife: 24 });
+        explosions.push({ x: this.x, y: this.y, radius: 5, maxRadius: BUZ_RADIUS * 1.3, life: 32, maxLife: 32 });
+        for (let k = 0; k < 12; k++) {
+            const ang = (k / 12) * Math.PI * 2;
+            spawnParticles(this.x + Math.cos(ang) * BUZ_RADIUS * 0.5, this.y + Math.sin(ang) * BUZ_RADIUS * 0.5, CHAR_COLOR, 'normal');
+        }
+        addFloatingNumber(this.x, this.y - 30, hit > 0 ? "BUZ! (" + hit + ")" : "BUZ!", CHAR_COLOR);
         this.gadgetReady = false;
         this.gadgetCooldown = BUZ_COOLDOWN;
         if (gadgetBtn) gadgetBtn.classList.add('cooldown');
         if (gadgetTimerText) gadgetTimerText.innerText = Math.ceil(BUZ_COOLDOWN / 60) + "s";
     };
 
-    // ===== SOĞUK NEFES (Aksesuar 2) =====
+    // ==== SOĞUK NEFES (Aks 2) ====
     const originalActivateGadget2 = Player.prototype.activateGadget2;
     Player.prototype.activateGadget2 = function (a, pull) {
         if (this.charType !== CHAR_ID) return originalActivateGadget2.call(this, a, pull);
@@ -295,20 +218,15 @@
             }
             applySilence(e, NEFES_SILENCE_MS);
         });
-        // Nefes konisi kısa bir parlama — anticipation
-        buzFlash(this.x + Math.cos(angle) * NEFES_RANGE * 0.5, this.y + Math.sin(angle) * NEFES_RANGE * 0.5, 20);
-        buzTexts.push({
-            x: this.x, y: this.y - 30,
-            val: "SOĞUK NEFES! (" + chosen.length + ")",
-            life: 70, maxLife: 70, isLabel: true
-        });
+        addFloatingNumber(this.x, this.y - 30, "SOĞUK NEFES! (" + chosen.length + ")", CHAR_COLOR);
+        explosions.push({ x: this.x, y: this.y, radius: 5, maxRadius: NEFES_RANGE * 0.7, life: 20, maxLife: 20 });
         this.gadget2Ready = false;
         this.gadget2Cooldown = NEFES_COOLDOWN;
         if (gadgetBtn2) gadgetBtn2.classList.add('cooldown');
         if (gadgetTimerText2) gadgetTimerText2.innerText = Math.ceil(NEFES_COOLDOWN / 60) + "s";
     };
 
-    // ===== ULTI =====
+    // ==== ULTI ====
     const originalFireUlti = Player.prototype.fireUlti;
     Player.prototype.fireUlti = function (a, pull) {
         if (this.charType !== CHAR_ID) return originalFireUlti.call(this, a, pull);
@@ -319,17 +237,14 @@
         let tx = clampPos(this.x + Math.cos(a) * dist, WALL_THICKNESS + ULTI_RADIUS + 10, canvas.width - WALL_THICKNESS - ULTI_RADIUS - 10);
         let ty = clampPos(this.y + Math.sin(a) * dist, WALL_THICKNESS + ULTI_RADIUS + 10, canvas.height - WALL_THICKNESS - ULTI_RADIUS - 10);
         buzcuZones.push({ x: tx, y: ty, timer: ULTI_DELAY, hitSet: new Set() });
-        buzTexts.push({
-            x: this.x, y: this.y - 40,
-            val: "BUZ DELME!", life: 70, maxLife: 70, isLabel: true
-        });
+        addFloatingNumber(this.x, this.y - 40, "BUZ DELME!", CHAR_COLOR);
         this.ultReady = false;
         this.ultCharge = 0;
         if (ultFill) ultFill.style.width = "0%";
         if (ultiBtn) ultiBtn.classList.remove('ready');
     };
 
-    // ===== ULTİ DOLUMU — %50 yavaş =====
+    // ==== ULTİ DOLUMU — %50 yavaş, aksesuarlar doldurmaz ====
     chainHook('onChargeUlti', function (amount) {
         if (player.charType !== CHAR_ID) return;
         if (!gameStarted || player.ultReady) return;
@@ -337,17 +252,14 @@
         if (player.ultCharge >= 100) {
             player.ultReady = true;
             if (ultiBtn) ultiBtn.classList.add('ready');
-            buzTexts.push({
-                x: player.x, y: player.y - 40,
-                val: "GÜÇ HAZIR!", life: 90, maxLife: 90, isLabel: true
-            });
+            addFloatingNumber(player.x, player.y - 40, "GÜÇ HAZIR!", CHAR_COLOR);
         }
         if (ultFill) ultFill.style.width = player.ultCharge + "%";
     });
 
     chainHook('onReset', function () { clearBuzcuState(); });
 
-    // ===== KONİ NİŞAN — base çizimi bloke =====
+    // ==== KONİ NİŞAN — base çizimi bloke, kendi konini çiz ====
     chainHook('onPreDraw', function (ctx2) {
         if (player.charType === CHAR_ID && aimData.active && !player.isDead && player.ammo >= 1) {
             player._buzcuAimHide = true;
@@ -362,7 +274,7 @@
         }
     });
 
-    // ===== ULTI DRAG =====
+    // ==== ULTI DRAG (base listener bloke) ====
     function ultiDragStart(cx, cy) {
         if (!player.ultReady || player.isDead || player.charType !== CHAR_ID) return;
         const r = ultiBtn.getBoundingClientRect();
@@ -423,7 +335,7 @@
         }
     });
 
-    // ===== UPDATE =====
+    // ==== UPDATE DÖNGÜSÜ ====
     let lastT = 0;
     function buzcuLoop(t) {
         if (!lastT) lastT = t;
@@ -442,7 +354,7 @@
             if (gadgetBtn && gadgetBtn.style.display !== 'flex') gadgetBtn.style.display = 'flex';
             if (gadgetBtn2 && gadgetBtn2.style.display !== 'flex') gadgetBtn2.style.display = 'flex';
         }
-        // Silence timer
+        // Silence zamanlayıcı
         silencedBots.forEach((v, bot) => {
             if (!bot || bot.isDead || Date.now() >= v.until) {
                 if (bot) bot.shootInterval = v.origInterval;
@@ -460,7 +372,7 @@
                 buzcuSlows.splice(i, 1);
             }
         }
-        // Soğuk Nefes DoT + patlama
+        // Soğuk Nefes DoT + splash
         for (let i = buzcuNefes.length - 1; i >= 0; i--) {
             const n = buzcuNefes[i];
             if (!n.target || n.target.isDead) { buzcuNefes.splice(i, 1); continue; }
@@ -470,18 +382,18 @@
                 const tick = Math.min(NEFES_DOT_TOTAL / 6, NEFES_DOT_TOTAL - n.dealt);
                 n.target.hp -= tick;
                 n.dealt += tick;
-                buzDamage(n.target.x, n.target.y, Math.round(tick));
+                buzcuDamageNoCharge(n.target.x, n.target.y, Math.round(tick), CHAR_COLOR);
             }
             if (n.dotTimer <= 0) {
                 if (!n.target.isDead && !n.splashDone) {
                     n.target.hp -= NEFES_BURST;
-                    buzDamage(n.target.x, n.target.y - 10, NEFES_BURST);
-                    buzExplosion(n.target.x, n.target.y, NEFES_SPLASH_RADIUS, 0.7);
+                    buzcuDamageNoCharge(n.target.x, n.target.y - 10, NEFES_BURST, CHAR_COLOR);
+                    explosions.push({ x: n.target.x, y: n.target.y, radius: 5, maxRadius: NEFES_SPLASH_RADIUS, life: 14, maxLife: 14 });
                     getActiveEnemies().forEach(other => {
                         if (other === n.target || other.isDead) return;
                         if (getDist(n.target, other) < NEFES_SPLASH_RADIUS + other.radius) {
                             other.hp -= NEFES_SPLASH;
-                            buzDamage(other.x, other.y, NEFES_SPLASH);
+                            buzcuDamageNoCharge(other.x, other.y, NEFES_SPLASH, CHAR_COLOR);
                         }
                     });
                     n.splashDone = true;
@@ -507,12 +419,8 @@
                 if (d.hitTargets.includes(e)) continue;
                 if (getDist(d, e) < e.radius + 10) {
                     e.hp -= DART_DAMAGE;
-                    buzDamage(e.x, e.y, DART_DAMAGE);
+                    addFloatingNumber(e.x, e.y, DART_DAMAGE, CHAR_COLOR);
                     applySlow(e, DART_SLOW_FACTOR, DART_SLOW_DURATION);
-                    // Vuruş anı: küçük buz kırığı patlaması (anlık, kalıcı değil)
-                    for (let k = 0; k < 3; k++) {
-                        buzShard(e.x, e.y, (k / 3) * Math.PI * 2, 3.5, false);
-                    }
                     d.hitTargets.push(e);
                     d.pierceLeft--;
                     if (d.pierceLeft <= 0) { buzcuDarts.splice(i, 1); removed = true; break; }
@@ -534,223 +442,113 @@
                 const botsIn = getActiveEnemies().filter(e => getDist(z, e) < ULTI_RADIUS + e.radius);
                 const n = botsIn.length;
                 const dmg = Math.min(ULTI_MAX_DMG, ULTI_BASE_DMG + n * ULTI_PER_BOT);
-                botsIn.forEach(e => { e.hp -= dmg; buzDamage(e.x, e.y, dmg); });
-                buzExplosion(z.x, z.y, ULTI_RADIUS, 1.4);
-                // Ekstra: dikey buz sarkıtı
-                buzShards.push({
-                    x: z.x, y: z.y - 120, vx: 0, vy: 18,
-                    rot: 0, rotSpeed: 0, size: 8,
-                    life: 20, maxLife: 20, isElmas: true, gravity: 0,
-                    isSarkit: true
-                });
+                botsIn.forEach(e => { e.hp -= dmg; addFloatingNumber(e.x, e.y, dmg, CHAR_COLOR); });
+                explosions.push({ x: z.x, y: z.y, radius: 5, maxRadius: ULTI_RADIUS, life: 18, maxLife: 18 });
+                explosions.push({ x: z.x, y: z.y, radius: 0, maxRadius: ULTI_RADIUS * 1.3, life: 25, maxLife: 25 });
+                for (let k = 0; k < 15; k++) {
+                    const ang = Math.random() * Math.PI * 2;
+                    const dist = Math.random() * ULTI_RADIUS;
+                    spawnParticles(z.x + Math.cos(ang) * dist, z.y + Math.sin(ang) * dist, CHAR_COLOR, 'normal');
+                }
                 screenShake = 12;
-                buzTexts.push({
-                    x: z.x, y: z.y - 40,
-                    val: n > 0 ? "DELDİ! (" + n + ")" : "BOŞ!",
-                    life: 80, maxLife: 80, isLabel: true
-                });
+                addFloatingNumber(z.x, z.y - 40, n > 0 ? "DELDİ! (" + n + ")" : "BOŞ!", CHAR_COLOR);
                 buzcuZones.splice(i, 1);
             }
         }
-        // ===== Efekt güncellemeleri =====
-        for (let i = buzFlashes.length - 1; i >= 0; i--) {
-            buzFlashes[i].life -= ts;
-            if (buzFlashes[i].life <= 0) buzFlashes.splice(i, 1);
-        }
-        for (let i = buzBursts.length - 1; i >= 0; i--) {
-            const b = buzBursts[i];
-            b.life -= ts;
-            const prog = 1 - (b.life / b.maxLife);
-            b.radius = b.targetRadius * (0.15 + prog * 0.85);
-            b.innerLife -= ts;
-            if (b.life <= 0) buzBursts.splice(i, 1);
-        }
-        for (let i = buzShards.length - 1; i >= 0; i--) {
-            const s = buzShards[i];
-            if (s.isSarkit) {
-                s.y += s.vy * ts;
-                if (s.y >= s.y + 120) {} // hedef yok, aşağı düşer
-            } else {
-                s.x += s.vx * ts;
-                s.y += s.vy * ts;
-                s.vy += s.gravity * ts;
-                s.vx *= 0.97;
-                s.vy *= 0.97;
-            }
-            s.rot += s.rotSpeed * ts;
-            s.life -= ts;
-            if (s.life <= 0) buzShards.splice(i, 1);
-        }
-        for (let i = buzTexts.length - 1; i >= 0; i--) {
-            const t = buzTexts[i];
-            t.y -= 0.7 * ts;
-            t.life -= ts;
-            if (t.life <= 0) buzTexts.splice(i, 1);
-        }
-        for (let i = buzLingers.length - 1; i >= 0; i--) {
-            buzLingers[i].life -= ts;
-            if (buzLingers[i].life <= 0) buzLingers.splice(i, 1);
-        }
     }
 
-    // ===== ÇİZİM =====
-    function drawBuzShard(ctx2, s) {
-        const alpha = Math.min(1, s.life / (s.maxLife * 0.4));
-        ctx2.save();
-        ctx2.translate(s.x, s.y);
-        ctx2.rotate(s.rot);
-        ctx2.globalAlpha = alpha;
-        ctx2.beginPath();
-        if (s.isElmas) {
-            // Elmas (kristal)
-            ctx2.moveTo(0, -s.size * 1.4);
-            ctx2.lineTo(s.size * 0.9, 0);
-            ctx2.lineTo(0, s.size * 1.4);
-            ctx2.lineTo(-s.size * 0.9, 0);
-            ctx2.closePath();
-        } else {
-            // Üçgen (buz kırığı)
-            ctx2.moveTo(0, -s.size * 1.3);
-            ctx2.lineTo(s.size, s.size * 0.8);
-            ctx2.lineTo(-s.size, s.size * 0.8);
-            ctx2.closePath();
-        }
-        ctx2.fillStyle = 'rgba(174,214,241,0.7)';
-        ctx2.fill();
-        ctx2.strokeStyle = C_WHITE;
-        ctx2.lineWidth = 1.2;
-        ctx2.stroke();
-        // İç parlama
-        ctx2.beginPath();
-        ctx2.arc(0, 0, s.size * 0.3, 0, Math.PI * 2);
-        ctx2.fillStyle = 'rgba(232,246,255,0.9)';
-        ctx2.fill();
-        ctx2.restore();
-    }
-
-    function drawTirtikliHalka(ctx2, x, y, radius, alpha) {
-        const points = 18;
-        ctx2.save();
-        ctx2.translate(x, y);
-        ctx2.beginPath();
-        for (let i = 0; i <= points; i++) {
-            const ang = (i / points) * Math.PI * 2;
-            // Her noktaya ±8 rastgele offset (deterministik — frame'e bağlı)
-            const offset = Math.sin(i * 7.3 + x * 0.1 + y * 0.1) * 6;
-            const r = radius + offset;
-            if (i === 0) ctx2.moveTo(Math.cos(ang) * r, Math.sin(ang) * r);
-            else ctx2.lineTo(Math.cos(ang) * r, Math.sin(ang) * r);
-        }
-        ctx2.closePath();
-        ctx2.strokeStyle = `rgba(232,246,255,${alpha})`;
-        ctx2.lineWidth = 2.5;
-        ctx2.stroke();
-        ctx2.restore();
-    }
-
+    // ==== ÇİZİM ====
     chainHook('onDraw', function (ctx2) {
-        // ===== Kalıntılar (yerde, en altta) =====
-        buzLingers.forEach(l => {
-            const alpha = Math.min(0.35, l.life / l.maxLife * 0.35);
+        // ==== Bot yavaş/silence görseli ====
+        getActiveEnemies().forEach(e => {
+            const isSlowed = buzcuSlows.some(s => s.target === e);
+            const isSilenced = silencedBots.has(e);
+            if (!isSlowed && !isSilenced) return;
             ctx2.save();
+            // Mavi tonlama
+            if (isSlowed) {
+                const s = buzcuSlows.find(sl => sl.target === e);
+                const alpha = s.factor < 0.5 ? 0.45 : 0.28;
+                ctx2.beginPath(); ctx2.arc(e.x, e.y, e.radius + 3, 0, Math.PI * 2);
+                ctx2.fillStyle = `rgba(93,173,226,${alpha})`; ctx2.fill();
+            }
+            // Mavi kenar çerçevesi
+            ctx2.beginPath(); ctx2.arc(e.x, e.y, e.radius + 2, 0, Math.PI * 2);
+            ctx2.strokeStyle = 'rgba(174,214,241,0.95)'; ctx2.lineWidth = 3; ctx2.stroke();
+            // Dönen buz halkası
+            ctx2.translate(e.x, e.y); ctx2.rotate(Date.now() / 400);
             ctx2.beginPath();
-            ctx2.ellipse(l.x, l.y, l.radius, l.radius * 0.55, 0, 0, Math.PI * 2);
-            ctx2.fillStyle = `rgba(93,173,226,${alpha})`;
-            ctx2.fill();
+            for (let k = 0; k < 8; k++) {
+                const a2 = (k / 8) * Math.PI * 2;
+                ctx2.moveTo(Math.cos(a2) * (e.radius + 8), Math.sin(a2) * (e.radius + 8));
+                ctx2.lineTo(Math.cos(a2) * (e.radius + 12), Math.sin(a2) * (e.radius + 12));
+            }
+            ctx2.strokeStyle = 'rgba(174,214,241,0.7)'; ctx2.lineWidth = 2; ctx2.stroke();
             ctx2.restore();
-        });
-        // ===== Şok dalgaları =====
-        buzBursts.forEach(b => {
-            const prog = 1 - (b.life / b.maxLife);
-            const alpha = 1 - prog;
-            // Dış tırtıklı halka
-            drawTirtikliHalka(ctx2, b.x, b.y, b.radius, alpha * 0.85);
-            // İç hızlı halka
-            if (b.innerLife > 0) {
-                const innerProg = 1 - (b.innerLife / b.innerMaxLife);
+            // ❄ ikonu (silence)
+            if (isSilenced) {
                 ctx2.save();
-                ctx2.beginPath();
-                ctx2.arc(b.x, b.y, b.innerRadius + (b.radius * 0.5) * innerProg, 0, Math.PI * 2);
-                ctx2.strokeStyle = `rgba(232,246,255,${(1 - innerProg) * 0.9})`;
-                ctx2.lineWidth = 3;
-                ctx2.stroke();
+                ctx2.globalAlpha = 0.7 + Math.sin(Date.now() / 150) * 0.3;
+                ctx2.font = 'bold 18px Arial'; ctx2.textAlign = 'center';
+                ctx2.fillStyle = '#aed6f1';
+                ctx2.fillText('❄', e.x, e.y - e.radius - 18);
                 ctx2.restore();
             }
         });
-        // ===== Buz kırıkları =====
-        buzShards.forEach(s => drawBuzShard(ctx2, s));
-        // ===== Merkez parlamaları =====
-        buzFlashes.forEach(f => {
-            const prog = 1 - (f.life / f.maxLife);
-            const size = f.size * (0.4 + prog * 0.6);
+        // ==== Koni nişan çizgisi ====
+        if (player.charType === CHAR_ID && player._buzcuAimHide && !player.isDead && player.ammo >= 1) {
+            const ang = aimData.angle;
             ctx2.save();
-            const grad = ctx2.createRadialGradient(f.x, f.y, 0, f.x, f.y, size);
-            grad.addColorStop(0, `rgba(232,246,255,${(1 - prog) * 0.9})`);
-            grad.addColorStop(0.5, `rgba(174,214,241,${(1 - prog) * 0.5})`);
-            grad.addColorStop(1, 'rgba(93,173,226,0)');
             ctx2.beginPath();
-            ctx2.arc(f.x, f.y, size, 0, Math.PI * 2);
-            ctx2.fillStyle = grad;
-            ctx2.fill();
+            ctx2.moveTo(player.x, player.y);
+            ctx2.arc(player.x, player.y, DART_RANGE, ang - DART_SPREAD / 2, ang + DART_SPREAD / 2);
+            ctx2.closePath();
+            ctx2.fillStyle = 'rgba(93,173,226,0.15)'; ctx2.fill();
+            ctx2.strokeStyle = 'rgba(93,173,226,0.7)'; ctx2.lineWidth = 2; ctx2.stroke();
+            for (let i = 0; i < DART_COUNT; i++) {
+                const a2 = ang - DART_SPREAD / 2 + (DART_SPREAD / (DART_COUNT - 1)) * i;
+                ctx2.beginPath();
+                ctx2.moveTo(player.x, player.y);
+                ctx2.lineTo(player.x + Math.cos(a2) * DART_RANGE, player.y + Math.sin(a2) * DART_RANGE);
+                ctx2.strokeStyle = 'rgba(174,214,241,0.55)'; ctx2.lineWidth = 1.5; ctx2.setLineDash([6, 6]); ctx2.stroke();
+            }
+            ctx2.setLineDash([]);
             ctx2.restore();
-        });
-        // ===== Dart'lar =====
+        }
+        // Dart'lar
         buzcuDarts.forEach(d => {
             ctx2.save();
             ctx2.translate(d.x, d.y); ctx2.rotate(d.angle);
             ctx2.beginPath();
             ctx2.moveTo(10, 0); ctx2.lineTo(0, -4); ctx2.lineTo(-8, 0); ctx2.lineTo(0, 4);
             ctx2.closePath();
-            ctx2.fillStyle = C_MAIN; ctx2.fill();
-            ctx2.strokeStyle = C_LIGHT; ctx2.lineWidth = 1.5; ctx2.stroke();
-            ctx2.beginPath(); ctx2.arc(3, 0, 2, 0, Math.PI * 2); ctx2.fillStyle = C_WHITE; ctx2.fill();
+            ctx2.fillStyle = CHAR_COLOR; ctx2.fill();
+            ctx2.strokeStyle = '#aed6f1'; ctx2.lineWidth = 1.5; ctx2.stroke();
+            ctx2.beginPath(); ctx2.arc(3, 0, 2, 0, Math.PI * 2); ctx2.fillStyle = '#fff'; ctx2.fill();
             ctx2.restore();
         });
-        // ===== Ulti bölgeleri =====
+        // Ulti bölgeleri
         buzcuZones.forEach(z => {
             const prog = 1 - Math.max(0, z.timer / ULTI_DELAY);
             ctx2.save(); ctx2.translate(z.x, z.y);
-            // Dolgu
             ctx2.beginPath(); ctx2.arc(0, 0, ULTI_RADIUS, 0, Math.PI * 2);
-            ctx2.fillStyle = `rgba(93,173,226,${0.12 + prog * 0.18})`; ctx2.fill();
-            // Ana halka
+            ctx2.fillStyle = `rgba(93,173,226,${0.15 + prog * 0.2})`; ctx2.fill();
             ctx2.beginPath(); ctx2.arc(0, 0, ULTI_RADIUS, 0, Math.PI * 2);
-            ctx2.strokeStyle = C_MAIN; ctx2.lineWidth = 3; ctx2.stroke();
-            // Dolan süre halkası
+            ctx2.strokeStyle = CHAR_COLOR; ctx2.lineWidth = 3; ctx2.stroke();
             ctx2.beginPath();
             ctx2.arc(0, 0, ULTI_RADIUS - 5, -Math.PI / 2, -Math.PI / 2 + prog * Math.PI * 2);
-            ctx2.strokeStyle = C_LIGHT; ctx2.lineWidth = 4; ctx2.stroke();
-            // İç süslemeler — buz ışınları
-            ctx2.globalAlpha = prog * 0.7;
+            ctx2.strokeStyle = '#aed6f1'; ctx2.lineWidth = 4; ctx2.stroke();
+            ctx2.globalAlpha = prog;
             for (let k = 0; k < 6; k++) {
-                const a2 = (k / 6) * Math.PI * 2 + Date.now() / 600;
+                const a2 = (k / 6) * Math.PI * 2 + Date.now() / 500;
                 ctx2.beginPath();
                 ctx2.moveTo(Math.cos(a2) * 20, Math.sin(a2) * 20);
                 ctx2.lineTo(Math.cos(a2) * (ULTI_RADIUS - 10), Math.sin(a2) * (ULTI_RADIUS - 10));
-                ctx2.strokeStyle = C_LIGHT; ctx2.lineWidth = 1.5; ctx2.stroke();
+                ctx2.strokeStyle = '#aed6f1'; ctx2.lineWidth = 1.5; ctx2.stroke();
             }
             ctx2.restore();
         });
-        // ===== Koni nişan çizgisi (sade, net) =====
-        if (player.charType === CHAR_ID && player._buzcuAimHide && !player.isDead && player.ammo >= 1) {
-            const ang = aimData.angle;
-            ctx2.save();
-            // Koni dolgusu
-            ctx2.beginPath();
-            ctx2.moveTo(player.x, player.y);
-            ctx2.arc(player.x, player.y, DART_RANGE, ang - DART_SPREAD / 2, ang + DART_SPREAD / 2);
-            ctx2.closePath();
-            ctx2.fillStyle = 'rgba(93,173,226,0.14)'; ctx2.fill();
-            // Koni kenarları
-            ctx2.strokeStyle = 'rgba(174,214,241,0.75)'; ctx2.lineWidth = 2;
-            ctx2.stroke();
-            // İç yay (buz hattı) — çok silik
-            ctx2.beginPath();
-            ctx2.arc(player.x, player.y, DART_RANGE * 0.75, ang - DART_SPREAD / 2 * 0.85, ang + DART_SPREAD / 2 * 0.85);
-            ctx2.strokeStyle = 'rgba(232,246,255,0.35)'; ctx2.lineWidth = 1; ctx2.stroke();
-            ctx2.restore();
-        }
-        // ===== Soğuk Nefes konisi (drag sırasında) =====
+        // Soğuk Nefes koni (drag sırasında)
         if (player.charType === CHAR_ID && gadAim2.active && player.gadget2Ready && !player.isDead) {
             const ang = gadAim2.angle;
             ctx2.save();
@@ -758,28 +556,18 @@
             ctx2.moveTo(player.x, player.y);
             ctx2.arc(player.x, player.y, NEFES_RANGE, ang - NEFES_HALF_ANGLE, ang + NEFES_HALF_ANGLE);
             ctx2.closePath();
-            // Yumuşak nefes dolgusu — gradient
-            const grad = ctx2.createRadialGradient(player.x, player.y, 0, player.x, player.y, NEFES_RANGE);
-            grad.addColorStop(0, 'rgba(93,173,226,0.4)');
-            grad.addColorStop(0.5, 'rgba(93,173,226,0.2)');
-            grad.addColorStop(1, 'rgba(93,173,226,0.05)');
-            ctx2.fillStyle = grad; ctx2.fill();
+            ctx2.fillStyle = 'rgba(93,173,226,0.25)'; ctx2.fill();
             ctx2.strokeStyle = 'rgba(174,214,241,0.8)'; ctx2.lineWidth = 2; ctx2.stroke();
-            // İç kar taneleri — nefes hissi
-            const tNow = Date.now() / 1000;
-            for (let k = 0; k < 8; k++) {
-                const rk = ((k * 37 + tNow * 20) % NEFES_RANGE);
-                const aK = ang + Math.sin(k + tNow * 2) * NEFES_HALF_ANGLE * 0.7;
-                const px = player.x + Math.cos(aK) * rk;
-                const py = player.y + Math.sin(aK) * rk;
+            ctx2.globalAlpha = 0.4 + Math.sin(Date.now() / 100) * 0.15;
+            for (let k = 1; k <= 3; k++) {
+                const r = (NEFES_RANGE / 4) * k;
                 ctx2.beginPath();
-                ctx2.arc(px, py, 2, 0, Math.PI * 2);
-                ctx2.fillStyle = `rgba(232,246,255,${1 - rk / NEFES_RANGE})`;
-                ctx2.fill();
+                ctx2.arc(player.x, player.y, r, ang - NEFES_HALF_ANGLE * (1 - k / 4), ang + NEFES_HALF_ANGLE * (1 - k / 4));
+                ctx2.strokeStyle = '#aed6f1'; ctx2.lineWidth = 1.5; ctx2.stroke();
             }
             ctx2.restore();
         }
-        // ===== Ulti drag göstergesi =====
+        // Ulti drag göstergesi
         if (player.charType === CHAR_ID && buzcuUltiDrag.active && player.ultReady && !player.isDead) {
             const pullMag = buzcuUltiDrag.pull < 0.05 ? 1 : buzcuUltiDrag.pull;
             const dist = ULTI_PLACE_MIN + (ULTI_PLACE_MAX - ULTI_PLACE_MIN) * pullMag;
@@ -788,26 +576,12 @@
             ctx2.save();
             ctx2.beginPath();
             ctx2.moveTo(player.x, player.y); ctx2.lineTo(tx, ty);
-            ctx2.strokeStyle = 'rgba(93,173,226,0.5)'; ctx2.lineWidth = 3; ctx2.setLineDash([8, 6]); ctx2.stroke();
+            ctx2.strokeStyle = 'rgba(93,173,226,0.6)'; ctx2.lineWidth = 3; ctx2.setLineDash([8, 6]); ctx2.stroke();
             ctx2.setLineDash([]);
             ctx2.beginPath(); ctx2.arc(tx, ty, ULTI_RADIUS, 0, Math.PI * 2);
             ctx2.fillStyle = 'rgba(93,173,226,0.15)'; ctx2.fill();
-            ctx2.strokeStyle = C_MAIN; ctx2.lineWidth = 3; ctx2.stroke();
+            ctx2.strokeStyle = CHAR_COLOR; ctx2.lineWidth = 3; ctx2.stroke();
             ctx2.restore();
         }
-        // ===== Hasar yazıları (en üstte) =====
-        buzTexts.forEach(t => {
-            const alpha = Math.min(1, t.life / 20);
-            ctx2.save();
-            ctx2.globalAlpha = alpha;
-            ctx2.font = t.isLabel ? 'bold 15px Arial' : 'bold 13px Arial';
-            ctx2.textAlign = 'center';
-            ctx2.fillStyle = C_WHITE;
-            ctx2.strokeStyle = 'rgba(40,116,166,0.8)';
-            ctx2.lineWidth = 3;
-            ctx2.strokeText(t.val, t.x, t.y);
-            ctx2.fillText(t.val, t.x, t.y);
-            ctx2.restore();
-        });
     });
 })();
