@@ -1,4 +1,4 @@
-// ========== mod30.js (KOR) - ATEŞ USTASI ==========
+// ========== mod30.js (KOR) - ATEŞ USTASI v3 ==========
 (function () {
     'use strict';
 
@@ -6,24 +6,25 @@
     const C_FIRE = '#e67e22';
     const C_EMBER = '#c0392b';
     const C_FLAME = '#f39c12';
+    const C_WHITE = '#fff5e6';
     const CHAR_HP = 2600;
     const CHAR_SPEED = 3.4;
 
     // Ana saldırı
-    const BULLET_DAMAGE = 300;
+    const BULLET_DAMAGE = 600;
     const BULLET_MULT = 1.2;
     const BULLET_PIERCE = 3;
     const BULLET_RANGE = 280;
     const BULLET_SPEED = PLAYER_BULLET_SPEED * 0.85;
-    const RELOAD_SPEED = 0.006;
+    const RELOAD_SPEED = 0.012; // 0.006'nın 2 katı
 
-    // Normal patlama
+    // Normal patlama (dışa iter)
     const EXPL_RADIUS = 43;
     const EXPL_DAMAGE = 400;
-    const EXPL_PULL = 20;
+    const EXPL_PUSH = 20;
 
-    // Büyük patlama (Aks 1)
-    const BIG_RADIUS = 65;
+    // Büyük patlama (Aks 1, içe çeker)
+    const BIG_RADIUS = 90;
     const BIG_DAMAGE = 500;
     const BIG_PULL = 50;
     const BIG_SLOW_FACTOR = 0.7;
@@ -43,10 +44,10 @@
     const SACILIM_HEAL_PER = 100;
     const SACILIM_COOLDOWN = 1200;
 
-    // Ulti — kendi etrafında patlama
+    // Ulti
     const ULTI_RADIUS = 150;
     const ULTI_DAMAGE = 600;
-    const ULTI_STUN_MS = 1000;
+    const ULTI_STUN_MS = 2000;
     const ULTI_BURN_DURATION = 180;
     const ULTI_BURN_DPS = 100;
 
@@ -57,11 +58,15 @@
     let korBurningFields = [];
     let korParticles = [];
     let korTexts = [];
-    let korFlashes = [];
-    let korKozReady = false;
-    let korStuns = new Map(); // bot -> { until }
+    let korStuns = new Map();
     let korSlows = [];
+    let korKozReady = false;
     let korUltiFlash = 0;
+
+    // Saçılım animasyon fazları
+    let korSacilimFlashes = [];
+    let korSacilimRings = [];
+    let korSacilimEmbers = []; // içe emiş parçacıkları
 
     function chainHook(name, fn) {
         const prev = window.GAME_EXT.hooks[name];
@@ -84,6 +89,25 @@
         } else {
             korSlows.push({ target, origSpeed: target._korOrigSpeed, factor, timer: duration });
         }
+    }
+
+    function applyStun(target, durationMs) {
+        if (!target || target.isDead) return;
+        const existing = korStuns.get(target);
+        if (existing) {
+            existing.until = Math.max(existing.until, Date.now() + durationMs);
+            return;
+        }
+        // Orijinal değerleri kaydet
+        const origSpeed = target.speed;
+        const origInterval = target.shootInterval;
+        korStuns.set(target, {
+            until: Date.now() + durationMs,
+            origSpeed: origSpeed,
+            origInterval: origInterval
+        });
+        target.speed = 0;
+        target.shootInterval = 999999;
     }
 
     function korText(x, y, val, isLabel) {
@@ -117,7 +141,7 @@
         card.innerHTML =
             '<div class="char-color-preview" style="background:' + C_FIRE + ';"></div>' +
             '<span>Kor</span>' +
-            '<small>Hasar: 300+%20 delici<br>Güç: Büyük Patlama + Saçılım<br>Ulti: Ateş Patlaması</small>';
+            '<small>Hasar: 600+%20 delici<br>Güç: Büyük Patlama + Saçılım<br>Ulti: Ateş Patlaması</small>';
         container.appendChild(card);
         card.addEventListener('click', () => {
             selectedCharacter = CHAR_ID;
@@ -128,13 +152,22 @@
 
     function clearKorState() {
         korBullets = []; korExplosions = []; korBurningFields = [];
-        korParticles = []; korTexts = []; korFlashes = [];
+        korParticles = []; korTexts = []; korFlashes();
         korKozReady = false; korUltiFlash = 0;
-        korStuns.forEach((v, bot) => { if (bot) delete bot._korStunUntil; });
+        korSacilimFlashes = []; korSacilimRings = []; korSacilimEmbers = [];
+        // Stun temizliği — botları normale döndür
+        korStuns.forEach((v, bot) => {
+            if (bot) {
+                if (!bot.isDead) bot.speed = v.origSpeed;
+                bot.shootInterval = v.origInterval;
+                delete bot._korStunUntil;
+            }
+        });
         korStuns.clear();
         korSlows.forEach(s => { if (s.target && !s.target.isDead) s.target.speed = s.origSpeed; });
         korSlows = [];
     }
+    function korFlashes() { /* placeholder — flash ayrı */ }
 
     const originalSetCharacter = Player.prototype.setCharacter;
     Player.prototype.setCharacter = function (type) {
@@ -201,7 +234,7 @@
         korText(this.x, this.y - 30, "HAZIR!", true);
     };
 
-    // ===== Aks 2 — Alev Saçılımı =====
+    // ===== Aks 2 — Alev Saçılımı (4 fazlı) =====
     const originalActivateGadget2 = Player.prototype.activateGadget2;
     Player.prototype.activateGadget2 = function (a, pull) {
         if (this.charType !== CHAR_ID) return originalActivateGadget2.call(this, a, pull);
@@ -218,18 +251,50 @@
         });
         const healAmount = SACILIM_HEAL_BASE + hitCount * SACILIM_HEAL_PER;
         this.hp = Math.min(this.maxHp, this.hp + healAmount);
-        korText(this.x, this.y - 40, "+" + healAmount, true);
-        korText(this.x, this.y - 60, "SAÇILIM! (" + hitCount + ")", true);
 
-        korExplosions.push({
+        // === FAZ 1: Merkez flash (0-3 frame) ===
+        korSacilimFlashes.push({ x: this.x, y: this.y, size: 40, life: 3, maxLife: 3 });
+
+        // === FAZ 2: Dışa doğru 2 katman halka ===
+        korSacilimRings.push({
             x: this.x, y: this.y,
-            radius: SACILIM_RADIUS,
-            isSacilim: true,
-            life: 20, maxLife: 20
+            innerRadius: 10, outerRadius: SACILIM_RADIUS,
+            innerLife: 10, outerLife: 20,
+            innerMaxLife: 10, outerMaxLife: 20
         });
-        for (let i = 0; i < 20; i++) {
-            const ang = (i / 20) * Math.PI * 2;
-            spawnFireParticle(this.x + Math.cos(ang) * SACILIM_RADIUS * 0.5, this.y + Math.sin(ang) * SACILIM_RADIUS * 0.5, 'normal');
+
+        // === FAZ 3: İçe doğru emiş parçacıkları ===
+        for (let i = 0; i < 10; i++) {
+            const ang = (i / 10) * Math.PI * 2 + Math.random() * 0.2;
+            const startR = SACILIM_RADIUS * (0.7 + Math.random() * 0.3);
+            korSacilimEmbers.push({
+                x: this.x + Math.cos(ang) * startR,
+                y: this.y + Math.sin(ang) * startR,
+                targetX: this.x, targetY: this.y,
+                angle: ang,
+                progress: 0,
+                speed: 0.03 + Math.random() * 0.02,
+                spiral: (Math.random() - 0.5) * 2,
+                size: 3 + Math.random() * 2,
+                life: 30 + Math.random() * 10,
+                maxLife: 40
+            });
+        }
+
+        // === FAZ 4: Heal yazısı (altın sarısı, yavaş süzülür) ===
+        korTexts.push({
+            x: this.x, y: this.y - 40,
+            val: "+" + healAmount,
+            life: 100, maxLife: 100,
+            isHeal: true
+        });
+        if (hitCount > 0) {
+            korTexts.push({
+                x: this.x, y: this.y - 60,
+                val: hitCount + " BOT",
+                life: 80, maxLife: 80,
+                isSmall: true
+            });
         }
 
         this.gadget2Ready = false;
@@ -238,7 +303,7 @@
         if (gadgetTimerText2) gadgetTimerText2.innerText = Math.ceil(SACILIM_COOLDOWN / 60) + "s";
     };
 
-    // ===== Ulti — kendi etrafında patlama =====
+    // ===== Ulti — kendi etrafında patlama + 2s stun =====
     const originalFireUlti = Player.prototype.fireUlti;
     Player.prototype.fireUlti = function (a, pull) {
         if (this.charType !== CHAR_ID) return originalFireUlti.call(this, a, pull);
@@ -250,11 +315,7 @@
             if (getDist(this, e) <= ULTI_RADIUS + e.radius) {
                 e.hp -= ULTI_DAMAGE;
                 addFloatingNumber(e.x, e.y, ULTI_DAMAGE, C_FLAME);
-                // Stun (hareket + ateş engellenir)
-                if (!e.isDead) {
-                    korStuns.set(e, { until: Date.now() + ULTI_STUN_MS });
-                    e._korStunUntil = Date.now() + ULTI_STUN_MS;
-                }
+                if (!e.isDead) applyStun(e, ULTI_STUN_MS);
             }
         });
 
@@ -311,15 +372,7 @@
 
     chainHook('onReset', function () { clearKorState(); });
 
-    // ===== Stun — base bot hareketini engelle =====
-    chainHook('getEngageDistance', function (bot) {
-        if (bot && bot._korStunUntil && Date.now() < bot._korStunUntil) {
-            return 99999; // base "menzil dışı" sayar → hareket etmez, ateş etmez
-        }
-        return undefined; // diğer durumlarda base dP kullanır
-    });
-
-    // ===== RAF loop =====
+    // ===== Raf loop =====
     let lastT = 0;
     function korLoop(t) {
         if (!lastT) lastT = t;
@@ -335,7 +388,6 @@
     function explodeBullet(b) {
         const radius = b.isBig ? BIG_RADIUS : EXPL_RADIUS;
         const damage = b.isBig ? BIG_DAMAGE : EXPL_DAMAGE;
-        const pull = b.isBig ? BIG_PULL : EXPL_PULL;
 
         korExplosions.push({
             x: b.x, y: b.y,
@@ -349,9 +401,18 @@
                 e.hp -= damage;
                 addFloatingNumber(e.x, e.y, damage, C_FIRE);
                 const ang = getAngle(e, b);
-                e.x += Math.cos(ang) * pull;
-                e.y += Math.sin(ang) * pull;
-                if (b.isBig) applySlow(e, BIG_SLOW_FACTOR, BIG_SLOW_DURATION);
+                if (b.isBig) {
+                    // Aksesuar patlaması: İÇE çeker
+                    e.x += Math.cos(ang) * BIG_PULL;
+                    e.y += Math.sin(ang) * BIG_PULL;
+                    applySlow(e, BIG_SLOW_FACTOR, BIG_SLOW_DURATION);
+                } else {
+                    // Normal patlama: DIŞA iter
+                    e.x -= Math.cos(ang) * EXPL_PUSH;
+                    e.y -= Math.sin(ang) * EXPL_PUSH;
+                }
+                e.x = clampPos(e.x, e.radius + WALL_THICKNESS, canvas.width - e.radius - WALL_THICKNESS);
+                e.y = clampPos(e.y, e.radius + WALL_THICKNESS, canvas.height - e.radius - WALL_THICKNESS);
             }
         });
 
@@ -364,7 +425,7 @@
         });
 
         spawnFireParticle(b.x, b.y, 'explosion');
-        screenShake = b.isBig ? 8 : 4;
+        screenShake = b.isBig ? 10 : 4;
     }
 
     function korUpdate(ts) {
@@ -373,10 +434,13 @@
             if (gadgetBtn && gadgetBtn.style.display !== 'flex') gadgetBtn.style.display = 'flex';
             if (gadgetBtn2 && gadgetBtn2.style.display !== 'flex') gadgetBtn2.style.display = 'flex';
         }
-        // Stun temizliği
+        // Stun temizliği — süre bittiğinde orijinal değerlere dön
         korStuns.forEach((v, bot) => {
             if (!bot || bot.isDead || Date.now() >= v.until) {
-                if (bot) delete bot._korStunUntil;
+                if (bot) {
+                    if (!bot.isDead) bot.speed = v.origSpeed;
+                    bot.shootInterval = v.origInterval;
+                }
                 korStuns.delete(bot);
             }
         });
@@ -399,7 +463,7 @@
                        b.y < WALL_THICKNESS + 5 || b.y > canvas.height - WALL_THICKNESS - 5;
             let hitObs = false;
             for (const o of obstacles.concat(cactusWalls || [])) {
-                if (getDist(b, o) < o.radius + 5) { o.hp -= 50; hitObs = true; break; }
+                if (getDist(b, o) < o.radius + 8) { o.hp -= 50; hitObs = true; break; }
             }
             if (hw || hitObs) { explodeBullet(b); korBullets.splice(i, 1); continue; }
             if (getDist({ x: b.sx, y: b.sy }, b) > BULLET_RANGE) {
@@ -409,7 +473,7 @@
             let removed = false;
             for (const e of getActiveEnemies()) {
                 if (b.hitTargets.has(e)) continue;
-                if (getDist(b, e) < e.radius + 10) {
+                if (getDist(b, e) < e.radius + 12) {
                     b.hitTargets.add(e);
                     const dmg = Math.round(BULLET_DAMAGE * Math.pow(BULLET_MULT, b.pierceCount));
                     e.hp -= dmg;
@@ -457,10 +521,32 @@
             }
             if (bf.timer <= 0) korBurningFields.splice(i, 1);
         }
-        // Patlamalar (sadece görsel)
+        // Patlamalar (görsel)
         for (let i = korExplosions.length - 1; i >= 0; i--) {
             korExplosions[i].life -= ts;
             if (korExplosions[i].life <= 0) korExplosions.splice(i, 1);
+        }
+        // Saçılım fazları
+        for (let i = korSacilimFlashes.length - 1; i >= 0; i--) {
+            korSacilimFlashes[i].life -= ts;
+            if (korSacilimFlashes[i].life <= 0) korSacilimFlashes.splice(i, 1);
+        }
+        for (let i = korSacilimRings.length - 1; i >= 0; i--) {
+            const r = korSacilimRings[i];
+            r.innerLife -= ts;
+            r.outerLife -= ts;
+            if (r.innerLife <= 0 && r.outerLife <= 0) korSacilimRings.splice(i, 1);
+        }
+        for (let i = korSacilimEmbers.length - 1; i >= 0; i--) {
+            const em = korSacilimEmbers[i];
+            em.progress += em.speed * ts;
+            const r = (1 - em.progress) * Math.hypot(em.x - em.targetX, em.y - em.targetY);
+            // Spiral ile içe ak
+            const spiralAngle = em.angle + em.progress * Math.PI * em.spiral;
+            em.x = em.targetX + Math.cos(spiralAngle) * r;
+            em.y = em.targetY + Math.sin(spiralAngle) * r;
+            em.life -= ts;
+            if (em.progress >= 1 || em.life <= 0) korSacilimEmbers.splice(i, 1);
         }
         // Partiküller
         for (let i = korParticles.length - 1; i >= 0; i--) {
@@ -474,20 +560,101 @@
         // Yazılar
         for (let i = korTexts.length - 1; i >= 0; i--) {
             const t = korTexts[i];
-            t.y -= 0.7 * ts;
+            t.y -= (t.isHeal ? 0.4 : 0.7) * ts;
             t.life -= ts;
             if (t.life <= 0) korTexts.splice(i, 1);
         }
-        // Flash
         if (korUltiFlash > 0) korUltiFlash -= ts;
-        for (let i = korFlashes.length - 1; i >= 0; i--) {
-            korFlashes[i].life -= ts;
-            if (korFlashes[i].life <= 0) korFlashes.splice(i, 1);
-        }
+    }
+
+    // ===== Öngören nişan çizgisi — 3 düşman delme yolunu göster =====
+    function drawPredictiveAimLine(ctx2) {
+        if (player.charType !== CHAR_ID || player.isDead || player.ammo < 1) return;
+        if (!aimData.active) return;
+
+        const ang = aimData.angle;
+        const startX = player.x, startY = player.y;
+        const endX = startX + Math.cos(ang) * BULLET_RANGE;
+        const endY = startY + Math.sin(ang) * BULLET_RANGE;
+
+        // Ana çizgi (ateş hattı)
+        ctx2.save();
+        ctx2.globalAlpha = 0.55;
+        const grad = ctx2.createLinearGradient(startX, startY, endX, endY);
+        grad.addColorStop(0, 'rgba(243,156,18,0.9)');
+        grad.addColorStop(0.5, 'rgba(230,126,34,0.6)');
+        grad.addColorStop(1, 'rgba(192,57,43,0.15)');
+        ctx2.strokeStyle = grad;
+        ctx2.lineWidth = 3;
+        ctx2.beginPath();
+        ctx2.moveTo(startX, startY);
+        ctx2.lineTo(endX, endY);
+        ctx2.stroke();
+
+        // Menzil sonu işareti
+        ctx2.globalAlpha = 0.7;
+        ctx2.beginPath();
+        ctx2.arc(endX, endY, 6, 0, Math.PI * 2);
+        ctx2.strokeStyle = 'rgba(230,126,34,0.9)';
+        ctx2.lineWidth = 2;
+        ctx2.stroke();
+
+        // Çizgi üzerindeki düşmanları vurgula (potansiyel delme hedefleri)
+        const onLineEnemies = [];
+        getActiveEnemies().forEach(e => {
+            const distToLine = pointToLineDistance(e, startX, startY, endX, endY);
+            const distAlong = Math.hypot(e.x - startX, e.y - startY);
+            const distProjection = (e.x - startX) * Math.cos(ang) + (e.y - startY) * Math.sin(ang);
+            if (distToLine < e.radius + 12 && distProjection > 0 && distProjection < BULLET_RANGE) {
+                onLineEnemies.push({ e, distAlong });
+            }
+        });
+        onLineEnemies.sort((a, b) => a.distAlong - b.distAlong);
+
+        // İlk 3 düşmanı vurgula
+        onLineEnemies.slice(0, 3).forEach((item, idx) => {
+            const e = item.e;
+            ctx2.save();
+            ctx2.globalAlpha = 0.6 + Math.sin(Date.now() / 200 + idx) * 0.2;
+            ctx2.beginPath();
+            ctx2.arc(e.x, e.y, e.radius + 6, 0, Math.PI * 2);
+            ctx2.strokeStyle = idx < 3 ? C_FLAME : C_EMBER;
+            ctx2.lineWidth = 2.5;
+            ctx2.setLineDash([5, 4]);
+            ctx2.stroke();
+            ctx2.setLineDash([]);
+            // Numaralandırma
+            ctx2.globalAlpha = 0.9;
+            ctx2.font = 'bold 12px Arial';
+            ctx2.textAlign = 'center';
+            ctx2.fillStyle = C_WHITE;
+            ctx2.strokeStyle = 'rgba(40,20,10,0.9)';
+            ctx2.lineWidth = 2;
+            const label = (idx + 1) + '×';
+            ctx2.strokeText(label, e.x, e.y - e.radius - 12);
+            ctx2.fillText(label, e.x, e.y - e.radius - 12);
+            ctx2.restore();
+        });
+
+        ctx2.restore();
+    }
+
+    function pointToLineDistance(px, py, x1, y1, x2, y2) {
+        const dx = px - x1, dy = py - y1;
+        const lx = x2 - x1, ly = y2 - y1;
+        const len2 = lx * lx + ly * ly;
+        if (len2 === 0) return Math.hypot(dx, dy);
+        let t = (dx * lx + dy * ly) / len2;
+        t = Math.max(0, Math.min(1, t));
+        const projX = x1 + t * lx, projY = y1 + t * ly;
+        return Math.hypot(px - projX, py - projY);
     }
 
     // ===== Çizim =====
     chainHook('onDraw', function (ctx2) {
+        // Öngören nişan çizgisi (en altta, görselin arkasında)
+        drawPredictiveAimLine(ctx2);
+
         // Yanan alanlar
         korBurningFields.forEach(bf => {
             const alpha = Math.min(0.4, bf.timer / 60 * 0.4);
@@ -503,20 +670,14 @@
             ctx2.lineWidth = 2; ctx2.stroke();
             ctx2.restore();
         });
+
         // Patlamalar
         korExplosions.forEach(ex => {
             const prog = 1 - (ex.life / ex.maxLife);
             const alpha = 1 - prog;
             const r = ex.radius * (0.4 + prog * 0.6);
             ctx2.save();
-            if (ex.isSacilim) {
-                ctx2.beginPath(); ctx2.arc(ex.x, ex.y, r, 0, Math.PI * 2);
-                ctx2.strokeStyle = `rgba(243,156,18,${alpha * 0.8})`;
-                ctx2.lineWidth = 4; ctx2.stroke();
-                ctx2.beginPath(); ctx2.arc(ex.x, ex.y, r * 0.7, 0, Math.PI * 2);
-                ctx2.strokeStyle = `rgba(230,126,34,${alpha * 0.6})`;
-                ctx2.lineWidth = 3; ctx2.stroke();
-            } else if (ex.isUlti) {
+            if (ex.isUlti) {
                 ctx2.beginPath(); ctx2.arc(ex.x, ex.y, r, 0, Math.PI * 2);
                 ctx2.fillStyle = `rgba(243,156,18,${alpha * 0.4})`; ctx2.fill();
                 ctx2.beginPath(); ctx2.arc(ex.x, ex.y, r, 0, Math.PI * 2);
@@ -525,30 +686,116 @@
                 ctx2.beginPath(); ctx2.arc(ex.x, ex.y, r * 1.15, 0, Math.PI * 2);
                 ctx2.strokeStyle = `rgba(230,126,34,${alpha * 0.7})`;
                 ctx2.lineWidth = 3; ctx2.stroke();
+            } else if (ex.isBig) {
+                // Büyük patlama — içe çekim çizgileri
+                ctx2.beginPath(); ctx2.arc(ex.x, ex.y, r, 0, Math.PI * 2);
+                ctx2.fillStyle = `rgba(255,245,230,${alpha * 0.35})`; ctx2.fill();
+                ctx2.beginPath(); ctx2.arc(ex.x, ex.y, r, 0, Math.PI * 2);
+                ctx2.strokeStyle = `rgba(255,245,230,${alpha})`;
+                ctx2.lineWidth = 5; ctx2.stroke();
+                // İçe çekim çizgileri
+                ctx2.strokeStyle = `rgba(243,156,18,${alpha * 0.7})`;
+                ctx2.lineWidth = 2;
+                for (let k = 0; k < 8; k++) {
+                    const a2 = (k / 8) * Math.PI * 2 + Date.now() / 300;
+                    ctx2.beginPath();
+                    ctx2.moveTo(ex.x + Math.cos(a2) * r * 0.8, ex.y + Math.sin(a2) * r * 0.8);
+                    ctx2.lineTo(ex.x + Math.cos(a2) * r * 0.4, ex.y + Math.sin(a2) * r * 0.4);
+                    ctx2.stroke();
+                }
             } else {
                 ctx2.beginPath(); ctx2.arc(ex.x, ex.y, r, 0, Math.PI * 2);
                 ctx2.fillStyle = `rgba(243,156,18,${alpha * 0.5})`; ctx2.fill();
                 ctx2.beginPath(); ctx2.arc(ex.x, ex.y, r, 0, Math.PI * 2);
                 ctx2.strokeStyle = `rgba(230,126,34,${alpha * 0.9})`;
-                ctx2.lineWidth = ex.isBig ? 4 : 3; ctx2.stroke();
+                ctx2.lineWidth = 3; ctx2.stroke();
+                // Dışa itme çizgileri (küçük oklar)
+                ctx2.strokeStyle = `rgba(230,126,34,${alpha * 0.5})`;
+                ctx2.lineWidth = 1.5;
+                for (let k = 0; k < 6; k++) {
+                    const a2 = (k / 6) * Math.PI * 2;
+                    ctx2.beginPath();
+                    ctx2.moveTo(ex.x + Math.cos(a2) * r * 0.9, ex.y + Math.sin(a2) * r * 0.9);
+                    ctx2.lineTo(ex.x + Math.cos(a2) * r * 1.1, ex.y + Math.sin(a2) * r * 1.1);
+                    ctx2.stroke();
+                }
             }
             ctx2.restore();
         });
-        // Mermiler
+
+        // Saçılım — Faz 1: Flash
+        korSacilimFlashes.forEach(f => {
+            const prog = 1 - (f.life / f.maxLife);
+            const size = f.size * (0.5 + prog * 0.5);
+            ctx2.save();
+            const grad = ctx2.createRadialGradient(f.x, f.y, 0, f.x, f.y, size);
+            grad.addColorStop(0, `rgba(255,255,255,${(1 - prog) * 0.9})`);
+            grad.addColorStop(0.5, `rgba(243,156,18,${(1 - prog) * 0.6})`);
+            grad.addColorStop(1, 'rgba(230,126,34,0)');
+            ctx2.beginPath(); ctx2.arc(f.x, f.y, size, 0, Math.PI * 2);
+            ctx2.fillStyle = grad; ctx2.fill();
+            ctx2.restore();
+        });
+
+        // Saçılım — Faz 2: Dışa doğru halkalar
+        korSacilimRings.forEach(r => {
+            const innerProg = 1 - (r.innerLife / r.innerMaxLife);
+            const outerProg = 1 - (r.outerLife / r.outerMaxLife);
+            ctx2.save();
+            if (r.innerLife > 0) {
+                const ir = r.innerRadius + (r.outerRadius * 0.6) * innerProg;
+                ctx2.beginPath(); ctx2.arc(r.x, r.y, ir, 0, Math.PI * 2);
+                ctx2.strokeStyle = `rgba(243,156,18,${(1 - innerProg) * 0.9})`;
+                ctx2.lineWidth = 4; ctx2.stroke();
+            }
+            if (r.outerLife > 0) {
+                const or = r.innerRadius + r.outerRadius * outerProg;
+                ctx2.beginPath(); ctx2.arc(r.x, r.y, or, 0, Math.PI * 2);
+                ctx2.strokeStyle = `rgba(192,57,43,${(1 - outerProg) * 0.8})`;
+                ctx2.lineWidth = 3; ctx2.stroke();
+            }
+            ctx2.restore();
+        });
+
+        // Saçılım — Faz 3: İçe emiş parçacıkları
+        korSacilimEmbers.forEach(em => {
+            const alpha = Math.min(1, em.life / 15);
+            ctx2.save();
+            ctx2.globalAlpha = alpha;
+            const grad = ctx2.createRadialGradient(em.x, em.y, 0, em.x, em.y, em.size * 2);
+            grad.addColorStop(0, C_WHITE);
+            grad.addColorStop(0.5, C_FLAME);
+            grad.addColorStop(1, 'rgba(192,57,43,0)');
+            ctx2.beginPath(); ctx2.arc(em.x, em.y, em.size * 2, 0, Math.PI * 2);
+            ctx2.fillStyle = grad; ctx2.fill();
+            ctx2.beginPath(); ctx2.arc(em.x, em.y, em.size, 0, Math.PI * 2);
+            ctx2.fillStyle = C_FLAME; ctx2.fill();
+            ctx2.restore();
+        });
+
+        // Mermiler (büyütülmüş)
         korBullets.forEach(b => {
             ctx2.save();
             ctx2.translate(b.x, b.y); ctx2.rotate(b.angle);
-            const grad = ctx2.createLinearGradient(-20, 0, 10, 0);
+            const grad = ctx2.createLinearGradient(-30, 0, 14, 0);
             grad.addColorStop(0, 'rgba(230,126,34,0)');
-            grad.addColorStop(1, b.isBig ? 'rgba(255,255,255,0.95)' : 'rgba(243,156,18,0.9)');
+            grad.addColorStop(1, b.isBig ? 'rgba(255,255,255,0.98)' : 'rgba(243,156,18,0.95)');
+            // Gövde — büyütülmüş
             ctx2.beginPath();
-            ctx2.moveTo(-20, -3); ctx2.lineTo(8, -6); ctx2.lineTo(12, 0); ctx2.lineTo(8, 6); ctx2.lineTo(-20, 3);
+            ctx2.moveTo(-28, -5); ctx2.lineTo(10, -8); ctx2.lineTo(16, 0); ctx2.lineTo(10, 8); ctx2.lineTo(-28, 5);
             ctx2.closePath();
             ctx2.fillStyle = grad; ctx2.fill();
-            ctx2.beginPath(); ctx2.arc(0, 0, b.isBig ? 8 : 5, 0, Math.PI * 2);
-            ctx2.fillStyle = b.isBig ? '#fff' : C_FLAME; ctx2.fill();
+            // Dış aura
+            ctx2.beginPath();
+            ctx2.arc(0, 0, b.isBig ? 12 : 8, 0, Math.PI * 2);
+            const glowGrad = ctx2.createRadialGradient(0, 0, 0, 0, 0, b.isBig ? 12 : 8);
+            glowGrad.addColorStop(0, b.isBig ? 'rgba(255,255,255,1)' : 'rgba(243,156,18,0.9)');
+            glowGrad.addColorStop(1, 'rgba(230,126,34,0)');
+            ctx2.fillStyle = glowGrad;
+            ctx2.fill();
             ctx2.restore();
         });
+
         // Partiküller
         korParticles.forEach(p => {
             const alpha = Math.min(1, p.life / 20);
@@ -557,6 +804,7 @@
             ctx2.fillStyle = p.color; ctx2.fill();
             ctx2.restore();
         });
+
         // Stun göstergesi
         korStuns.forEach((v, bot) => {
             if (!bot || bot.isDead) return;
@@ -565,19 +813,23 @@
             ctx2.save();
             const alpha = 0.6 + Math.sin(Date.now() / 80) * 0.3;
             ctx2.globalAlpha = alpha;
-            ctx2.font = 'bold 20px Arial';
+            ctx2.font = 'bold 22px Arial';
             ctx2.textAlign = 'center';
-            ctx2.fillStyle = '#f1c40f';
-            ctx2.fillText('✦', bot.x, bot.y - bot.radius - 18);
+            ctx2.fillStyle = C_FLAME;
+            ctx2.strokeStyle = 'rgba(40,20,10,0.9)';
+            ctx2.lineWidth = 3;
+            ctx2.strokeText('✦', bot.x, bot.y - bot.radius - 20);
+            ctx2.fillText('✦', bot.x, bot.y - bot.radius - 20);
             ctx2.restore();
             ctx2.save();
             ctx2.beginPath();
-            ctx2.arc(bot.x, bot.y, bot.radius + 4, 0, Math.PI * 2);
-            ctx2.strokeStyle = `rgba(241,196,15,${alpha * 0.7})`;
-            ctx2.lineWidth = 2; ctx2.setLineDash([5, 5]); ctx2.stroke();
+            ctx2.arc(bot.x, bot.y, bot.radius + 6, 0, Math.PI * 2);
+            ctx2.strokeStyle = `rgba(243,156,18,${alpha * 0.8})`;
+            ctx2.lineWidth = 3; ctx2.setLineDash([6, 6]); ctx2.stroke();
             ctx2.setLineDash([]); ctx2.restore();
         });
-        // Flash (ulti anı)
+
+        // Flash
         if (korUltiFlash > 0) {
             ctx2.save();
             ctx2.globalAlpha = korUltiFlash / 12 * 0.4;
@@ -585,17 +837,39 @@
             ctx2.fillRect(0, 0, canvas.width, canvas.height);
             ctx2.restore();
         }
+
         // Yazılar
         korTexts.forEach(t => {
             const alpha = Math.min(1, t.life / 20);
             ctx2.save(); ctx2.globalAlpha = alpha;
-            ctx2.font = t.isLabel ? 'bold 15px Arial' : 'bold 13px Arial';
-            ctx2.textAlign = 'center';
-            ctx2.fillStyle = C_FLAME;
-            ctx2.strokeStyle = 'rgba(40,20,10,0.9)';
-            ctx2.lineWidth = 3;
-            ctx2.strokeText(t.val, t.x, t.y);
-            ctx2.fillText(t.val, t.x, t.y);
+            if (t.isHeal) {
+                // Heal yazısı — altın sarısı, parlak
+                ctx2.font = 'bold 24px Arial';
+                ctx2.textAlign = 'center';
+                ctx2.shadowColor = C_FLAME;
+                ctx2.shadowBlur = 15;
+                ctx2.fillStyle = '#f1c40f';
+                ctx2.strokeStyle = 'rgba(80,40,0,0.9)';
+                ctx2.lineWidth = 3;
+                ctx2.strokeText(t.val, t.x, t.y);
+                ctx2.fillText(t.val, t.x, t.y);
+            } else if (t.isSmall) {
+                ctx2.font = 'bold 12px Arial';
+                ctx2.textAlign = 'center';
+                ctx2.fillStyle = C_WHITE;
+                ctx2.strokeStyle = 'rgba(40,20,10,0.9)';
+                ctx2.lineWidth = 2;
+                ctx2.strokeText(t.val, t.x, t.y);
+                ctx2.fillText(t.val, t.x, t.y);
+            } else {
+                ctx2.font = t.isLabel ? 'bold 15px Arial' : 'bold 13px Arial';
+                ctx2.textAlign = 'center';
+                ctx2.fillStyle = C_FLAME;
+                ctx2.strokeStyle = 'rgba(40,20,10,0.9)';
+                ctx2.lineWidth = 3;
+                ctx2.strokeText(t.val, t.x, t.y);
+                ctx2.fillText(t.val, t.x, t.y);
+            }
             ctx2.restore();
         });
     });
