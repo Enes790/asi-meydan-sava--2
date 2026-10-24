@@ -693,4 +693,523 @@
 
             if (ranger && !ranger.isDead) {
                 if (ranger.hp <= 0) {
-                    ranger.isDead =
+                    ranger.isDead = true;
+                    spawnParticles(ranger.x, ranger.y, ranger.color, 'smoke');
+                    triggerBotKill(ranger.x, ranger);
+                    clearRangerBuffs();
+                    ranger = null;
+                } else {
+                    const dP = getDist(ranger, player);
+
+                    if (rangerShotState === 'idle' && !player.isDead && dP > RANGER_RANGE * 0.9) {
+                        const angle = Math.atan2(player.y - ranger.y, player.x - ranger.x);
+                        ranger.x += Math.cos(angle) * RANGER_SPEED * ts;
+                        ranger.y += Math.sin(angle) * RANGER_SPEED * ts;
+                        ranger.x = clampPos(ranger.x, RANGER_RADIUS + WALL_THICKNESS, canvas.width - RANGER_RADIUS - WALL_THICKNESS);
+                        ranger.y = clampPos(ranger.y, RANGER_RADIUS + WALL_THICKNESS, canvas.height - RANGER_RADIUS - WALL_THICKNESS);
+                    }
+
+                    if (!player.isDead) {
+                        ranger.angle = Math.atan2(player.y - ranger.y, player.x - ranger.x);
+                    }
+
+                    if (rangerShotState === 'idle') {
+                        if (rangerCooldownTimer > 0) {
+                            rangerCooldownTimer -= ts;
+                        } else if (!player.isDead && !player.isInvisible && dP < RANGER_RANGE) {
+                            rangerShotState = 'shooting';
+                            rangerShotCount = 0;
+                            rangerShotTimer = 0;
+                        }
+                    }
+
+                    if (rangerShotState === 'shooting') {
+                        rangerShotTimer += ts;
+                        while (rangerShotTimer >= RANGER_SHOT_INTERVAL && rangerShotCount < RANGER_SHOT_COUNT) {
+                            rangerShotTimer -= RANGER_SHOT_INTERVAL;
+                            const angle = Math.atan2(player.y - ranger.y, player.x - ranger.x);
+                            rangerBullets.push({
+                                x: ranger.x, y: ranger.y,
+                                vx: Math.cos(angle) * RANGER_BULLET_SPEED,
+                                vy: Math.sin(angle) * RANGER_BULLET_SPEED,
+                                hasar: RANGER_BULLET_DMG,
+                                isDead: false
+                            });
+                            rangerShotCount++;
+                        }
+                        if (rangerShotCount >= RANGER_SHOT_COUNT) {
+                            rangerShotState = 'idle';
+                            rangerCooldownTimer = RANGER_COOLDOWN;
+                        }
+                    }
+
+                    rangerAuraTimer += ts;
+                    const allBots = [piyade, turuncuBot, ...kamikazeler, ...miniKamikazeler, ...slimeBots].filter(b => b && !b.isDead);
+                    if (rangerAuraTimer >= RANGER_AURA_HEAL_INTERVAL) {
+                        rangerAuraTimer = 0;
+                        allBots.forEach(b => {
+                            if (getDist(b, ranger) < RANGER_AURA_RADIUS) {
+                                b.hp = Math.min(b.maxHp, b.hp + RANGER_AURA_HEAL);
+                            }
+                        });
+                    }
+
+                    let buffedCount = 0;
+                    allBots.forEach(b => { if (b._rangerBuffed) buffedCount++; });
+                    allBots.forEach(b => {
+                        const inAura = getDist(b, ranger) < RANGER_AURA_RADIUS;
+                        if (inAura && !b._rangerBuffed && buffedCount < RANGER_AURA_MAX_BOTS) {
+                            b._rangerOrigSpeed = b.speed;
+                            b.speed += RANGER_AURA_SPEED_BONUS;
+                            b._rangerBuffed = true;
+                            buffedCount++;
+                        } else if (!inAura && b._rangerBuffed) {
+                            b.speed = b._rangerOrigSpeed;
+                            b._rangerBuffed = false;
+                            buffedCount--;
+                        }
+                    });
+                }
+            } else {
+                // Ranger yoksa buff'ları temizle
+                const allBots = [piyade, turuncuBot, ...kamikazeler, ...miniKamikazeler, ...slimeBots].filter(b => b && !b.isDead);
+                allBots.forEach(b => {
+                    if (b._rangerBuffed) {
+                        b.speed = b._rangerOrigSpeed;
+                        b._rangerBuffed = false;
+                    }
+                });
+            }
+
+            for (let i = rangerBullets.length - 1; i >= 0; i--) {
+                const m = rangerBullets[i];
+                if (m.isDead) { rangerBullets.splice(i, 1); continue; }
+                m.x += m.vx * ts;
+                m.y += m.vy * ts;
+                if (m.x < WALL_THICKNESS || m.x > canvas.width - WALL_THICKNESS ||
+                    m.y < WALL_THICKNESS || m.y > canvas.height - WALL_THICKNESS) {
+                    m.isDead = true; continue;
+                }
+                let hitObs = false;
+                for (const o of obstacles.concat(cactusWalls || [])) {
+                    if (getDist(m, o) < o.radius + 5) { o.hp -= 30; hitObs = true; break; }
+                }
+                if (hitObs) { m.isDead = true; continue; }
+                if (!player.isDead && !player.jumpInvulnerable && getDist(m, player) < player.radius + 5) {
+                    player.hp -= m.hasar;
+                    rawDamageText(player.x, player.y, m.hasar, "#e74c3c");
+                    player.lastHitTime = Date.now();
+                    m.isDead = true;
+                }
+            }
+        },
+
+        onReset: function () {
+            piyade = null; piyadeSpawnTimer = 0; piyadeRespawnTimer = 0;
+            piyadeDeathMermiler = [];
+            turuncuBot = null; turuncuSpawnFrame = 0; turuncuSpawnUyari = 0;
+            kamikazeler = []; miniKamikazeler = []; kamiSpawnUyarilari = [];
+            kamiTimerCount = 0; modKillCount = 0;
+            havanBot = null; havanSpawnTimer = 0; havanSpawnUyari = 0; havanShootTimer = 0;
+            havanMermiler = [];
+            ranger = null; rangerSpawnTimer = 0; rangerSpawnUyari = 0;
+            rangerShotState = 'idle'; rangerShotCount = 0; rangerShotTimer = 0;
+            rangerCooldownTimer = 0; rangerAuraTimer = 0; rangerBullets = [];
+            clearRangerBuffs();
+
+            bot.isActive = true; bot.isDead = false; bot.hp = bot.maxHp;
+            bot.x = canvas.width - 150; bot.y = 300; bot.kbX = bot.kbY = 0;
+            bot2.isActive = false; bot2.isDead = true; bot2.hp = bot2.maxHp;
+            bot2.respawnTimer = -9999;
+            botsKilled = 0;
+        }
+    });
+
+    window.GAME_EXT.chainHook('onEnemyKilled', function (enemy) {
+        if (window.GAME_MODE !== MOD_ID) return;
+        if (!enemy) return;
+        if (enemy === piyade || enemy === turuncuBot || enemy === havanBot || enemy === ranger) {
+            modKillCount++;
+            if (modKillCount % KAMI_KILL_TRIGGER === 0 && kamikazeler.length < KAMI_MAX && kamiSpawnUyarilari.length === 0) {
+                spawnKamikazeUyari();
+            }
+        }
+    });
+
+    window.GAME_EXT.chainHook('getExtraEnemies', function () {
+        if (window.GAME_MODE !== MOD_ID) return undefined;
+        const liste = [];
+        if (piyade && !piyade.isDead) liste.push(piyade);
+        if (turuncuBot && !turuncuBot.isDead) liste.push(turuncuBot);
+        if (havanBot && !havanBot.isDead) liste.push(havanBot);
+        if (ranger && !ranger.isDead) liste.push(ranger);
+        liste.push(...kamikazeler.filter(k => !k.isDead));
+        liste.push(...miniKamikazeler.filter(k => !k.isDead));
+        return liste;
+    });
+
+    // ========== ÇİZİM ==========
+    window.GAME_EXT.chainHook('onDraw', function (ctx2) {
+        if (window.GAME_MODE !== MOD_ID || !gameStarted) return;
+
+        // Siperler gri
+        for (const o of obstacles) {
+            ctx2.save();
+            ctx2.translate(o.x, o.y);
+            ctx2.fillStyle = '#808080';
+            ctx2.beginPath();
+            ctx2.roundRect(-o.radius, -o.radius, o.radius * 2, o.radius * 2, 10);
+            ctx2.fill();
+            ctx2.strokeStyle = '#505050';
+            ctx2.lineWidth = 2;
+            ctx2.stroke();
+            ctx2.fillStyle = '#e74c3c';
+            ctx2.fillRect(-15, -o.radius - 15, 30, 4);
+            ctx2.fillStyle = '#2ecc71';
+            ctx2.fillRect(-15, -o.radius - 15, 30 * (o.hp / o.maxHp), 4);
+            ctx2.restore();
+        }
+
+        // Ranger aura
+        if (ranger && !ranger.isDead) {
+            ctx2.save();
+            ctx2.globalAlpha = 0.18 + Math.sin(Date.now() / 300) * 0.08;
+            ctx2.beginPath();
+            ctx2.arc(ranger.x, ranger.y, RANGER_AURA_RADIUS, 0, Math.PI * 2);
+            ctx2.fillStyle = '#f1c40f';
+            ctx2.fill();
+            ctx2.globalAlpha = 0.7;
+            ctx2.beginPath();
+            ctx2.arc(ranger.x, ranger.y, RANGER_AURA_RADIUS, 0, Math.PI * 2);
+            ctx2.strokeStyle = '#f1c40f';
+            ctx2.lineWidth = 2;
+            ctx2.setLineDash([10, 8]);
+            ctx2.stroke();
+            ctx2.setLineDash([]);
+            ctx2.restore();
+        }
+
+        // Piyade spawn uyarısı
+        if (piyadeSpawnTimer > 0) {
+            ctx2.save();
+            ctx2.translate(piyadeSpawnX, piyadeSpawnY);
+            ctx2.globalAlpha = Math.abs(Math.sin(Date.now() / 150));
+            ctx2.beginPath(); ctx2.arc(0, 0, PIYADE_RADIUS + 12, 0, Math.PI * 2);
+            ctx2.strokeStyle = '#d35400'; ctx2.lineWidth = 3; ctx2.stroke();
+            ctx2.globalAlpha = 1;
+            ctx2.fillStyle = '#d35400'; ctx2.font = "bold 14px Arial"; ctx2.textAlign = "center";
+            ctx2.fillText(Math.ceil(piyadeSpawnTimer / 60), 0, 5);
+            ctx2.restore();
+        }
+
+        // Turuncu bot spawn uyarısı
+        if (turuncuSpawnUyari > 0 && !turuncuBot) {
+            ctx2.save();
+            ctx2.translate(turuncuSpawnX, turuncuSpawnY);
+            ctx2.globalAlpha = Math.abs(Math.sin(Date.now() / 150));
+            ctx2.beginPath(); ctx2.arc(0, 0, TURUNCU_RADIUS + 14, 0, Math.PI * 2);
+            ctx2.strokeStyle = '#e67e22'; ctx2.lineWidth = 3; ctx2.stroke();
+            ctx2.globalAlpha = 1;
+            ctx2.fillStyle = '#e67e22'; ctx2.font = "bold 16px Arial"; ctx2.textAlign = "center";
+            ctx2.fillText(Math.ceil(turuncuSpawnUyari / 60), 0, 6);
+            ctx2.restore();
+        }
+
+        // Havan spawn uyarısı (kare)
+        if (havanSpawnUyari > 0 && !havanBot) {
+            ctx2.save();
+            ctx2.translate(havanSpawnX, havanSpawnY);
+            ctx2.globalAlpha = Math.abs(Math.sin(Date.now() / 100));
+            ctx2.beginPath();
+            ctx2.rect(-HAVAN_RADIUS - 14, -HAVAN_RADIUS - 14, (HAVAN_RADIUS + 14) * 2, (HAVAN_RADIUS + 14) * 2);
+            ctx2.strokeStyle = '#7f1d1d'; ctx2.lineWidth = 4; ctx2.stroke();
+            ctx2.globalAlpha = 1;
+            ctx2.fillStyle = '#7f1d1d'; ctx2.font = "bold 20px Arial"; ctx2.textAlign = "center";
+            ctx2.fillText(Math.ceil(havanSpawnUyari / 60), 0, 7);
+            ctx2.restore();
+        }
+
+        // Ranger spawn uyarısı (haç)
+        if (rangerSpawnUyari > 0 && !ranger) {
+            ctx2.save();
+            ctx2.translate(rangerSpawnX, rangerSpawnY);
+            ctx2.globalAlpha = Math.abs(Math.sin(Date.now() / 150));
+            ctx2.beginPath(); ctx2.arc(0, 0, RANGER_RADIUS + 14, 0, Math.PI * 2);
+            ctx2.strokeStyle = '#f1c40f'; ctx2.lineWidth = 3; ctx2.stroke();
+            ctx2.globalAlpha = 0.9;
+            ctx2.fillStyle = '#c0392b';
+            ctx2.fillRect(-4, -12, 8, 24);
+            ctx2.fillRect(-12, -4, 24, 8);
+            ctx2.globalAlpha = 1;
+            ctx2.fillStyle = '#f1c40f'; ctx2.font = "bold 16px Arial"; ctx2.textAlign = "center";
+            ctx2.fillText(Math.ceil(rangerSpawnUyari / 60), 0, 40);
+            ctx2.restore();
+        }
+
+        // Kamikaze spawn uyarısı
+        kamiSpawnUyarilari.forEach(u => {
+            ctx2.save();
+            ctx2.translate(u.x, u.y);
+            ctx2.globalAlpha = Math.abs(Math.sin(Date.now() / 100));
+            ctx2.beginPath();
+            ctx2.moveTo(0, -22); ctx2.lineTo(-18, 12); ctx2.lineTo(18, 12); ctx2.closePath();
+            ctx2.strokeStyle = '#e67e22'; ctx2.lineWidth = 3; ctx2.stroke();
+            ctx2.globalAlpha = 1;
+            ctx2.fillStyle = '#e67e22'; ctx2.font = "bold 18px Arial"; ctx2.textAlign = "center";
+            ctx2.fillText('!', 0, 5);
+            ctx2.restore();
+        });
+
+        // Piyade
+        if (piyade && !piyade.isDead) {
+            const b = piyade;
+            ctx2.save();
+            ctx2.translate(b.x, b.y);
+            ctx2.fillStyle = '#e74c3c'; ctx2.fillRect(-20, -b.radius - 15, 40, 5);
+            ctx2.fillStyle = '#2ecc71'; ctx2.fillRect(-20, -b.radius - 15, 40 * (b.hp / b.maxHp), 5);
+            ctx2.rotate(b.angle);
+            ctx2.fillStyle = '#d35400';
+            ctx2.beginPath(); ctx2.arc(0, 0, b.radius, 0, Math.PI * 2); ctx2.fill();
+            ctx2.strokeStyle = '#5d4037'; ctx2.lineWidth = 2; ctx2.stroke();
+            ctx2.fillStyle = '#fff5e1';
+            ctx2.beginPath(); ctx2.arc(7, -5, 4, 0, Math.PI * 2); ctx2.arc(7, 5, 4, 0, Math.PI * 2); ctx2.fill();
+            ctx2.fillStyle = '#5d4037';
+            ctx2.beginPath(); ctx2.arc(8, -5, 2, 0, Math.PI * 2); ctx2.arc(8, 5, 2, 0, Math.PI * 2); ctx2.fill();
+            ctx2.fillStyle = '#a04000';
+            ctx2.beginPath(); ctx2.arc(0, -b.radius * 0.4, b.radius * 0.65, Math.PI, Math.PI * 2); ctx2.fill();
+            ctx2.strokeStyle = '#5d4037'; ctx2.lineWidth = 1.5; ctx2.stroke();
+            ctx2.restore();
+        }
+
+        // Turuncu bot
+        if (turuncuBot && !turuncuBot.isDead) {
+            const b = turuncuBot;
+            ctx2.save();
+            ctx2.translate(b.x, b.y);
+            ctx2.fillStyle = '#e74c3c'; ctx2.fillRect(-20, -b.radius - 15, 40, 5);
+            ctx2.fillStyle = '#2ecc71'; ctx2.fillRect(-20, -b.radius - 15, 40 * (b.hp / b.maxHp), 5);
+            ctx2.rotate(b.angle);
+            ctx2.fillStyle = '#e67e22';
+            ctx2.beginPath(); ctx2.arc(0, 0, b.radius, 0, Math.PI * 2); ctx2.fill();
+            ctx2.strokeStyle = '#a04000'; ctx2.lineWidth = 2; ctx2.stroke();
+            ctx2.fillStyle = '#d35400';
+            ctx2.beginPath(); ctx2.arc(0, 0, b.radius * 0.75, -Math.PI * 0.7, Math.PI * 0.7); ctx2.fill();
+            ctx2.fillStyle = '#5d4037'; ctx2.fillRect(b.radius - 2, -3, 10, 6);
+            ctx2.fillStyle = '#fff5e1';
+            ctx2.beginPath(); ctx2.arc(7, -5, 4, 0, Math.PI * 2); ctx2.arc(7, 5, 4, 0, Math.PI * 2); ctx2.fill();
+            ctx2.fillStyle = '#e67e22';
+            ctx2.beginPath(); ctx2.arc(8, -5, 2, 0, Math.PI * 2); ctx2.arc(8, 5, 2, 0, Math.PI * 2); ctx2.fill();
+            ctx2.restore();
+        }
+
+        // Havan (Clash Royale tarzı yuvarlak taş top)
+        if (havanBot && !havanBot.isDead) {
+            const b = havanBot;
+            ctx2.save();
+            ctx2.translate(b.x, b.y);
+            ctx2.fillStyle = '#7f1d1d'; ctx2.fillRect(-30, -b.radius - 18, 60, 6);
+            ctx2.fillStyle = '#c0392b'; ctx2.fillRect(-30, -b.radius - 18, 60 * (b.hp / b.maxHp), 6);
+            // Gölge
+            ctx2.fillStyle = 'rgba(0,0,0,0.3)';
+            ctx2.beginPath(); ctx2.ellipse(0, b.radius * 0.5, b.radius * 1.1, b.radius * 0.35, 0, 0, Math.PI * 2); ctx2.fill();
+            // Taş gövde (yuvarlak)
+            ctx2.fillStyle = '#5d4037';
+            ctx2.beginPath(); ctx2.arc(0, 0, b.radius, 0, Math.PI * 2); ctx2.fill();
+            ctx2.strokeStyle = '#3e2723'; ctx2.lineWidth = 3; ctx2.stroke();
+            // Taş blok detayları (kenarlar)
+            ctx2.fillStyle = '#3e2723';
+            for (let i = 0; i < 6; i++) {
+                const a = (i / 6) * Math.PI * 2;
+                const bx = Math.cos(a) * (b.radius - 4);
+                const by = Math.sin(a) * (b.radius - 4);
+                ctx2.beginPath(); ctx2.arc(bx, by, 4, 0, Math.PI * 2); ctx2.fill();
+            }
+            // İç taş (açık)
+            ctx2.fillStyle = '#8d6e63';
+            ctx2.beginPath(); ctx2.arc(0, 0, b.radius - 8, 0, Math.PI * 2); ctx2.fill();
+            // Namlu (üstte)
+            ctx2.fillStyle = '#1a0a00';
+            ctx2.beginPath(); ctx2.arc(0, -4, 10, 0, Math.PI * 2); ctx2.fill();
+            // Metal halka
+            ctx2.strokeStyle = '#808080'; ctx2.lineWidth = 2;
+            ctx2.beginPath(); ctx2.arc(0, -4, 10, 0, Math.PI * 2); ctx2.stroke();
+            // Namlu içi
+            ctx2.fillStyle = '#000';
+            ctx2.beginPath(); ctx2.arc(0, -4, 6, 0, Math.PI * 2); ctx2.fill();
+            // Ateş anı parlaması
+            if (havanShootTimer > HAVAN_SHOOT_INTERVAL - 10 && havanShootTimer <= HAVAN_SHOOT_INTERVAL) {
+                ctx2.globalAlpha = (havanShootTimer - (HAVAN_SHOOT_INTERVAL - 10)) / 10;
+                ctx2.fillStyle = '#ff5500';
+                ctx2.beginPath(); ctx2.arc(0, -4, 12, 0, Math.PI * 2); ctx2.fill();
+                ctx2.globalAlpha = 1;
+            }
+            ctx2.restore();
+        }
+
+        // Ranger
+        if (ranger && !ranger.isDead) {
+            ctx2.save();
+            ctx2.translate(ranger.x, ranger.y);
+            // HP bar
+            ctx2.fillStyle = '#e74c3c'; ctx2.fillRect(-18, -ranger.radius - 12, 36, 4);
+            ctx2.fillStyle = '#2ecc71'; ctx2.fillRect(-18, -ranger.radius - 12, 36 * (ranger.hp / ranger.maxHp), 4);
+            // Gövde
+            ctx2.fillStyle = '#f1c40f';
+            ctx2.beginPath(); ctx2.arc(0, 0, ranger.radius, 0, Math.PI * 2); ctx2.fill();
+            ctx2.strokeStyle = '#b7950b'; ctx2.lineWidth = 2; ctx2.stroke();
+            // Kırmızı haç (healer)
+            ctx2.fillStyle = '#c0392b';
+            ctx2.fillRect(-3, -8, 6, 16);
+            ctx2.fillRect(-8, -3, 16, 6);
+            // Ateş parlaması
+            if (rangerShotState === 'shooting') {
+                ctx2.globalAlpha = 0.4 + Math.sin(Date.now() / 60) * 0.3;
+                ctx2.beginPath(); ctx2.arc(0, 0, ranger.radius + 5, 0, Math.PI * 2);
+                ctx2.strokeStyle = '#ff5500'; ctx2.lineWidth = 2; ctx2.stroke();
+                ctx2.globalAlpha = 1;
+            }
+            ctx2.restore();
+        }
+
+        // Havan mermileri (yay yok, sadece top + gölge)
+        havanMermiler.forEach(m => {
+            if (m.isDead) return;
+            const prog = 1 - (m.flightTimer / m.maxFlight);
+            // Yer halkası
+            ctx2.save();
+            ctx2.globalAlpha = 0.5 + Math.sin(Date.now() / 100) * 0.3;
+            ctx2.beginPath();
+            ctx2.arc(m.x, m.y, HAVAN_MERMI_AOE, 0, Math.PI * 2);
+            ctx2.strokeStyle = '#c0392b'; ctx2.lineWidth = 3; ctx2.setLineDash([8, 6]); ctx2.stroke();
+            ctx2.setLineDash([]);
+            ctx2.globalAlpha = 0.15;
+            ctx2.beginPath();
+            ctx2.arc(m.x, m.y, HAVAN_MERMI_AOE * prog, 0, Math.PI * 2);
+            ctx2.fillStyle = '#c0392b'; ctx2.fill();
+            ctx2.restore();
+
+            const currentX = m.startX + (m.x - m.startX) * prog;
+            const currentY = m.startY + (m.y - m.startY) * prog;
+            const arcHeight = Math.sin(prog * Math.PI) * 120;
+            ctx2.save();
+            // Gölge
+            ctx2.globalAlpha = 0.3;
+            ctx2.beginPath();
+            ctx2.ellipse(m.x, m.y, 12 * prog, 5 * prog, 0, 0, Math.PI * 2);
+            ctx2.fillStyle = '#000'; ctx2.fill();
+            ctx2.globalAlpha = 1;
+            // Top
+            ctx2.beginPath();
+            ctx2.arc(currentX, currentY - arcHeight, 9, 0, Math.PI * 2);
+            ctx2.fillStyle = '#7f1d1d'; ctx2.fill();
+            ctx2.strokeStyle = '#c0392b'; ctx2.lineWidth = 2; ctx2.stroke();
+            // Parlama
+            ctx2.beginPath();
+            ctx2.arc(currentX - 2, currentY - arcHeight - 2, 3, 0, Math.PI * 2);
+            ctx2.fillStyle = 'rgba(255,255,255,0.4)'; ctx2.fill();
+            ctx2.restore();
+        });
+
+        // Ranger mermileri
+        rangerBullets.forEach(m => {
+            if (m.isDead) return;
+            ctx2.save();
+            ctx2.translate(m.x, m.y);
+            ctx2.beginPath(); ctx2.arc(0, 0, 4, 0, Math.PI * 2);
+            ctx2.fillStyle = '#f1c40f'; ctx2.fill();
+            ctx2.strokeStyle = '#b7950b'; ctx2.lineWidth = 1; ctx2.stroke();
+            ctx2.restore();
+        });
+
+        // Piyade ölüm mermileri
+        piyadeDeathMermiler.forEach(m => {
+            if (m.isDead) return;
+            ctx2.save();
+            ctx2.translate(m.x, m.y);
+            ctx2.beginPath(); ctx2.arc(0, 0, m.radius + 2, 0, Math.PI * 2);
+            ctx2.fillStyle = 'rgba(211,84,0,0.3)'; ctx2.fill();
+            ctx2.beginPath(); ctx2.arc(0, 0, m.radius, 0, Math.PI * 2);
+            ctx2.fillStyle = '#d35400'; ctx2.fill();
+            ctx2.strokeStyle = '#5d4037'; ctx2.lineWidth = 1.5; ctx2.stroke();
+            ctx2.restore();
+        });
+
+        // Kamikazeler
+        kamikazeler.forEach(k => {
+            if (k.isDead) return;
+            const canSee = !player.isDead && !player.isInvisible;
+            if (canSee && getDist(k, player) < KAMI_TRIGGER_DIST + 40) {
+                ctx2.save();
+                ctx2.globalAlpha = 0.4 + Math.sin(Date.now() / 80) * 0.3;
+                ctx2.beginPath();
+                ctx2.arc(k.x, k.y, k.radius + 8 + Math.sin(Date.now() / 100) * 3, 0, Math.PI * 2);
+                ctx2.strokeStyle = '#e67e22'; ctx2.lineWidth = 2; ctx2.stroke();
+                ctx2.restore();
+            }
+            // Ranger aura içinde mi?
+            const inAura = ranger && !ranger.isDead && getDist(k, ranger) < RANGER_AURA_RADIUS;
+            ctx2.save();
+            ctx2.translate(k.x, k.y);
+            ctx2.fillStyle = '#e74c3c'; ctx2.fillRect(-15, -k.radius - 12, 30, 4);
+            ctx2.fillStyle = '#2ecc71'; ctx2.fillRect(-15, -k.radius - 12, 30 * (k.hp / k.maxHp), 4);
+            ctx2.rotate(k.angle);
+            ctx2.beginPath();
+            ctx2.moveTo(k.radius, 0); ctx2.lineTo(-k.radius, -k.radius * 0.8); ctx2.lineTo(-k.radius, k.radius * 0.8); ctx2.closePath();
+            ctx2.fillStyle = '#e67e22'; ctx2.fill();
+            ctx2.strokeStyle = inAura ? '#ffcc00' : '#a04000';
+            ctx2.lineWidth = inAura ? 3 : 2;
+            ctx2.stroke();
+            ctx2.restore();
+            ctx2.save();
+            ctx2.globalAlpha = 0.9;
+            ctx2.fillStyle = '#fff5e1'; ctx2.font = 'bold 14px Arial'; ctx2.textAlign = 'center';
+            ctx2.fillText('!', k.x, k.y + 5);
+            ctx2.restore();
+        });
+
+        // Mini-kamikazeler
+        miniKamikazeler.forEach(k => {
+            if (k.isDead) return;
+            const canSee = !player.isDead && !player.isInvisible;
+            if (canSee && getDist(k, player) < MINI_TRIGGER_DIST + 30) {
+                ctx2.save();
+                ctx2.globalAlpha = 0.4 + Math.sin(Date.now() / 80) * 0.3;
+                ctx2.beginPath();
+                ctx2.arc(k.x, k.y, k.radius + 6 + Math.sin(Date.now() / 100) * 2, 0, Math.PI * 2);
+                ctx2.strokeStyle = '#f39c12'; ctx2.lineWidth = 1.5; ctx2.stroke();
+                ctx2.restore();
+            }
+            const inAura = ranger && !ranger.isDead && getDist(k, ranger) < RANGER_AURA_RADIUS;
+            ctx2.save();
+            ctx2.translate(k.x, k.y);
+            ctx2.fillStyle = '#e74c3c'; ctx2.fillRect(-10, -k.radius - 10, 20, 3);
+            ctx2.fillStyle = '#2ecc71'; ctx2.fillRect(-10, -k.radius - 10, 20 * (k.hp / k.maxHp), 3);
+            ctx2.rotate(k.angle);
+            ctx2.beginPath();
+            ctx2.moveTo(k.radius, 0); ctx2.lineTo(-k.radius, -k.radius * 0.8); ctx2.lineTo(-k.radius, k.radius * 0.8); ctx2.closePath();
+            ctx2.fillStyle = '#f39c12'; ctx2.fill();
+            ctx2.strokeStyle = inAura ? '#ffcc00' : '#a04000';
+            ctx2.lineWidth = inAura ? 2.5 : 1.5;
+            ctx2.stroke();
+            ctx2.restore();
+        });
+    });
+
+    // Arena dönüşü
+    (function () {
+        const diffNormal = document.getElementById('diff-normal');
+        const diffEasy = document.getElementById('diff-easy');
+        if (diffNormal) {
+            diffNormal.addEventListener('click', () => { window.GAME_MODE = 'arena'; });
+            diffNormal.addEventListener('touchstart', () => { window.GAME_MODE = 'arena'; }, { passive: true });
+        }
+        if (diffEasy) {
+            diffEasy.addEventListener('click', () => { window.GAME_MODE = 'arena'; });
+            diffEasy.addEventListener('touchstart', () => { window.GAME_MODE = 'arena'; }, { passive: true });
+        }
+    })();
+
+    window.GAME_EXT.modKartiEkle('turuncu', 'Turuncu Baskın', 'Piyade + Turuncu + Kamikaze + Havan + Ranger + Yuvalar');
+
+    console.log('[MOD YÜKLENDİ] turuncu (v7)');
+})();
