@@ -1,13 +1,13 @@
-// ========== mod31.js (ZIPLAYAN) - ZİNCİR USTASI v3 ==========
+// ========== mod31.js (CURLOS) - ZİNCİR USTASI v4 ==========
 (function () {
     'use strict';
 
-    const CHAR_ID = 'ziplayan';
+    const CHAR_ID = 'curlos';
     const C_MAIN = '#8e44ad';
     const C_LIGHT = '#bb8fce';
     const C_SPARK = '#f1c40f';
     const C_WHITE = '#fff';
-    const CHAR_HP = 2800;
+    const CHAR_HP = 3000;
     const CHAR_SPEED = 3.6;
 
     const DMG_1 = 700;
@@ -22,7 +22,7 @@
     const SIIPER_HASAR = 80;
 
     const DASH_MAX_BOUNCE = 4;
-    const DASH_DAMAGE = 200;
+    const DASH_DAMAGE = 500;
     const DASH_SPEED = 16;
     const DASH_LEG = 120;
     const DASH_COOLDOWN = 900;
@@ -33,9 +33,9 @@
 
     const ULTI_RADIUS = 85;
     const ULTI_DAMAGE = 400;
-    const ULTI_JUMP_MAX = 8;
+    const ULTI_JUMP_MAX = 5;
     const ULTI_PER_BOT_ULTI = 10;
-    const ULTI_PER_BOT_HEAL = 100;
+    const ULTI_PER_BOT_HEAL = 200;
     const ULTI_PLACE_MAX = 260;
     const ULTI_PLACE_MIN = 60;
     const ULTI_AIR_TIME = 40;
@@ -47,13 +47,13 @@
 
     window.GAME_EXT.characters[CHAR_ID] = { color: C_MAIN, hp: CHAR_HP, speed: CHAR_SPEED };
 
-    let zipBullets = [];
-    let zipTexts = [];
-    let zipParticles = [];
-    let zipSparks = [];
+    let curlosBullets = [];
+    let curlosTexts = [];
+    let curlosParticles = [];
+    let curlosSparks = [];
     let dashState = { active: false, vx: 0, vy: 0, bouncesLeft: 0, hitTargets: new Set(), remainingRange: 0 };
     let healReady = false;
-    let ultiState = { active: false, startX: 0, startY: 0, targetX: 0, targetY: 0, progress: 0 };
+    let ultiTarget = { x: 0, y: 0 };
     let ultiDrag = { active: false, startX: 0, startY: 0, angle: 0, pull: 0, touchId: null, isMouse: false };
 
     function chainHook(name, fn) {
@@ -67,15 +67,15 @@
         };
     }
 
-    function zipText(x, y, val, isLabel) {
-        zipTexts.push({ x, y, val, life: 55, maxLife: 55, isLabel: !!isLabel });
+    function curlosText(x, y, val, isLabel) {
+        curlosTexts.push({ x, y, val, life: 55, maxLife: 55, isLabel: !!isLabel });
     }
 
     function sparkBurst(x, y, n, color) {
         for (let i = 0; i < (n || 6); i++) {
             const ang = Math.random() * Math.PI * 2;
             const sp = 2 + Math.random() * 4;
-            zipParticles.push({
+            curlosParticles.push({
                 x, y,
                 vx: Math.cos(ang) * sp, vy: Math.sin(ang) * sp,
                 size: 1.5 + Math.random() * 2,
@@ -87,13 +87,13 @@
     }
 
     function triggerBotJump(bot) {
-        if (!bot || bot.isDead || bot._zipJumpActive) return false;
-        bot._zipJumpActive = true;
-        bot._zipJumpTimer = BOT_JUMP_FRAMES;
-        bot._zipJumpOrigY = bot.y;
-        bot._zipJumpOrigSpeed = bot.speed;
-        bot._zipJumpOrigRadius = bot.radius;
-        bot._zipJumpOrigInterval = bot.shootInterval;
+        if (!bot || bot.isDead || bot._curlosJumpActive) return false;
+        bot._curlosJumpActive = true;
+        bot._curlosJumpTimer = BOT_JUMP_FRAMES;
+        bot._curlosJumpOrigY = bot.y;
+        bot._curlosJumpOrigSpeed = bot.speed;
+        bot._curlosJumpOrigRadius = bot.radius;
+        bot._curlosJumpOrigInterval = bot.shootInterval;
         bot.speed = 0;
         bot.radius = 0.1;
         bot.shootInterval = 999999;
@@ -107,7 +107,7 @@
         card.id = 'char-' + CHAR_ID;
         card.innerHTML =
             '<div class="char-color-preview" style="background:' + C_MAIN + ';"></div>' +
-            '<span>Zıplayan</span>' +
+            '<span>Curlos</span>' +
             '<small>Hasar: 700→400→100<br>Güç: Seken Dash + Can<br>Ulti: Zıplatma</small>';
         container.appendChild(card);
         card.addEventListener('click', () => {
@@ -117,23 +117,23 @@
         });
     }
 
-    function clearZipState() {
-        zipBullets = [];
-        zipTexts = [];
-        zipParticles = [];
-        zipSparks = [];
+    function clearCurlosState() {
+        curlosBullets = [];
+        curlosTexts = [];
+        curlosParticles = [];
+        curlosSparks = [];
         dashState = { active: false, vx: 0, vy: 0, bouncesLeft: 0, hitTargets: new Set(), remainingRange: 0 };
-        ultiState = { active: false, startX: 0, startY: 0, targetX: 0, targetY: 0, progress: 0 };
         healReady = false;
+        player._curlosUltiPending = false;
         player.isJumping = false;
         player.jumpInvulnerable = false;
         getActiveEnemies().forEach(b => {
-            if (b._zipJumpActive) {
-                b._zipJumpActive = false;
-                b.y = b._zipJumpOrigY || b.y;
-                b.speed = b._zipJumpOrigSpeed || b.speed;
-                b.radius = b._zipJumpOrigRadius || b.radius;
-                b.shootInterval = b._zipJumpOrigInterval || b.shootInterval;
+            if (b._curlosJumpActive) {
+                b._curlosJumpActive = false;
+                b.y = b._curlosJumpOrigY || b.y;
+                b.speed = b._curlosJumpOrigSpeed || b.speed;
+                b.radius = b._curlosJumpOrigRadius || b.radius;
+                b.shootInterval = b._curlosJumpOrigInterval || b.shootInterval;
             }
         });
     }
@@ -142,7 +142,7 @@
     Player.prototype.setCharacter = function (type) {
         originalSetCharacter.call(this, type);
         if (type === CHAR_ID) {
-            clearZipState();
+            clearCurlosState();
             this.reloadSpeed = RELOAD_SPEED;
             if (gadgetBtn) {
                 gadgetBtn.style.display = 'flex';
@@ -161,7 +161,7 @@
             gadgetTimerText = document.getElementById('gadget-timer');
             gadgetTimerText2 = document.getElementById('gadget-timer-2');
         } else {
-            clearZipState();
+            clearCurlosState();
             if (ultiBtn) ultiBtn.style.background = '';
             if (this.reloadSpeed === RELOAD_SPEED) this.reloadSpeed = 0.015;
         }
@@ -170,8 +170,8 @@
     const originalFire = Player.prototype.fire;
     Player.prototype.fire = function (a, pullOverride) {
         if (this.charType !== CHAR_ID) return originalFire.call(this, a, pullOverride);
-        if (this.ammo < 1 || this.isDead || ultiState.active) return;
-        zipBullets.push({
+        if (this.ammo < 1 || this.isDead || this._curlosUltiPending) return;
+        curlosBullets.push({
             x: this.x, y: this.y, sx: this.x, sy: this.y,
             vx: Math.cos(a) * BULLET_SPEED,
             vy: Math.sin(a) * BULLET_SPEED,
@@ -190,7 +190,7 @@
     const originalActivateGadget = Player.prototype.activateGadget;
     Player.prototype.activateGadget = function (a, pull) {
         if (this.charType !== CHAR_ID) return originalActivateGadget.call(this, a, pull);
-        if (!this.gadgetReady || this.isDead || dashState.active || ultiState.active) return;
+        if (!this.gadgetReady || this.isDead || dashState.active || this._curlosUltiPending) return;
         const ang = a !== undefined ? a : this.angle;
         dashState.active = true;
         dashState.vx = Math.cos(ang) * DASH_SPEED;
@@ -220,30 +220,27 @@
     Player.prototype.fireUlti = function (a, pull) {
         if (this.charType !== CHAR_ID) return originalFireUlti.call(this, a, pull);
         if (pull === undefined) return;
-        if (!this.ultReady || this.isDead || ultiState.active || dashState.active) return;
+        if (!this.ultReady || this.isDead || this._curlosUltiPending || dashState.active) return;
         const pullMag = pull > 0.05 ? pull : 1;
         const dist = ULTI_PLACE_MIN + (ULTI_PLACE_MAX - ULTI_PLACE_MIN) * pullMag;
         const tx = clampPos(this.x + Math.cos(a) * dist, WALL_THICKNESS + 30, canvas.width - WALL_THICKNESS - 30);
         const ty = clampPos(this.y + Math.sin(a) * dist, WALL_THICKNESS + 30, canvas.height - WALL_THICKNESS - 30);
-        ultiState.active = true;
-        ultiState.startX = this.x;
-        ultiState.startY = this.y;
-        ultiState.targetX = tx;
-        ultiState.targetY = ty;
-        ultiState.progress = 0;
-        // Base jump animasyonu
+        ultiTarget.x = tx;
+        ultiTarget.y = ty;
+        this._curlosUltiPending = true;
+        // Base jump flag'leri — animasyon otomatik güzel
         this.isJumping = true;
         this.jumpInvulnerable = true;
         this.jumpProgress = 0;
-        this.jumpDuration = 9999999;
+        this.jumpDuration = ULTI_AIR_TIME;
         this.jumpStartX = this.x;
         this.jumpStartY = this.y;
         this.jumpTargetX = tx;
         this.jumpTargetY = ty;
-        this.jumpDamage = 0;
-        this.jumpKnockback = 0;
-        this.jumpLabel = "";
-        zipText(this.x, this.y - 40, "ZIPLAT!", true);
+        this.jumpDamage = 0.01;
+        this.jumpKnockback = 0.01;
+        this.jumpLabel = " ";
+        curlosText(this.x, this.y - 40, "ZIPLAT!", true);
         this.ultReady = false;
         this.ultCharge = 0;
         if (ultFill) ultFill.style.width = "0%";
@@ -261,20 +258,19 @@
         if (ultFill) ultFill.style.width = player.ultCharge + "%";
     });
 
-    chainHook('onReset', function () { clearZipState(); });
+    chainHook('onReset', function () { clearCurlosState(); });
 
-    // Base aim çizgisini blokla
     chainHook('onPreDraw', function (ctx2) {
         if (player.charType === CHAR_ID && aimData.active && !player.isDead && !dashState.active) {
-            player._zipHideBaseAim = true;
+            player._curlosHideBaseAim = true;
             aimData.active = false;
         }
     });
 
     chainHook('onPostDraw', function (ctx2) {
-        if (player._zipHideBaseAim) {
+        if (player._curlosHideBaseAim) {
             aimData.active = true;
-            player._zipHideBaseAim = false;
+            player._curlosHideBaseAim = false;
         }
     });
 
@@ -339,63 +335,97 @@
     });
 
     let lastT = 0;
-    function zipLoop(t) {
+    function curlosLoop(t) {
         if (!lastT) lastT = t;
         const ts = Math.min(3, (t - lastT) / 16.666);
         lastT = t;
         if (gameStarted) {
-            try { zipUpdate(ts); } catch (err) { console.error('[ZIP]', err); }
+            try { curlosUpdate(ts); } catch (err) { console.error('[CURLOS]', err); }
         }
-        requestAnimationFrame(zipLoop);
+        requestAnimationFrame(curlosLoop);
     }
-    requestAnimationFrame(zipLoop);
+    requestAnimationFrame(curlosLoop);
 
-    function zipUpdate(ts) {
+    function curlosUpdate(ts) {
         if (player.charType === CHAR_ID) {
             if (ultiBtn && ultiBtn.style.display !== 'flex') ultiBtn.style.display = 'flex';
             if (gadgetBtn && gadgetBtn.style.display !== 'flex') gadgetBtn.style.display = 'flex';
             if (gadgetBtn2 && gadgetBtn2.style.display !== 'flex') gadgetBtn2.style.display = 'flex';
         }
 
-        // ===== Bot zıplatma — 1. Geçiş: hareket + iniş zamanlaması =====
+        // Bot zıplatma
         const landingBots = [];
         getActiveEnemies().forEach(e => {
-            if (e._zipJumpActive) {
-                e._zipJumpTimer -= ts;
-                if (e._zipJumpTimer <= 0) {
+            if (e._curlosJumpActive) {
+                e._curlosJumpTimer -= ts;
+                if (e._curlosJumpTimer <= 0) {
                     landingBots.push(e);
                 } else {
-                    const prog = 1 - (e._zipJumpTimer / BOT_JUMP_FRAMES);
+                    const prog = 1 - (e._curlosJumpTimer / BOT_JUMP_FRAMES);
                     const jumpH = Math.sin(prog * Math.PI);
-                    e.y = Math.max(WALL_THICKNESS + 20, e._zipJumpOrigY - jumpH * BOT_JUMP_HEIGHT);
+                    e.y = Math.max(WALL_THICKNESS + 20, e._curlosJumpOrigY - jumpH * BOT_JUMP_HEIGHT);
                 }
             }
         });
-        // ===== Bot zıplatma — 2. Geçiş: iniş restore =====
         landingBots.forEach(e => {
-            e._zipJumpActive = false;
-            e.y = e._zipJumpOrigY;
-            e.speed = e._zipJumpOrigSpeed;
-            e.radius = e._zipJumpOrigRadius;
-            e.shootInterval = e._zipJumpOrigInterval;
+            e._curlosJumpActive = false;
+            e.y = e._curlosJumpOrigY;
+            e.speed = e._curlosJumpOrigSpeed;
+            e.radius = e._curlosJumpOrigRadius;
+            e.shootInterval = e._curlosJumpOrigInterval;
         });
-        // ===== Bot zıplatma — 3. Geçiş: iniş AoE =====
         landingBots.forEach(e => {
             getActiveEnemies().forEach(other => {
                 if (other === e || other.isDead) return;
-                const otherY = other._zipJumpActive ? other._zipJumpOrigY : other.y;
-                const otherRadius = other._zipJumpActive ? other._zipJumpOrigRadius : other.radius;
+                const otherY = other._curlosJumpActive ? other._curlosJumpOrigY : other.y;
+                const otherRadius = other._curlosJumpActive ? other._curlosJumpOrigRadius : other.radius;
                 const dist = Math.hypot(e.x - other.x, e.y - otherY);
                 if (dist < BOT_JUMP_AOE_RADIUS + otherRadius) {
                     other.hp -= BOT_JUMP_AOE_DMG;
                     addFloatingNumber(other.x, otherY, BOT_JUMP_AOE_DMG, C_MAIN);
                 }
             });
-            zipSparks.push({ x: e.x, y: e.y, radius: 5, targetRadius: BOT_JUMP_AOE_RADIUS, life: 15, maxLife: 15 });
+            curlosSparks.push({ x: e.x, y: e.y, radius: 5, targetRadius: BOT_JUMP_AOE_RADIUS, life: 15, maxLife: 15 });
             sparkBurst(e.x, e.y, 8, C_MAIN);
         });
 
-        // ===== Dash =====
+        // Ulti iniş algılama
+        if (player._curlosUltiPending && player.charType === CHAR_ID && !player.isDead) {
+            if (!player.isJumping) {
+                player._curlosUltiPending = false;
+                let jumped = 0;
+                const inRange = [];
+                getActiveEnemies().forEach(e => {
+                    if (getDist(ultiTarget, e) < ULTI_RADIUS + e.radius) inRange.push(e);
+                });
+                inRange.sort((a, b) => getDist(ultiTarget, a) - getDist(ultiTarget, b));
+                inRange.slice(0, ULTI_JUMP_MAX).forEach(e => {
+                    e.hp -= ULTI_DAMAGE;
+                    addFloatingNumber(e.x, e.y, ULTI_DAMAGE, C_MAIN);
+                    if (triggerBotJump(e)) jumped++;
+                });
+
+                if (jumped > 0) {
+                    const ultiGain = jumped * ULTI_PER_BOT_ULTI;
+                    const healGain = jumped * ULTI_PER_BOT_HEAL;
+                    if (!player.ultReady) {
+                        player.ultCharge = Math.min(100, player.ultCharge + ultiGain);
+                        if (player.ultCharge >= 100) {
+                            player.ultReady = true;
+                            if (ultiBtn) ultiBtn.classList.add('ready');
+                        }
+                        if (ultFill) ultFill.style.width = player.ultCharge + "%";
+                    }
+                    player.hp = Math.min(player.maxHp, player.hp + healGain);
+                }
+
+                curlosSparks.push({ x: ultiTarget.x, y: ultiTarget.y, radius: 10, targetRadius: ULTI_RADIUS, life: 20, maxLife: 20 });
+                sparkBurst(ultiTarget.x, ultiTarget.y, 20, C_MAIN);
+                screenShake = 8;
+            }
+        }
+
+        // Dash
         if (dashState.active && !player.isDead) {
             const stepX = dashState.vx * ts;
             const stepY = dashState.vy * ts;
@@ -448,59 +478,10 @@
             }
         }
 
-        // ===== Ulti zıplama (base flag senkronize) =====
-        if (ultiState.active && !player.isDead) {
-            ultiState.progress += ts / ULTI_AIR_TIME;
-            const t = Math.min(1, ultiState.progress);
-            player.isJumping = true;
-            player.jumpInvulnerable = true;
-            player.jumpProgress = t;
-            player.x = ultiState.startX + (ultiState.targetX - ultiState.startX) * t;
-            player.y = ultiState.startY + (ultiState.targetY - ultiState.startY) * t;
-
-            if (ultiState.progress >= 1) {
-                player.x = ultiState.targetX;
-                player.y = ultiState.targetY;
-                player.jumpInvulnerable = false;
-                player.isJumping = false;
-                ultiState.active = false;
-
-                let jumped = 0;
-                const inRange = [];
-                getActiveEnemies().forEach(e => {
-                    if (getDist(player, e) < ULTI_RADIUS + e.radius) inRange.push(e);
-                });
-                inRange.sort((a, b) => getDist(player, a) - getDist(player, b));
-                inRange.slice(0, ULTI_JUMP_MAX).forEach(e => {
-                    e.hp -= ULTI_DAMAGE;
-                    addFloatingNumber(e.x, e.y, ULTI_DAMAGE, C_MAIN);
-                    if (triggerBotJump(e)) jumped++;
-                });
-
-                if (jumped > 0) {
-                    const ultiGain = jumped * ULTI_PER_BOT_ULTI;
-                    const healGain = jumped * ULTI_PER_BOT_HEAL;
-                    if (!player.ultReady) {
-                        player.ultCharge = Math.min(100, player.ultCharge + ultiGain);
-                        if (player.ultCharge >= 100) {
-                            player.ultReady = true;
-                            if (ultiBtn) ultiBtn.classList.add('ready');
-                        }
-                        if (ultFill) ultFill.style.width = player.ultCharge + "%";
-                    }
-                    player.hp = Math.min(player.maxHp, player.hp + healGain);
-                }
-
-                zipSparks.push({ x: player.x, y: player.y, radius: 10, targetRadius: ULTI_RADIUS, life: 20, maxLife: 20 });
-                sparkBurst(player.x, player.y, 20, C_MAIN);
-                screenShake = 8;
-            }
-        }
-
-        // ===== Mermiler =====
-        for (let i = zipBullets.length - 1; i >= 0; i--) {
-            const b = zipBullets[i];
-            if (b.isDead) { zipBullets.splice(i, 1); continue; }
+        // Mermiler
+        for (let i = curlosBullets.length - 1; i >= 0; i--) {
+            const b = curlosBullets[i];
+            if (b.isDead) { curlosBullets.splice(i, 1); continue; }
 
             const stepX = b.vx * ts;
             const stepY = b.vy * ts;
@@ -567,7 +548,7 @@
             let botHit = null;
             for (const e of getActiveEnemies()) {
                 if (b.hitTargets.has(e)) continue;
-                if (e._zipJumpActive) continue;
+                if (e._curlosJumpActive) continue;
                 if (getDist(b, e) < e.radius + 10) { botHit = e; break; }
             }
 
@@ -587,7 +568,7 @@
 
                 let nearest = null, nearestDist = Infinity;
                 getActiveEnemies().forEach(e => {
-                    if (b.hitTargets.has(e) || e.isDead || e._zipJumpActive) return;
+                    if (b.hitTargets.has(e) || e.isDead || e._curlosJumpActive) return;
                     const d = getDist(b, e);
                     if (d < BULLET_RANGE && d < nearestDist) { nearestDist = d; nearest = e; }
                 });
@@ -610,59 +591,54 @@
             }
         }
 
-        zipBullets.forEach(b => {
+        curlosBullets.forEach(b => {
             for (let i = b.trail.length - 1; i >= 0; i--) {
                 b.trail[i].life -= ts;
                 if (b.trail[i].life <= 0) b.trail.splice(i, 1);
             }
         });
 
-        for (let i = zipParticles.length - 1; i >= 0; i--) {
-            const p = zipParticles[i];
+        for (let i = curlosParticles.length - 1; i >= 0; i--) {
+            const p = curlosParticles[i];
             p.x += p.vx * ts; p.y += p.vy * ts;
             p.vy += p.gravity * ts;
             p.vx *= 0.95; p.vy *= 0.95;
             p.life -= ts;
-            if (p.life <= 0) zipParticles.splice(i, 1);
+            if (p.life <= 0) curlosParticles.splice(i, 1);
         }
 
-        for (let i = zipTexts.length - 1; i >= 0; i--) {
-            const t = zipTexts[i];
+        for (let i = curlosTexts.length - 1; i >= 0; i--) {
+            const t = curlosTexts[i];
             t.y -= 0.7 * ts;
             t.life -= ts;
-            if (t.life <= 0) zipTexts.splice(i, 1);
+            if (t.life <= 0) curlosTexts.splice(i, 1);
         }
 
-        for (let i = zipSparks.length - 1; i >= 0; i--) {
-            const s = zipSparks[i];
+        for (let i = curlosSparks.length - 1; i >= 0; i--) {
+            const s = curlosSparks[i];
             const prog = 1 - (s.life / s.maxLife);
             s.radius = s.targetRadius * prog;
             s.life -= ts;
-            if (s.life <= 0) zipSparks.splice(i, 1);
+            if (s.life <= 0) curlosSparks.splice(i, 1);
         }
     }
 
-    // ===== Çizim =====
     chainHook('onDraw', function (ctx2) {
-        // Zıplayan botlar — shadow + büyük görsel overlay
+        // Zıplayan botlar
         getActiveEnemies().forEach(e => {
-            if (e._zipJumpActive) {
-                const prog = 1 - Math.max(0, e._zipJumpTimer / BOT_JUMP_FRAMES);
+            if (e._curlosJumpActive) {
+                const prog = 1 - Math.max(0, e._curlosJumpTimer / BOT_JUMP_FRAMES);
                 const jumpH = Math.sin(prog * Math.PI);
-                const origRadius = e._zipJumpOrigRadius || 20;
-                
-                // Shadow at ground level
+                const origRadius = e._curlosJumpOrigRadius || 20;
                 ctx2.save();
                 ctx2.globalAlpha = 0.55 * (1 - jumpH * 0.7);
                 ctx2.beginPath();
-                ctx2.ellipse(e.x, e._zipJumpOrigY + origRadius * 0.4,
+                ctx2.ellipse(e.x, e._curlosJumpOrigY + origRadius * 0.4,
                              origRadius * (0.9 + jumpH * 0.3),
                              origRadius * 0.35, 0, 0, Math.PI * 2);
                 ctx2.fillStyle = 'rgba(0,0,0,0.6)';
                 ctx2.fill();
                 ctx2.restore();
-                
-                // Bot overlay at elevated position
                 const scale = 1 + jumpH * 0.3;
                 ctx2.save();
                 ctx2.translate(e.x, e.y);
@@ -696,31 +672,28 @@
             ctx2.restore();
         }
 
-        // ===== Ana saldırı ince nişan çizgisi =====
-        if (player.charType === CHAR_ID && player._zipHideBaseAim && !player.isDead && player.ammo >= 1) {
+        // Hayalet gibi dolu dikdörtgen nişan çizgisi
+        if (player.charType === CHAR_ID && player._curlosHideBaseAim && !player.isDead && player.ammo >= 1) {
             const ang = aimData.angle;
-            const endX = player.x + Math.cos(ang) * BULLET_RANGE;
-            const endY = player.y + Math.sin(ang) * BULLET_RANGE;
             ctx2.save();
-            ctx2.beginPath();
-            ctx2.moveTo(player.x, player.y);
-            ctx2.lineTo(endX, endY);
-            ctx2.strokeStyle = 'rgba(142,68,173,0.65)';
+            ctx2.translate(player.x, player.y);
+            ctx2.rotate(ang);
+            ctx2.fillStyle = 'rgba(142, 68, 173, 0.18)';
+            ctx2.fillRect(0, -10, BULLET_RANGE, 20);
+            ctx2.strokeStyle = 'rgba(142, 68, 173, 0.55)';
             ctx2.lineWidth = 1.5;
-            ctx2.setLineDash([12, 8]);
-            ctx2.stroke();
-            ctx2.setLineDash([]);
+            ctx2.strokeRect(0, -10, BULLET_RANGE, 20);
             ctx2.beginPath();
-            ctx2.arc(endX, endY, 4, 0, Math.PI * 2);
+            ctx2.arc(BULLET_RANGE, 0, 6, 0, Math.PI * 2);
             ctx2.fillStyle = C_MAIN;
             ctx2.fill();
             ctx2.strokeStyle = C_SPARK;
-            ctx2.lineWidth = 1.5;
+            ctx2.lineWidth = 2;
             ctx2.stroke();
             ctx2.restore();
         }
 
-        // ===== Dash nişan çizgisi =====
+        // Dash nişan çizgisi (ninja gibi)
         if (player.charType === CHAR_ID && gadAim.active && player.gadgetReady && !player.isDead && !dashState.active) {
             const ang = gadAim.angle;
             const startX = player.x, startY = player.y;
@@ -736,17 +709,20 @@
             ctx2.stroke();
             ctx2.setLineDash([]);
             ctx2.beginPath();
-            ctx2.arc(endX, endY, 6, 0, Math.PI * 2);
-            ctx2.fillStyle = C_MAIN;
+            ctx2.arc(endX, endY, 10, 0, Math.PI * 2);
+            ctx2.fillStyle = 'rgba(142,68,173,0.3)';
             ctx2.fill();
             ctx2.strokeStyle = C_SPARK;
             ctx2.lineWidth = 2;
             ctx2.stroke();
+            ctx2.beginPath();
+            ctx2.arc(endX, endY, 4, 0, Math.PI * 2);
+            ctx2.fillStyle = C_MAIN;
+            ctx2.fill();
             ctx2.restore();
         }
 
-        // Mermiler
-        zipBullets.forEach(b => {
+        curlosBullets.forEach(b => {
             b.trail.forEach(pt => {
                 const alpha = (pt.life / 15) * 0.5;
                 ctx2.save();
@@ -757,7 +733,6 @@
                 ctx2.fill();
                 ctx2.restore();
             });
-
             ctx2.save();
             ctx2.translate(b.x, b.y);
             const grad = ctx2.createRadialGradient(0, 0, 0, 0, 0, 12);
@@ -775,12 +750,11 @@
             ctx2.restore();
         });
 
-        // Ulti hedef göstergesi
-        if (ultiState.active && player.charType === CHAR_ID) {
+        if (player._curlosUltiPending && player.charType === CHAR_ID) {
             ctx2.save();
             ctx2.globalAlpha = 0.4;
             ctx2.beginPath();
-            ctx2.arc(ultiState.targetX, ultiState.targetY, ULTI_RADIUS, 0, Math.PI * 2);
+            ctx2.arc(ultiTarget.x, ultiTarget.y, ULTI_RADIUS, 0, Math.PI * 2);
             ctx2.strokeStyle = C_MAIN;
             ctx2.lineWidth = 3;
             ctx2.setLineDash([8, 6]);
@@ -789,8 +763,7 @@
             ctx2.restore();
         }
 
-        // Sparks
-        zipSparks.forEach(s => {
+        curlosSparks.forEach(s => {
             const alpha = s.life / s.maxLife;
             ctx2.save();
             ctx2.globalAlpha = alpha;
@@ -807,7 +780,7 @@
             ctx2.restore();
         });
 
-        zipParticles.forEach(p => {
+        curlosParticles.forEach(p => {
             const alpha = Math.min(1, p.life / 15);
             ctx2.save();
             ctx2.globalAlpha = alpha;
@@ -818,7 +791,7 @@
             ctx2.restore();
         });
 
-        zipTexts.forEach(t => {
+        curlosTexts.forEach(t => {
             const alpha = Math.min(1, t.life / 20);
             ctx2.save();
             ctx2.globalAlpha = alpha;
@@ -832,7 +805,6 @@
             ctx2.restore();
         });
 
-        // Ulti drag göstergesi
         if (player.charType === CHAR_ID && ultiDrag.active && player.ultReady && !player.isDead) {
             const pullMag = ultiDrag.pull < 0.05 ? 1 : ultiDrag.pull;
             const dist = ULTI_PLACE_MIN + (ULTI_PLACE_MAX - ULTI_PLACE_MIN) * pullMag;
