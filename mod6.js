@@ -1,7 +1,7 @@
-// ========== mod10.js (TURUNCU BASKIN) - v7 ==========
-// - Piyade, Turuncu, Kamikaze, Mini-Kamikaze, Havan (3s ateş, 400 hasar, 100 radius)
-// - RANGER: 1000 HP, 15s spawn (max 1), 5 mermi × 100 hasar, 0.4s aralık, 2s cooldown
-//   Aura: heal 200/3s, +0.6 hız, max 3 bot, aura içindeki kamikazeler +200 duvar hasarı
+// ========== mod10.js (TURUNCU BASKIN) - v8 ==========
+// - Piyade, Turuncu, Kamikaze, Mini-Kamikaze, Havan
+// - RANGER: 1000 HP, 40s spawn (max 1), menzil 120 (çok yakın), aura 60, hız 2.2
+// - Ranger ilk mermi anında çıkar (gecikme yok)
 // - Yuva aktif: her 10 kill'de bir yuva spawn, slime üretir
 // - Siper canı 2500
 
@@ -77,16 +77,16 @@
     // ---- Ranger ----
     const RANGER_HP = 1000;
     const RANGER_RADIUS = 18;
-    const RANGER_SPEED = 1.0;
-    const RANGER_RANGE = 250;
+    const RANGER_SPEED = 2.2;             // Hızlı
+    const RANGER_RANGE = 120;             // Çok yakın menzil
     const RANGER_BULLET_DMG = 100;
     const RANGER_BULLET_SPEED = PLAYER_BULLET_SPEED * 0.8;
-    const RANGER_SHOT_INTERVAL = 24;   // 0.4s
+    const RANGER_SHOT_INTERVAL = 24;      // 0.4s
     const RANGER_SHOT_COUNT = 5;
-    const RANGER_COOLDOWN = 120;       // 2s
-    const RANGER_SPAWN_INTERVAL = 900; // 15s
-    const RANGER_SPAWN_WARN = 180;     // 3s
-    const RANGER_AURA_RADIUS = 150;
+    const RANGER_COOLDOWN = 120;          // 2s
+    const RANGER_SPAWN_INTERVAL = 2400;   // 40 saniye
+    const RANGER_SPAWN_WARN = 180;        // 3s
+    const RANGER_AURA_RADIUS = 60;        // Çok küçük aura
     const RANGER_AURA_HEAL = 200;
     const RANGER_AURA_HEAL_INTERVAL = 180; // 3s
     const RANGER_AURA_SPEED_BONUS = 0.6;
@@ -431,7 +431,6 @@
         onUpdate: function (ts) {
             slimeTimer = 0; stationaryTimer = 0;
             boomerangTimer = 0; fogBotTimer = 0;
-            // NOT: spawnIndicators ve nests TEMİZLENMEZ — yuva spawn çalışsın
 
             bot.isActive = false; bot.isDead = true;
             bot2.isActive = false; bot2.isDead = true; bot2.hp = 0;
@@ -719,7 +718,7 @@
                         } else if (!player.isDead && !player.isInvisible && dP < RANGER_RANGE) {
                             rangerShotState = 'shooting';
                             rangerShotCount = 0;
-                            rangerShotTimer = 0;
+                            rangerShotTimer = RANGER_SHOT_INTERVAL; // İlk mermi anında çıksın
                         }
                     }
 
@@ -771,7 +770,6 @@
                     });
                 }
             } else {
-                // Ranger yoksa buff'ları temizle
                 const allBots = [piyade, turuncuBot, ...kamikazeler, ...miniKamikazeler, ...slimeBots].filter(b => b && !b.isDead);
                 allBots.forEach(b => {
                     if (b._rangerBuffed) {
@@ -873,17 +871,17 @@
         // Ranger aura
         if (ranger && !ranger.isDead) {
             ctx2.save();
-            ctx2.globalAlpha = 0.18 + Math.sin(Date.now() / 300) * 0.08;
+            ctx2.globalAlpha = 0.25 + Math.sin(Date.now() / 200) * 0.1;
             ctx2.beginPath();
             ctx2.arc(ranger.x, ranger.y, RANGER_AURA_RADIUS, 0, Math.PI * 2);
             ctx2.fillStyle = '#f1c40f';
             ctx2.fill();
-            ctx2.globalAlpha = 0.7;
+            ctx2.globalAlpha = 0.8;
             ctx2.beginPath();
             ctx2.arc(ranger.x, ranger.y, RANGER_AURA_RADIUS, 0, Math.PI * 2);
             ctx2.strokeStyle = '#f1c40f';
             ctx2.lineWidth = 2;
-            ctx2.setLineDash([10, 8]);
+            ctx2.setLineDash([6, 6]);
             ctx2.stroke();
             ctx2.setLineDash([]);
             ctx2.restore();
@@ -1009,14 +1007,11 @@
             ctx2.translate(b.x, b.y);
             ctx2.fillStyle = '#7f1d1d'; ctx2.fillRect(-30, -b.radius - 18, 60, 6);
             ctx2.fillStyle = '#c0392b'; ctx2.fillRect(-30, -b.radius - 18, 60 * (b.hp / b.maxHp), 6);
-            // Gölge
             ctx2.fillStyle = 'rgba(0,0,0,0.3)';
             ctx2.beginPath(); ctx2.ellipse(0, b.radius * 0.5, b.radius * 1.1, b.radius * 0.35, 0, 0, Math.PI * 2); ctx2.fill();
-            // Taş gövde (yuvarlak)
             ctx2.fillStyle = '#5d4037';
             ctx2.beginPath(); ctx2.arc(0, 0, b.radius, 0, Math.PI * 2); ctx2.fill();
             ctx2.strokeStyle = '#3e2723'; ctx2.lineWidth = 3; ctx2.stroke();
-            // Taş blok detayları (kenarlar)
             ctx2.fillStyle = '#3e2723';
             for (let i = 0; i < 6; i++) {
                 const a = (i / 6) * Math.PI * 2;
@@ -1024,19 +1019,14 @@
                 const by = Math.sin(a) * (b.radius - 4);
                 ctx2.beginPath(); ctx2.arc(bx, by, 4, 0, Math.PI * 2); ctx2.fill();
             }
-            // İç taş (açık)
             ctx2.fillStyle = '#8d6e63';
             ctx2.beginPath(); ctx2.arc(0, 0, b.radius - 8, 0, Math.PI * 2); ctx2.fill();
-            // Namlu (üstte)
             ctx2.fillStyle = '#1a0a00';
             ctx2.beginPath(); ctx2.arc(0, -4, 10, 0, Math.PI * 2); ctx2.fill();
-            // Metal halka
             ctx2.strokeStyle = '#808080'; ctx2.lineWidth = 2;
             ctx2.beginPath(); ctx2.arc(0, -4, 10, 0, Math.PI * 2); ctx2.stroke();
-            // Namlu içi
             ctx2.fillStyle = '#000';
             ctx2.beginPath(); ctx2.arc(0, -4, 6, 0, Math.PI * 2); ctx2.fill();
-            // Ateş anı parlaması
             if (havanShootTimer > HAVAN_SHOOT_INTERVAL - 10 && havanShootTimer <= HAVAN_SHOOT_INTERVAL) {
                 ctx2.globalAlpha = (havanShootTimer - (HAVAN_SHOOT_INTERVAL - 10)) / 10;
                 ctx2.fillStyle = '#ff5500';
@@ -1050,18 +1040,14 @@
         if (ranger && !ranger.isDead) {
             ctx2.save();
             ctx2.translate(ranger.x, ranger.y);
-            // HP bar
             ctx2.fillStyle = '#e74c3c'; ctx2.fillRect(-18, -ranger.radius - 12, 36, 4);
             ctx2.fillStyle = '#2ecc71'; ctx2.fillRect(-18, -ranger.radius - 12, 36 * (ranger.hp / ranger.maxHp), 4);
-            // Gövde
             ctx2.fillStyle = '#f1c40f';
             ctx2.beginPath(); ctx2.arc(0, 0, ranger.radius, 0, Math.PI * 2); ctx2.fill();
             ctx2.strokeStyle = '#b7950b'; ctx2.lineWidth = 2; ctx2.stroke();
-            // Kırmızı haç (healer)
             ctx2.fillStyle = '#c0392b';
             ctx2.fillRect(-3, -8, 6, 16);
             ctx2.fillRect(-8, -3, 16, 6);
-            // Ateş parlaması
             if (rangerShotState === 'shooting') {
                 ctx2.globalAlpha = 0.4 + Math.sin(Date.now() / 60) * 0.3;
                 ctx2.beginPath(); ctx2.arc(0, 0, ranger.radius + 5, 0, Math.PI * 2);
@@ -1075,7 +1061,6 @@
         havanMermiler.forEach(m => {
             if (m.isDead) return;
             const prog = 1 - (m.flightTimer / m.maxFlight);
-            // Yer halkası
             ctx2.save();
             ctx2.globalAlpha = 0.5 + Math.sin(Date.now() / 100) * 0.3;
             ctx2.beginPath();
@@ -1092,18 +1077,15 @@
             const currentY = m.startY + (m.y - m.startY) * prog;
             const arcHeight = Math.sin(prog * Math.PI) * 120;
             ctx2.save();
-            // Gölge
             ctx2.globalAlpha = 0.3;
             ctx2.beginPath();
             ctx2.ellipse(m.x, m.y, 12 * prog, 5 * prog, 0, 0, Math.PI * 2);
             ctx2.fillStyle = '#000'; ctx2.fill();
             ctx2.globalAlpha = 1;
-            // Top
             ctx2.beginPath();
             ctx2.arc(currentX, currentY - arcHeight, 9, 0, Math.PI * 2);
             ctx2.fillStyle = '#7f1d1d'; ctx2.fill();
             ctx2.strokeStyle = '#c0392b'; ctx2.lineWidth = 2; ctx2.stroke();
-            // Parlama
             ctx2.beginPath();
             ctx2.arc(currentX - 2, currentY - arcHeight - 2, 3, 0, Math.PI * 2);
             ctx2.fillStyle = 'rgba(255,255,255,0.4)'; ctx2.fill();
@@ -1146,7 +1128,6 @@
                 ctx2.strokeStyle = '#e67e22'; ctx2.lineWidth = 2; ctx2.stroke();
                 ctx2.restore();
             }
-            // Ranger aura içinde mi?
             const inAura = ranger && !ranger.isDead && getDist(k, ranger) < RANGER_AURA_RADIUS;
             ctx2.save();
             ctx2.translate(k.x, k.y);
@@ -1211,5 +1192,5 @@
 
     window.GAME_EXT.modKartiEkle('turuncu', 'Turuncu Baskın', 'Piyade + Turuncu + Kamikaze + Havan + Ranger + Yuvalar');
 
-    console.log('[MOD YÜKLENDİ] turuncu (v7)');
+    console.log('[MOD YÜKLENDİ] turuncu (v8)');
 })();
