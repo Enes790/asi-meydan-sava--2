@@ -1,11 +1,12 @@
-// ========== mod10.js (TURUNCU BASKIN) - DÜZELTİLMİŞ ==========
-// - Turuncu bot: Klasik stationary tipi, sınırsız menzil, ciritçi gibi spawn.
-// - Turuncu Slime: Orijinal slime mekaniğinin turuncu versiyonu.
-//   * Büyük spawn olur, ölünce 2 orta, orta ölünce 2 küçük, küçük tamamen ölür.
-//   * Görünüm: göz yok, iki iç içe turuncu daire, içteki öne kaymış.
-//   * Her bölünmede/ölümde 4 mermi bırakır (temasla ölürse bırakmaz).
-//   * Mermiler açılı, hafif eğim alır, menzilli, sipere 50 hasar.
-// - Siperler gri, can 2.5 kat (2000).
+// ========== mod10.js (TURUNCU BASKIN) - DÜZELTİLMİŞ v2 ==========
+// Düzeltmeler:
+// - Slime mermi life: 8 → 120 (mekanik kurtarıldı)
+// - addFloatingNumber → floatingNumbers.push (bedava ulti bitti)
+// - onUpdate'te bot2/nest temizliği (arena artıkları)
+// - onReset'te bot/bot2 re-enable
+// - getExtraEnemies: [] → undefined (chain bozulmadı)
+// - Çift bar pozisyonu hizalandı
+// - Arena dönüşü için diff-normal/diff-easy listener
 
 (function () {
     'use strict';
@@ -33,6 +34,7 @@
     const SLIME_MERMI_MENZIL = 350;
     const SLIME_MERMI_EGIM = 0.03;
     const SLIME_MERMI_SIPER_HASAR = 50;
+    const SLIME_MERMI_LIFE = 120; // DÜZELTME: 8 → 120
     const SLIME_MERMI_HASAR = { 0: 100, 1: 50, 2: 30 };
 
     const SIPER_CAN = 2000;
@@ -48,6 +50,18 @@
     let slimeSpawnUyarilari = [];
     let slimeMermileri = [];
 
+    // DÜZELTME: Bedava ulti için özel hasar yazısı (base charge bypass)
+    function rawDamageText(x, y, val, color) {
+        floatingNumbers.push({
+            x: x + (Math.random() - .5) * 20,
+            y: y - 20,
+            val: val,
+            color: color || "#e74c3c",
+            life: 60,
+            opacity: 1
+        });
+    }
+
     window.GAME_EXT.registerMode(MOD_ID, {
         label: 'Turuncu Baskın',
         onStart: function () {
@@ -60,8 +74,9 @@
             slimeSpawnUyarilari = [];
             slimeMermileri = [];
 
-            bot.isActive = false; bot.isDead = true;
-            bot2.isActive = false; bot2.isDead = true;
+            // Arena botlarını kapat
+            bot.isActive = false; bot.isDead = true; bot.x = -9999; bot.y = -9999;
+            bot2.isActive = false; bot2.isDead = true; bot2.x = -9999; bot2.y = -9999;
             slimeBots = []; stationaryBots = [];
             boomerangBots = []; fogBots = [];
             nests = []; spawnIndicators = [];
@@ -76,9 +91,20 @@
         },
 
         onUpdate: function (ts) {
+            // Base'in spawn timer'larını sıfırla
             slimeTimer = 0; stationaryTimer = 0;
             boomerangTimer = 0; fogBotTimer = 0;
             spawnIndicators = [];
+
+            // DÜZELTME: Arena bot2 ve nest'i her frame temizle
+            bot.isActive = false; bot.isDead = true;
+            bot2.isActive = false; bot2.isDead = true;
+            bot2.hp = 0;
+            bot2.x = -9999; bot2.y = -9999;
+            if (nests.length > 0) {
+                nests.forEach(n => { n.hp = 0; n.isDead = true; });
+                nests.length = 0;
+            }
 
             obstacles.forEach(o => {
                 if (!o._griSiper) {
@@ -131,6 +157,8 @@
                     b.x = clampPos(b.x, b.radius + WALL_THICKNESS, canvas.width - b.radius - WALL_THICKNESS);
                     b.y = clampPos(b.y, b.radius + WALL_THICKNESS, canvas.height - b.radius - WALL_THICKNESS);
                     resolveObstacleCollision(b);
+                    b.x = clampPos(b.x, b.radius + WALL_THICKNESS, canvas.width - b.radius - WALL_THICKNESS);
+                    b.y = clampPos(b.y, b.radius + WALL_THICKNESS, canvas.height - b.radius - WALL_THICKNESS);
                 }
             }
 
@@ -157,17 +185,14 @@
                 const s = slimeBotlar[i];
                 if (s.isDead) { slimeBotlar.splice(i, 1); continue; }
 
-                // Can kontrolü
                 if (s.hp <= 0) {
                     s.isDead = true;
                     const temaslaOldu = s.temaslaOldu || false;
 
-                    // Temasla ölmediyse mermi bırak
                     if (!temaslaOldu) {
                         slimeMermiBirak(s);
                     }
 
-                    // Bölünme
                     if (s.stage === 0) {
                         slimeDogur(s.x + 15, s.y + 15, 1);
                         slimeDogur(s.x - 15, s.y - 15, 1);
@@ -181,7 +206,6 @@
                     continue;
                 }
 
-                // Hareket (oyuncuya doğru)
                 const canSee = !player.isDead && !player.isInvisible;
                 if (canSee) {
                     s.angle = Math.atan2(player.y - s.y, player.x - s.x);
@@ -189,7 +213,6 @@
                     s.y += Math.sin(s.angle) * s.speed * ts;
                 }
 
-                // Knockback
                 if (Math.abs(s.kbX) > 0.1 || Math.abs(s.kbY) > 0.1) {
                     s.x += s.kbX * ts; s.y += s.kbY * ts;
                     s.kbX *= 0.85; s.kbY *= 0.85;
@@ -198,9 +221,11 @@
                 s.x = clampPos(s.x, s.radius + WALL_THICKNESS, canvas.width - s.radius - WALL_THICKNESS);
                 s.y = clampPos(s.y, s.radius + WALL_THICKNESS, canvas.height - s.radius - WALL_THICKNESS);
                 resolveObstacleCollision(s);
+                s.x = clampPos(s.x, s.radius + WALL_THICKNESS, canvas.width - s.radius - WALL_THICKNESS);
+                s.y = clampPos(s.y, s.radius + WALL_THICKNESS, canvas.height - s.radius - WALL_THICKNESS);
 
-                // Temas hasarı
-                if (!player.isDead && getDist(s, player) < s.radius + player.radius) {
+                // DÜZELTME: Görünmezken temas hasarı yok
+                if (!player.isDead && !player.isInvisible && getDist(s, player) < s.radius + player.radius) {
                     player.hp -= SLIME_TEMAS_HASAR;
                     addFloatingNumber(player.x, player.y, SLIME_TEMAS_HASAR, "#e74c3c");
                     player.lastHitTime = Date.now();
@@ -214,7 +239,6 @@
                 const m = slimeMermileri[i];
                 if (m.isDead) { slimeMermileri.splice(i, 1); continue; }
 
-                // Hafif eğim
                 if (!player.isDead) {
                     const hedefAci = Math.atan2(player.y - m.y, player.x - m.x);
                     const mevcutAci = Math.atan2(m.vy, m.vx);
@@ -240,22 +264,21 @@
                     m.isDead = true; continue;
                 }
 
-                // Sipere çarpma
                 let sipereCarpti = false;
                 for (const o of obstacles.concat(cactusWalls || [])) {
                     if (getDist(m, o) < o.radius + m.radius) {
                         o.hp -= SLIME_MERMI_SIPER_HASAR;
-                        addFloatingNumber(o.x, o.y, SLIME_MERMI_SIPER_HASAR, "#e67e22");
+                        // DÜZELTME: rawDamageText — bedava ulti yok
+                        rawDamageText(o.x, o.y, SLIME_MERMI_SIPER_HASAR, "#e74c3c");
                         sipereCarpti = true;
                         break;
                     }
                 }
                 if (sipereCarpti) { m.isDead = true; continue; }
 
-                // Oyuncuya çarpma
                 if (!player.isDead && getDist(m, player) < player.radius + m.radius) {
                     player.hp -= m.hasar;
-                    addFloatingNumber(player.x, player.y, m.hasar, "#e74c3c");
+                    rawDamageText(player.x, player.y, m.hasar, "#e74c3c");
                     player.lastHitTime = Date.now();
                     m.isDead = true; continue;
                 }
@@ -270,6 +293,12 @@
             slimeSpawnTimer = 0;
             slimeSpawnUyarilari = [];
             slimeMermileri = [];
+            // DÜZELTME: Arena botlarını geri aç
+            bot.isActive = true; bot.isDead = false; bot.hp = bot.maxHp;
+            bot.x = canvas.width - 150; bot.y = 300; bot.kbX = bot.kbY = 0;
+            bot2.isActive = false; bot2.isDead = true; bot2.hp = bot2.maxHp;
+            bot2.respawnTimer = -9999;
+            botsKilled = 0;
         }
     });
 
@@ -320,16 +349,15 @@
                 vy: Math.sin(a) * SLIME_MERMI_HIZ,
                 radius: 8,
                 hasar: hasar,
-                life: 8,
+                life: SLIME_MERMI_LIFE, // DÜZELTME
                 isDead: false
             });
         }
-        // YENİ: Yazı çıkmasın (addFloatingNumber kaldırıldı)
     }
 
     // ========== DÜŞMAN LİSTESİNE EKLE ==========
     window.GAME_EXT.chainHook('getExtraEnemies', function () {
-        if (window.GAME_MODE !== MOD_ID) return [];
+        if (window.GAME_MODE !== MOD_ID) return undefined; // DÜZELTME: [] → undefined
         const liste = [];
         if (turuncuBot && !turuncuBot.isDead) liste.push(turuncuBot);
         liste.push(...slimeBotlar.filter(s => !s.isDead));
@@ -340,7 +368,7 @@
     window.GAME_EXT.chainHook('onDraw', function (ctx2) {
         if (window.GAME_MODE !== MOD_ID || !gameStarted) return;
 
-        // Siperler gri
+        // Siperler gri (base çiziminin üstüne)
         for (const o of obstacles) {
             ctx2.save();
             ctx2.translate(o.x, o.y);
@@ -351,6 +379,7 @@
             ctx2.strokeStyle = '#505050';
             ctx2.lineWidth = 2;
             ctx2.stroke();
+            // Bar base ile aynı yere (üst üste binsin)
             ctx2.fillStyle = '#e74c3c';
             ctx2.fillRect(-15, -o.radius - 15, 30, 4);
             ctx2.fillStyle = '#2ecc71';
@@ -394,15 +423,16 @@
             ctx2.restore();
         });
 
-        // Turuncu bot
+        // Turuncu bot (base çiziminin üstüne)
         if (turuncuBot && !turuncuBot.isDead) {
             const b = turuncuBot;
             ctx2.save();
             ctx2.translate(b.x, b.y);
+            // Bar base ile aynı yere (üst üste)
             ctx2.fillStyle = '#e74c3c';
-            ctx2.fillRect(-b.radius, -b.radius - 12, b.radius * 2, 5);
+            ctx2.fillRect(-20, -b.radius - 15, 40, 5);
             ctx2.fillStyle = '#2ecc71';
-            ctx2.fillRect(-b.radius, -b.radius - 12, b.radius * 2 * (b.hp / b.maxHp), 5);
+            ctx2.fillRect(-20, -b.radius - 15, 40 * (b.hp / b.maxHp), 5);
             ctx2.rotate(b.angle);
             ctx2.fillStyle = '#e67e22';
             ctx2.beginPath();
@@ -433,18 +463,17 @@
             ctx2.restore();
         }
 
-        // Turuncu Slime'lar
+        // Turuncu Slime'lar (base çiziminin üstüne)
         slimeBotlar.forEach(s => {
             if (s.isDead) return;
             ctx2.save();
             ctx2.translate(s.x, s.y);
-            const barW = s.radius * 2;
+            // Bar base ile aynı yere
             ctx2.fillStyle = '#e74c3c';
-            ctx2.fillRect(-barW / 2, -s.radius - 12, barW, 4);
+            ctx2.fillRect(-20, -s.radius - 15, 40, 5);
             ctx2.fillStyle = '#2ecc71';
-            ctx2.fillRect(-barW / 2, -s.radius - 12, barW * (s.hp / s.maxHp), 4);
+            ctx2.fillRect(-20, -s.radius - 15, 40 * (s.hp / s.maxHp), 5);
             ctx2.rotate(s.angle);
-            // Dış daire (gövde) - turuncu
             ctx2.fillStyle = '#e67e22';
             ctx2.beginPath();
             ctx2.arc(0, 0, s.radius, 0, Math.PI * 2);
@@ -452,7 +481,6 @@
             ctx2.strokeStyle = '#a04000';
             ctx2.lineWidth = 2;
             ctx2.stroke();
-            // İç daire (öne kaymış, koyu turuncu)
             ctx2.fillStyle = '#a04000';
             ctx2.beginPath();
             ctx2.arc(s.radius * 0.4, 0, s.radius * 0.55, 0, Math.PI * 2);
@@ -480,7 +508,22 @@
         });
     });
 
+    // ========== ARENA DÖNÜŞÜ ==========
+    // DÜZELTME: Klasik/Kolay seçilirse GAME_MODE 'arena'ya dönsün
+    (function () {
+        const diffNormal = document.getElementById('diff-normal');
+        const diffEasy = document.getElementById('diff-easy');
+        if (diffNormal) {
+            diffNormal.addEventListener('click', () => { window.GAME_MODE = 'arena'; });
+            diffNormal.addEventListener('touchstart', () => { window.GAME_MODE = 'arena'; }, { passive: true });
+        }
+        if (diffEasy) {
+            diffEasy.addEventListener('click', () => { window.GAME_MODE = 'arena'; });
+            diffEasy.addEventListener('touchstart', () => { window.GAME_MODE = 'arena'; }, { passive: true });
+        }
+    })();
+
     window.GAME_EXT.modKartiEkle('turuncu', 'Turuncu Baskın', 'Gri siperler, turuncu bot + turuncu slime');
 
-    console.log('[MOD YÜKLENDİ] turuncu');
+    console.log('[MOD YÜKLENDİ] turuncu (v2)');
 })();
