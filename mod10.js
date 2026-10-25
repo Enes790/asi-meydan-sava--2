@@ -11,19 +11,19 @@
     const CHAR_SPEED = 3.6;
 
     const DMG_1 = 700;
-    const DMG_2 = 400;
-    const DMG_3 = 100;
+    const DMG_2 = 500;
+    const DMG_3 = 250;
     const BULLET_SPEED = PLAYER_BULLET_SPEED * 0.95;
     const BULLET_RANGE = 280;
     const MAX_BOT_HITS = 3;
     const MAX_WALL_HITS = 6;
     const WALL_RANGE = 150;
     const RELOAD_SPEED = 0.012;
-    const SIIPER_HASAR = 80;
+    const SIIPER_HASAR = 100;
 
     const DASH_MAX_BOUNCE = 4;
     const DASH_DAMAGE = 500;
-    const DASH_SPEED = 16;
+    const DASH_SPEED = 9;
     const DASH_LEG = 120;
     const DASH_COOLDOWN = 900;
 
