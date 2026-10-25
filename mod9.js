@@ -11,7 +11,7 @@
     const CHAR_SPEED = 3.4;
 
     // Ana saldırı
-    const BULLET_DAMAGE = 600;
+    const BULLET_DAMAGE = 720;
     const BULLET_MULT = 1.2;
     const BULLET_PIERCE = 3;
     const BULLET_RANGE = 280;
@@ -20,12 +20,12 @@
 
     // Normal patlama (dışa iter)
     const EXPL_RADIUS = 43;
-    const EXPL_DAMAGE = 400;
+    const EXPL_DAMAGE = 500;
     const EXPL_PUSH = 30;
 
     // Büyük patlama (Aks 1, içe çeker)
-    const BIG_RADIUS = 90;
-    const BIG_DAMAGE = 500;
+    const BIG_RADIUS = 100;
+    const BIG_DAMAGE = 800;
     const BIG_PULL = 50;
     const BIG_SLOW_FACTOR = 0.7;
     const BIG_SLOW_DURATION = 60;
@@ -39,15 +39,15 @@
 
     // Alev Saçılımı (Aks 2)
     const SACILIM_RADIUS = 150;
-    const SACILIM_DAMAGE = 300;
-    const SACILIM_HEAL_BASE = 200;
-    const SACILIM_HEAL_PER = 100;
+    const SACILIM_DAMAGE = 600;
+    const SACILIM_HEAL_BASE = 500;
+    const SACILIM_HEAL_PER = 200;
     const SACILIM_COOLDOWN = 1200;
 
     // Ulti
     const ULTI_RADIUS = 150;
-    const ULTI_DAMAGE = 600;
-    const ULTI_STUN_MS = 2000;
+    const ULTI_DAMAGE = 800;
+    const ULTI_STUN_MS = 2500;
     const ULTI_BURN_DURATION = 180;
     const ULTI_BURN_DPS = 250;
 
