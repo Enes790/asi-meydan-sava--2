@@ -8,7 +8,7 @@
     const CHAR_SPEED = 3.8;
 
     const DART_COUNT = 3;
-    const DART_DAMAGE = 250;
+    const DART_DAMAGE = 400;
     const DART_SPEED = PLAYER_BULLET_SPEED * 0.9;
     const DART_RANGE = 320;
     const DART_SPREAD = Math.PI * 30 / 180;
@@ -16,30 +16,30 @@
     const DART_SLOW_FACTOR = 0.70;
     const DART_SLOW_DURATION = 60;
 
-    const BUZ_RADIUS = 90;
-    const BUZ_SLOW = 0.3;
-    const BUZ_SLOW_DURATION = 180;
-    const BUZ_SILENCE_MS = 2000;
+    const BUZ_RADIUS = 130;
+    const BUZ_SLOW = 0.2;
+    const BUZ_SLOW_DURATION = 250;
+    const BUZ_SILENCE_MS = 3000;
     const BUZ_COOLDOWN = 900;
 
     const NEFES_RANGE = 170;
     const NEFES_HALF_ANGLE = Math.PI / 4;
-    const NEFES_MAX = 4;
-    const NEFES_DOT_TOTAL = 400;
+    const NEFES_MAX = 5;
+    const NEFES_DOT_TOTAL = 600;
     const NEFES_DURATION = 180;
-    const NEFES_SILENCE_MS = 2000;
-    const NEFES_BURST = 400;
-    const NEFES_SPLASH = 400;
-    const NEFES_SPLASH_RADIUS = 60;
-    const NEFES_COOLDOWN = 1000;
+    const NEFES_SILENCE_MS = 1500;
+    const NEFES_BURST = 600;
+    const NEFES_SPLASH = 600;
+    const NEFES_SPLASH_RADIUS = 90;
+    const NEFES_COOLDOWN = 1400;
 
     const ULTI_RADIUS = 114;
     const ULTI_PLACE_MAX = 300;
     const ULTI_PLACE_MIN = 80;
     const ULTI_DELAY = 180;
     const ULTI_SLOW_FACTOR = 0.56;
-    const ULTI_BASE_DMG = 650;
-    const ULTI_PER_BOT = 170;
+    const ULTI_BASE_DMG = 850;
+    const ULTI_PER_BOT = 280;
     const ULTI_MAX_DMG = 2300;
 
     window.GAME_EXT.characters[CHAR_ID] = { color: CHAR_COLOR, hp: CHAR_HP, speed: CHAR_SPEED };
