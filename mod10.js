@@ -1,46 +1,40 @@
-// ========== mod29.js (CURLOS) - v5 (Neon Dash) ==========
-// - Renk: Neon Turkuaz / Elektrik Mavisi
-// - Hasar: 700 -> 500 -> 250 (Sırasıyla 1., 2. ve 3. zıplama)
-// - Dash: Hız 12'ye düşürüldü, ekran sarsıntısı ve parçacık eklendi.
-// - NaN Koruması: fireUlti ve triggerBotJump fonksiyonlarına güvenlik kontrolü eklendi.
-// - Zıplayan Bot Kaskları: Çizim orijinal boyut üzerinden yapılarak kaskların kaybolması engellendi.
+// ========== mod29.js (CURLOS) - v6 (BUG FIX) ==========
+// - BASE ÇİZİM SARMALAYICI: Zıplayan botlar base tarafından çizilmiyor
+// - PLAYER NaN KURTARICI: Her frame NaN kontrolü + güvenli değere dönüş
+// - TRIGGER BOT JUMP TAM KORUMA: orig değerler de NaN kontrolünden geçiyor
 
 (function () {
     'use strict';
 
     const CHAR_ID = 'curlos';
-    const C_MAIN = '#00e5ff';      // Neon Turkuaz
-    const C_LIGHT = '#80deea';     // Açık Turkuaz
-    const C_ACCENT = '#00b0ff';    // Elektrik Mavisi
+    const C_MAIN = '#00e5ff';
+    const C_LIGHT = '#80deea';
+    const C_ACCENT = '#00b0ff';
     const C_WHITE = '#ffffff';
     const CHAR_HP = 2800;
     const CHAR_SPEED = 3.6;
 
-    // Ana Saldırı (Yeni Hasar Değerleri)
-    const DMG_1 = 700;             // İlk vurulan bot
-    const DMG_2 = 500;             // İkinci vurulan bot
-    const DMG_3 = 250;             // Üçüncü vurulan bot
+    const DMG_1 = 700;
+    const DMG_2 = 500;
+    const DMG_3 = 250;
     const BULLET_SPEED = PLAYER_BULLET_SPEED * 0.95;
     const BULLET_RANGE = 280;
     const MAX_BOT_HITS = 3;
     const MAX_WALL_HITS = 6;
     const WALL_RANGE = 150;
-    const RELOAD_SPEED = 0.012;    // Cephane dolum hızı (Aynı kaldı)
+    const RELOAD_SPEED = 0.012;
     const SIIPER_HASAR = 80;
 
-    // Aksesuar 1 - Seken Dash
     const DASH_MAX_BOUNCE = 4;
     const DASH_DAMAGE = 500;
-    const DASH_SPEED = 12;         // 16'dan 12'ye düşürüldü
+    const DASH_SPEED = 12;
     const DASH_LEG = 120;
     const DASH_COOLDOWN = 900;
 
-    // Aksesuar 2 - Duvarda Can
     const HEAL_PER_WALL = 200;
     const HEAL_MAX = 1000;
     const HEAL_COOLDOWN = 1200;
 
-    // Ulti
     const ULTI_RADIUS = 85;
     const ULTI_DAMAGE = 400;
     const ULTI_JUMP_MAX = 5;
@@ -50,7 +44,6 @@
     const ULTI_PLACE_MIN = 60;
     const ULTI_AIR_TIME = 40;
 
-    // Bot Zıplatma
     const BOT_JUMP_FRAMES = 48;
     const BOT_JUMP_HEIGHT = 65;
     const BOT_JUMP_AOE_RADIUS = 50;
@@ -67,22 +60,33 @@
     let ultiTarget = { x: 0, y: 0 };
     let ultiDrag = { active: false, startX: 0, startY: 0, angle: 0, pull: 0, touchId: null, isMouse: false };
 
+    // ===== BASE ÇİZİM SARMALAYICI =====
+    // Curlos zıplayan botları kendi çizer, base çizmesin (radius 0.1 sorunu)
+    if (!window._curlosOrigDrawEntity) {
+        window._curlosOrigDrawEntity = window.drawEntity;
+        window.drawEntity = function (e, isP) {
+            if (e && e._curlosJumpActive) return;
+            return window._curlosOrigDrawEntity(e, isP);
+        };
+    }
+
     function chainHook(name, fn) {
         const prev = window.GAME_EXT.hooks[name];
         window.GAME_EXT.hooks[name] = function (...args) {
-            let prevResult;
-            if (typeof prev === 'function') prevResult = prev.apply(this, args);
-            const ownResult = fn.apply(this, args);
-            if (typeof prevResult === 'boolean' || typeof ownResult === 'boolean') return !!prevResult || !!ownResult;
-            return ownResult !== undefined ? ownResult : prevResult;
+            let pr; if (typeof prev === 'function') pr = prev.apply(this, args);
+            const or = fn.apply(this, args);
+            if (typeof pr === 'boolean' || typeof or === 'boolean') return !!pr || !!or;
+            return or !== undefined ? or : pr;
         };
     }
 
     function curlosText(x, y, val, isLabel) {
+        if (!Number.isFinite(x) || !Number.isFinite(y)) return;
         curlosTexts.push({ x, y, val, life: 55, maxLife: 55, isLabel: !!isLabel });
     }
 
     function sparkBurst(x, y, n, color) {
+        if (!Number.isFinite(x) || !Number.isFinite(y)) return;
         for (let i = 0; i < (n || 6); i++) {
             const ang = Math.random() * Math.PI * 2;
             const sp = 2 + Math.random() * 4;
@@ -99,9 +103,11 @@
 
     function triggerBotJump(bot) {
         if (!bot || bot.isDead || bot._curlosJumpActive) return false;
-        // NaN Koruması
+        // TAM KORUMA
         if (!Number.isFinite(bot.x) || !Number.isFinite(bot.y)) return false;
         if (!Number.isFinite(bot.radius) || bot.radius <= 0) return false;
+        if (!Number.isFinite(bot.shootInterval)) bot.shootInterval = 1600;
+        if (!Number.isFinite(bot.speed)) bot.speed = 1;
 
         bot._curlosJumpActive = true;
         bot._curlosJumpTimer = BOT_JUMP_FRAMES;
@@ -110,7 +116,7 @@
         bot._curlosJumpOrigRadius = bot.radius;
         bot._curlosJumpOrigInterval = bot.shootInterval;
         bot.speed = 0;
-        bot.radius = 0.1; // Çarpışma için küçültüldü (çizimde orijinal boyut kullanılacak)
+        bot.radius = 0.1;
         bot.shootInterval = 999999;
         return true;
     }
@@ -173,8 +179,8 @@
                 ultiBtn.style.display = 'flex';
                 ultiBtn.style.background = 'radial-gradient(circle, ' + C_MAIN + ', ' + C_ACCENT + ')';
             }
-            gadgetTimerText = document.getElementById('gadget-timer');
-            gadgetTimerText2 = document.getElementById('gadget-timer-2');
+            if (typeof gadgetTimerText !== 'undefined') gadgetTimerText = document.getElementById('gadget-timer');
+            if (typeof gadgetTimerText2 !== 'undefined') gadgetTimerText2 = document.getElementById('gadget-timer-2');
         } else {
             clearCurlosState();
             if (ultiBtn) ultiBtn.style.background = '';
@@ -182,11 +188,11 @@
         }
     };
 
-    // ===== ANA SALDIRI =====
     const originalFire = Player.prototype.fire;
     Player.prototype.fire = function (a, pullOverride) {
         if (this.charType !== CHAR_ID) return originalFire.call(this, a, pullOverride);
         if (this.ammo < 1 || this.isDead || this._curlosUltiPending) return;
+        if (!Number.isFinite(a)) a = this.angle || 0;
         curlosBullets.push({
             x: this.x, y: this.y, sx: this.x, sy: this.y,
             vx: Math.cos(a) * BULLET_SPEED,
@@ -203,31 +209,30 @@
         this.lastShotTime = Date.now();
     };
 
-    // ===== AKS 1: DASH =====
     const originalActivateGadget = Player.prototype.activateGadget;
     Player.prototype.activateGadget = function (a, pull) {
         if (this.charType !== CHAR_ID) return originalActivateGadget.call(this, a, pull);
         if (!this.gadgetReady || this.isDead || dashState.active || this._curlosUltiPending) return;
-        
         const ang = a !== undefined ? a : this.angle;
+        // NaN KORUMASI
+        if (!Number.isFinite(ang)) {
+            console.warn('[CURLOS] Dash angle NaN, iptal');
+            return;
+        }
         dashState.active = true;
         dashState.vx = Math.cos(ang) * DASH_SPEED;
         dashState.vy = Math.sin(ang) * DASH_SPEED;
         dashState.bouncesLeft = DASH_MAX_BOUNCE;
         dashState.hitTargets = new Set();
         dashState.remainingRange = DASH_LEG;
-        
-        // Dash Animasyonu: Ekran Sarsıntısı ve Parçacıklar
         screenShake = 6;
         sparkBurst(this.x, this.y, 15, C_MAIN);
-
         this.gadgetReady = false;
         this.gadgetCooldown = DASH_COOLDOWN;
         if (gadgetBtn) gadgetBtn.classList.add('cooldown');
         if (gadgetTimerText) gadgetTimerText.innerText = Math.ceil(DASH_COOLDOWN / 60) + "s";
     };
 
-    // ===== AKS 2: CAN =====
     const originalActivateGadget2 = Player.prototype.activateGadget2;
     Player.prototype.activateGadget2 = function (a, pull) {
         if (this.charType !== CHAR_ID) return originalActivateGadget2.call(this, a, pull);
@@ -239,14 +244,16 @@
         if (gadgetTimerText2) gadgetTimerText2.innerText = Math.ceil(HEAL_COOLDOWN / 60) + "s";
     };
 
-    // ===== ULTİ =====
     const originalFireUlti = Player.prototype.fireUlti;
     Player.prototype.fireUlti = function (a, pull) {
         if (this.charType !== CHAR_ID) return originalFireUlti.call(this, a, pull);
-        
-        // NaN Koruması
+        // NaN KORUMASI
         if (!Number.isFinite(a)) a = this.angle;
         if (!Number.isFinite(a)) a = 0;
+        if (!Number.isFinite(this.x) || !Number.isFinite(this.y)) {
+            console.warn('[CURLOS] Position NaN, ulti iptal');
+            return;
+        }
         if (pull === undefined || !Number.isFinite(pull)) return;
         if (!this.ultReady || this.isDead || this._curlosUltiPending || dashState.active) return;
 
@@ -254,11 +261,12 @@
         const dist = ULTI_PLACE_MIN + (ULTI_PLACE_MAX - ULTI_PLACE_MIN) * pullMag;
         const tx = clampPos(this.x + Math.cos(a) * dist, WALL_THICKNESS + 30, canvas.width - WALL_THICKNESS - 30);
         const ty = clampPos(this.y + Math.sin(a) * dist, WALL_THICKNESS + 30, canvas.height - WALL_THICKNESS - 30);
-        
+        if (!Number.isFinite(tx) || !Number.isFinite(ty)) return;
+
         ultiTarget.x = tx;
         ultiTarget.y = ty;
         this._curlosUltiPending = true;
-        
+
         this.isJumping = true;
         this.jumpInvulnerable = true;
         this.jumpProgress = 0;
@@ -270,7 +278,7 @@
         this.jumpDamage = 0.01;
         this.jumpKnockback = 0.01;
         this.jumpLabel = " ";
-        
+
         curlosText(this.x, this.y - 40, "ZIPLAT!", true);
         this.ultReady = false;
         this.ultCharge = 0;
@@ -378,13 +386,43 @@
     requestAnimationFrame(curlosLoop);
 
     function curlosUpdate(ts) {
+        // ===== PLAYER NaN KURTARICI (HER FRAME) =====
+        if (!Number.isFinite(player.x) || !Number.isFinite(player.y)) {
+            console.warn('[CURLOS] Player NaN kurtarıldı');
+            player.x = Number.isFinite(player.jumpStartX) ? player.jumpStartX : canvas.width / 2;
+            player.y = Number.isFinite(player.jumpStartY) ? player.jumpStartY : canvas.height / 2;
+            player.isJumping = false;
+            player.jumpInvulnerable = false;
+            player._curlosUltiPending = false;
+        }
+        if (player.isJumping && !Number.isFinite(player.jumpProgress)) {
+            player.jumpProgress = 0;
+            player.isJumping = false;
+            player._curlosUltiPending = false;
+        }
+        // Dash NaN koruması
+        if (dashState.active && (!Number.isFinite(dashState.vx) || !Number.isFinite(dashState.vy))) {
+            dashState.active = false;
+            dashState.vx = 0;
+            dashState.vy = 0;
+        }
+        // Bozuk bot temizle
+        getActiveEnemies().forEach(b => {
+            if (!b) return;
+            if (!Number.isFinite(b.x) || !Number.isFinite(b.y) || !Number.isFinite(b.radius) || b.radius <= 0) {
+                b.hp = 0;
+                b.isDead = true;
+            }
+        });
+        // Bozuk mermi temizle
+        curlosBullets = curlosBullets.filter(b => b && Number.isFinite(b.x) && Number.isFinite(b.y));
+
         if (player.charType === CHAR_ID) {
             if (ultiBtn && ultiBtn.style.display !== 'flex') ultiBtn.style.display = 'flex';
             if (gadgetBtn && gadgetBtn.style.display !== 'flex') gadgetBtn.style.display = 'flex';
             if (gadgetBtn2 && gadgetBtn2.style.display !== 'flex') gadgetBtn2.style.display = 'flex';
         }
 
-        // Bot zıplatma
         const landingBots = [];
         getActiveEnemies().forEach(e => {
             if (e._curlosJumpActive) {
@@ -420,7 +458,6 @@
             sparkBurst(e.x, e.y, 8, C_MAIN);
         });
 
-        // Ulti iniş algılama
         if (player._curlosUltiPending && player.charType === CHAR_ID && !player.isDead) {
             if (!player.isJumping) {
                 player._curlosUltiPending = false;
@@ -456,7 +493,6 @@
             }
         }
 
-        // DASH
         if (dashState.active && !player.isDead) {
             const stepX = dashState.vx * ts;
             const stepY = dashState.vy * ts;
@@ -464,7 +500,6 @@
             player.y += stepY;
             dashState.remainingRange -= Math.hypot(stepX, stepY);
 
-            // Dash sırasında parçacık bırak
             if (Math.random() < 0.5) {
                 curlosParticles.push({
                     x: player.x, y: player.y,
@@ -520,7 +555,6 @@
             }
         }
 
-        // Mermiler
         for (let i = curlosBullets.length - 1; i >= 0; i--) {
             const b = curlosBullets[i];
             if (b.isDead) { curlosBullets.splice(i, 1); continue; }
@@ -597,7 +631,6 @@
             if (botHit) {
                 b.hitTargets.add(botHit);
                 b.botHits++;
-                // YENİ HASAR SİSTEMİ: 700 -> 500 -> 250
                 const dmg = b.botHits === 1 ? DMG_1 : b.botHits === 2 ? DMG_2 : DMG_3;
                 botHit.hp -= dmg;
                 addFloatingNumber(botHit.x, botHit.y, dmg, C_MAIN);
@@ -667,7 +700,6 @@
     }
 
     chainHook('onDraw', function (ctx2) {
-        // Zıplayan botlar (Kask çizimi orijinal radius ile yapılıyor)
         getActiveEnemies().forEach(e => {
             if (e._curlosJumpActive) {
                 const prog = 1 - Math.max(0, e._curlosJumpTimer / BOT_JUMP_FRAMES);
@@ -715,13 +747,12 @@
             ctx2.restore();
         }
 
-        // Hayalet gibi dolu dikdörtgen nişan çizgisi (Neon Renk)
         if (player.charType === CHAR_ID && player._curlosHideBaseAim && !player.isDead && player.ammo >= 1) {
             const ang = aimData.angle;
             ctx2.save();
             ctx2.translate(player.x, player.y);
             ctx2.rotate(ang);
-            ctx2.fillStyle = 'rgba(0, 229, 255, 0.15)'; // Neon Turkuaz dolu
+            ctx2.fillStyle = 'rgba(0, 229, 255, 0.15)';
             ctx2.fillRect(0, -10, BULLET_RANGE, 20);
             ctx2.strokeStyle = 'rgba(0, 229, 255, 0.6)';
             ctx2.lineWidth = 1.5;
@@ -736,7 +767,6 @@
             ctx2.restore();
         }
 
-        // Dash nişan çizgisi
         if (player.charType === CHAR_ID && gadAim.active && player.gadgetReady && !player.isDead && !dashState.active) {
             const ang = gadAim.angle;
             const startX = player.x, startY = player.y;
