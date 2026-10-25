@@ -1,36 +1,46 @@
-// ========== mod31.js (CURLOS) - ZİNCİR USTASI v4 ==========
+// ========== mod29.js (CURLOS) - v5 (Neon Dash) ==========
+// - Renk: Neon Turkuaz / Elektrik Mavisi
+// - Hasar: 700 -> 500 -> 250 (Sırasıyla 1., 2. ve 3. zıplama)
+// - Dash: Hız 12'ye düşürüldü, ekran sarsıntısı ve parçacık eklendi.
+// - NaN Koruması: fireUlti ve triggerBotJump fonksiyonlarına güvenlik kontrolü eklendi.
+// - Zıplayan Bot Kaskları: Çizim orijinal boyut üzerinden yapılarak kaskların kaybolması engellendi.
+
 (function () {
     'use strict';
 
     const CHAR_ID = 'curlos';
-    const C_MAIN = '#8e44ad';
-    const C_LIGHT = '#bb8fce';
-    const C_SPARK = '#f1c40f';
-    const C_WHITE = '#fff';
-    const CHAR_HP = 3000;
+    const C_MAIN = '#00e5ff';      // Neon Turkuaz
+    const C_LIGHT = '#80deea';     // Açık Turkuaz
+    const C_ACCENT = '#00b0ff';    // Elektrik Mavisi
+    const C_WHITE = '#ffffff';
+    const CHAR_HP = 2800;
     const CHAR_SPEED = 3.6;
 
-    const DMG_1 = 700;
-    const DMG_2 = 500;
-    const DMG_3 = 250;
+    // Ana Saldırı (Yeni Hasar Değerleri)
+    const DMG_1 = 700;             // İlk vurulan bot
+    const DMG_2 = 500;             // İkinci vurulan bot
+    const DMG_3 = 250;             // Üçüncü vurulan bot
     const BULLET_SPEED = PLAYER_BULLET_SPEED * 0.95;
     const BULLET_RANGE = 280;
     const MAX_BOT_HITS = 3;
     const MAX_WALL_HITS = 6;
     const WALL_RANGE = 150;
-    const RELOAD_SPEED = 0.012;
-    const SIIPER_HASAR = 100;
+    const RELOAD_SPEED = 0.012;    // Cephane dolum hızı (Aynı kaldı)
+    const SIIPER_HASAR = 80;
 
+    // Aksesuar 1 - Seken Dash
     const DASH_MAX_BOUNCE = 4;
     const DASH_DAMAGE = 500;
-    const DASH_SPEED = 9;
+    const DASH_SPEED = 12;         // 16'dan 12'ye düşürüldü
     const DASH_LEG = 120;
     const DASH_COOLDOWN = 900;
 
+    // Aksesuar 2 - Duvarda Can
     const HEAL_PER_WALL = 200;
     const HEAL_MAX = 1000;
     const HEAL_COOLDOWN = 1200;
 
+    // Ulti
     const ULTI_RADIUS = 85;
     const ULTI_DAMAGE = 400;
     const ULTI_JUMP_MAX = 5;
@@ -40,6 +50,7 @@
     const ULTI_PLACE_MIN = 60;
     const ULTI_AIR_TIME = 40;
 
+    // Bot Zıplatma
     const BOT_JUMP_FRAMES = 48;
     const BOT_JUMP_HEIGHT = 65;
     const BOT_JUMP_AOE_RADIUS = 50;
@@ -80,7 +91,7 @@
                 vx: Math.cos(ang) * sp, vy: Math.sin(ang) * sp,
                 size: 1.5 + Math.random() * 2,
                 life: 15 + Math.random() * 15, maxLife: 30,
-                color: color || C_SPARK,
+                color: color || C_ACCENT,
                 gravity: 0.05
             });
         }
@@ -88,6 +99,10 @@
 
     function triggerBotJump(bot) {
         if (!bot || bot.isDead || bot._curlosJumpActive) return false;
+        // NaN Koruması
+        if (!Number.isFinite(bot.x) || !Number.isFinite(bot.y)) return false;
+        if (!Number.isFinite(bot.radius) || bot.radius <= 0) return false;
+
         bot._curlosJumpActive = true;
         bot._curlosJumpTimer = BOT_JUMP_FRAMES;
         bot._curlosJumpOrigY = bot.y;
@@ -95,7 +110,7 @@
         bot._curlosJumpOrigRadius = bot.radius;
         bot._curlosJumpOrigInterval = bot.shootInterval;
         bot.speed = 0;
-        bot.radius = 0.1;
+        bot.radius = 0.1; // Çarpışma için küçültüldü (çizimde orijinal boyut kullanılacak)
         bot.shootInterval = 999999;
         return true;
     }
@@ -108,7 +123,7 @@
         card.innerHTML =
             '<div class="char-color-preview" style="background:' + C_MAIN + ';"></div>' +
             '<span>Curlos</span>' +
-            '<small>Hasar: 700→400→100<br>Güç: Seken Dash + Can<br>Ulti: Zıplatma</small>';
+            '<small>Hasar: 700→500→250<br>Güç: Seken Dash + Can<br>Ulti: Zıplatma</small>';
         container.appendChild(card);
         card.addEventListener('click', () => {
             selectedCharacter = CHAR_ID;
@@ -156,7 +171,7 @@
             }
             if (ultiBtn) {
                 ultiBtn.style.display = 'flex';
-                ultiBtn.style.background = 'radial-gradient(circle, ' + C_MAIN + ', #4a235a)';
+                ultiBtn.style.background = 'radial-gradient(circle, ' + C_MAIN + ', ' + C_ACCENT + ')';
             }
             gadgetTimerText = document.getElementById('gadget-timer');
             gadgetTimerText2 = document.getElementById('gadget-timer-2');
@@ -167,6 +182,7 @@
         }
     };
 
+    // ===== ANA SALDIRI =====
     const originalFire = Player.prototype.fire;
     Player.prototype.fire = function (a, pullOverride) {
         if (this.charType !== CHAR_ID) return originalFire.call(this, a, pullOverride);
@@ -187,10 +203,12 @@
         this.lastShotTime = Date.now();
     };
 
+    // ===== AKS 1: DASH =====
     const originalActivateGadget = Player.prototype.activateGadget;
     Player.prototype.activateGadget = function (a, pull) {
         if (this.charType !== CHAR_ID) return originalActivateGadget.call(this, a, pull);
         if (!this.gadgetReady || this.isDead || dashState.active || this._curlosUltiPending) return;
+        
         const ang = a !== undefined ? a : this.angle;
         dashState.active = true;
         dashState.vx = Math.cos(ang) * DASH_SPEED;
@@ -198,13 +216,18 @@
         dashState.bouncesLeft = DASH_MAX_BOUNCE;
         dashState.hitTargets = new Set();
         dashState.remainingRange = DASH_LEG;
+        
+        // Dash Animasyonu: Ekran Sarsıntısı ve Parçacıklar
+        screenShake = 6;
+        sparkBurst(this.x, this.y, 15, C_MAIN);
+
         this.gadgetReady = false;
         this.gadgetCooldown = DASH_COOLDOWN;
         if (gadgetBtn) gadgetBtn.classList.add('cooldown');
         if (gadgetTimerText) gadgetTimerText.innerText = Math.ceil(DASH_COOLDOWN / 60) + "s";
-        sparkBurst(this.x, this.y, 8, C_MAIN);
     };
 
+    // ===== AKS 2: CAN =====
     const originalActivateGadget2 = Player.prototype.activateGadget2;
     Player.prototype.activateGadget2 = function (a, pull) {
         if (this.charType !== CHAR_ID) return originalActivateGadget2.call(this, a, pull);
@@ -216,19 +239,26 @@
         if (gadgetTimerText2) gadgetTimerText2.innerText = Math.ceil(HEAL_COOLDOWN / 60) + "s";
     };
 
+    // ===== ULTİ =====
     const originalFireUlti = Player.prototype.fireUlti;
     Player.prototype.fireUlti = function (a, pull) {
         if (this.charType !== CHAR_ID) return originalFireUlti.call(this, a, pull);
-        if (pull === undefined) return;
+        
+        // NaN Koruması
+        if (!Number.isFinite(a)) a = this.angle;
+        if (!Number.isFinite(a)) a = 0;
+        if (pull === undefined || !Number.isFinite(pull)) return;
         if (!this.ultReady || this.isDead || this._curlosUltiPending || dashState.active) return;
+
         const pullMag = pull > 0.05 ? pull : 1;
         const dist = ULTI_PLACE_MIN + (ULTI_PLACE_MAX - ULTI_PLACE_MIN) * pullMag;
         const tx = clampPos(this.x + Math.cos(a) * dist, WALL_THICKNESS + 30, canvas.width - WALL_THICKNESS - 30);
         const ty = clampPos(this.y + Math.sin(a) * dist, WALL_THICKNESS + 30, canvas.height - WALL_THICKNESS - 30);
+        
         ultiTarget.x = tx;
         ultiTarget.y = ty;
         this._curlosUltiPending = true;
-        // Base jump flag'leri — animasyon otomatik güzel
+        
         this.isJumping = true;
         this.jumpInvulnerable = true;
         this.jumpProgress = 0;
@@ -240,6 +270,7 @@
         this.jumpDamage = 0.01;
         this.jumpKnockback = 0.01;
         this.jumpLabel = " ";
+        
         curlosText(this.x, this.y - 40, "ZIPLAT!", true);
         this.ultReady = false;
         this.ultCharge = 0;
@@ -425,7 +456,7 @@
             }
         }
 
-        // Dash
+        // DASH
         if (dashState.active && !player.isDead) {
             const stepX = dashState.vx * ts;
             const stepY = dashState.vy * ts;
@@ -433,13 +464,24 @@
             player.y += stepY;
             dashState.remainingRange -= Math.hypot(stepX, stepY);
 
+            // Dash sırasında parçacık bırak
+            if (Math.random() < 0.5) {
+                curlosParticles.push({
+                    x: player.x, y: player.y,
+                    vx: (Math.random() - 0.5) * 2, vy: (Math.random() - 0.5) * 2,
+                    size: 2 + Math.random() * 2,
+                    life: 10, maxLife: 10,
+                    color: C_MAIN, gravity: 0
+                });
+            }
+
             getActiveEnemies().forEach(e => {
                 if (dashState.hitTargets.has(e)) return;
                 if (getDist(player, e) < e.radius + player.radius + 5) {
                     dashState.hitTargets.add(e);
                     e.hp -= DASH_DAMAGE;
                     addFloatingNumber(e.x, e.y, DASH_DAMAGE, C_MAIN);
-                    sparkBurst(e.x, e.y, 5, C_SPARK);
+                    sparkBurst(e.x, e.y, 5, C_ACCENT);
                 }
             });
 
@@ -466,7 +508,7 @@
             if (bounced) {
                 dashState.bouncesLeft--;
                 dashState.remainingRange = DASH_LEG;
-                sparkBurst(player.x, player.y, 6, C_SPARK);
+                sparkBurst(player.x, player.y, 6, C_ACCENT);
                 if (dashState.bouncesLeft <= 0) {
                     dashState.active = false;
                     sparkBurst(player.x, player.y, 10, C_MAIN);
@@ -503,7 +545,7 @@
                     b.wallHits++;
                     b.angle = Math.atan2(b.vy, b.vx);
                     b.remainingRange = WALL_RANGE;
-                    sparkBurst(b.x, b.y, 3, C_SPARK);
+                    sparkBurst(b.x, b.y, 3, C_ACCENT);
                     if (b.showHeal && b.healThisShot > 0) {
                         const heal = Math.min(HEAL_PER_WALL, b.healThisShot);
                         b.healThisShot -= heal;
@@ -530,7 +572,7 @@
                     b.remainingRange = WALL_RANGE;
                     b.wallHits++;
                     obsHit = true;
-                    sparkBurst(b.x, b.y, 4, C_SPARK);
+                    sparkBurst(b.x, b.y, 4, C_ACCENT);
                     if (b.showHeal && b.healThisShot > 0) {
                         const heal = Math.min(HEAL_PER_WALL, b.healThisShot);
                         b.healThisShot -= heal;
@@ -555,10 +597,11 @@
             if (botHit) {
                 b.hitTargets.add(botHit);
                 b.botHits++;
+                // YENİ HASAR SİSTEMİ: 700 -> 500 -> 250
                 const dmg = b.botHits === 1 ? DMG_1 : b.botHits === 2 ? DMG_2 : DMG_3;
                 botHit.hp -= dmg;
                 addFloatingNumber(botHit.x, botHit.y, dmg, C_MAIN);
-                sparkBurst(botHit.x, botHit.y, 6, C_SPARK);
+                sparkBurst(botHit.x, botHit.y, 6, C_ACCENT);
 
                 if (b.botHits >= MAX_BOT_HITS) {
                     b.isDead = true;
@@ -624,7 +667,7 @@
     }
 
     chainHook('onDraw', function (ctx2) {
-        // Zıplayan botlar
+        // Zıplayan botlar (Kask çizimi orijinal radius ile yapılıyor)
         getActiveEnemies().forEach(e => {
             if (e._curlosJumpActive) {
                 const prog = 1 - Math.max(0, e._curlosJumpTimer / BOT_JUMP_FRAMES);
@@ -654,7 +697,7 @@
                 ctx2.fill();
                 ctx2.beginPath();
                 ctx2.arc(0, 0, origRadius, 0, Math.PI * 2);
-                ctx2.strokeStyle = C_SPARK;
+                ctx2.strokeStyle = C_ACCENT;
                 ctx2.lineWidth = 2.5;
                 ctx2.stroke();
                 ctx2.restore();
@@ -666,34 +709,34 @@
             ctx2.globalAlpha = 0.5;
             ctx2.beginPath();
             ctx2.arc(player.x, player.y, player.radius + 8, 0, Math.PI * 2);
-            ctx2.strokeStyle = C_SPARK;
+            ctx2.strokeStyle = C_WHITE;
             ctx2.lineWidth = 3;
             ctx2.stroke();
             ctx2.restore();
         }
 
-        // Hayalet gibi dolu dikdörtgen nişan çizgisi
+        // Hayalet gibi dolu dikdörtgen nişan çizgisi (Neon Renk)
         if (player.charType === CHAR_ID && player._curlosHideBaseAim && !player.isDead && player.ammo >= 1) {
             const ang = aimData.angle;
             ctx2.save();
             ctx2.translate(player.x, player.y);
             ctx2.rotate(ang);
-            ctx2.fillStyle = 'rgba(142, 68, 173, 0.18)';
+            ctx2.fillStyle = 'rgba(0, 229, 255, 0.15)'; // Neon Turkuaz dolu
             ctx2.fillRect(0, -10, BULLET_RANGE, 20);
-            ctx2.strokeStyle = 'rgba(142, 68, 173, 0.55)';
+            ctx2.strokeStyle = 'rgba(0, 229, 255, 0.6)';
             ctx2.lineWidth = 1.5;
             ctx2.strokeRect(0, -10, BULLET_RANGE, 20);
             ctx2.beginPath();
             ctx2.arc(BULLET_RANGE, 0, 6, 0, Math.PI * 2);
             ctx2.fillStyle = C_MAIN;
             ctx2.fill();
-            ctx2.strokeStyle = C_SPARK;
+            ctx2.strokeStyle = C_WHITE;
             ctx2.lineWidth = 2;
             ctx2.stroke();
             ctx2.restore();
         }
 
-        // Dash nişan çizgisi (ninja gibi)
+        // Dash nişan çizgisi
         if (player.charType === CHAR_ID && gadAim.active && player.gadgetReady && !player.isDead && !dashState.active) {
             const ang = gadAim.angle;
             const startX = player.x, startY = player.y;
@@ -703,16 +746,16 @@
             ctx2.beginPath();
             ctx2.moveTo(startX, startY);
             ctx2.lineTo(endX, endY);
-            ctx2.strokeStyle = 'rgba(142,68,173,0.7)';
+            ctx2.strokeStyle = 'rgba(0, 229, 255, 0.7)';
             ctx2.lineWidth = 1.5;
             ctx2.setLineDash([12, 8]);
             ctx2.stroke();
             ctx2.setLineDash([]);
             ctx2.beginPath();
             ctx2.arc(endX, endY, 10, 0, Math.PI * 2);
-            ctx2.fillStyle = 'rgba(142,68,173,0.3)';
+            ctx2.fillStyle = 'rgba(0, 229, 255, 0.3)';
             ctx2.fill();
-            ctx2.strokeStyle = C_SPARK;
+            ctx2.strokeStyle = C_WHITE;
             ctx2.lineWidth = 2;
             ctx2.stroke();
             ctx2.beginPath();
@@ -737,8 +780,8 @@
             ctx2.translate(b.x, b.y);
             const grad = ctx2.createRadialGradient(0, 0, 0, 0, 0, 12);
             grad.addColorStop(0, C_WHITE);
-            grad.addColorStop(0.4, C_LIGHT);
-            grad.addColorStop(1, 'rgba(142,68,173,0)');
+            grad.addColorStop(0.4, C_MAIN);
+            grad.addColorStop(1, 'rgba(0, 229, 255, 0)');
             ctx2.beginPath(); ctx2.arc(0, 0, 12, 0, Math.PI * 2);
             ctx2.fillStyle = grad; ctx2.fill();
             ctx2.rotate(b.angle);
@@ -774,7 +817,7 @@
             ctx2.stroke();
             ctx2.beginPath();
             ctx2.arc(s.x, s.y, s.radius * 0.7, 0, Math.PI * 2);
-            ctx2.strokeStyle = C_SPARK;
+            ctx2.strokeStyle = C_WHITE;
             ctx2.lineWidth = 2;
             ctx2.stroke();
             ctx2.restore();
@@ -798,7 +841,7 @@
             ctx2.font = t.isLabel ? 'bold 15px Arial' : 'bold 12px Arial';
             ctx2.textAlign = 'center';
             ctx2.fillStyle = C_LIGHT;
-            ctx2.strokeStyle = 'rgba(30,10,40,0.9)';
+            ctx2.strokeStyle = 'rgba(0, 30, 40, 0.9)';
             ctx2.lineWidth = 3;
             ctx2.strokeText(t.val, t.x, t.y);
             ctx2.fillText(t.val, t.x, t.y);
@@ -814,14 +857,14 @@
             ctx2.beginPath();
             ctx2.moveTo(player.x, player.y);
             ctx2.lineTo(tx, ty);
-            ctx2.strokeStyle = 'rgba(142,68,173,0.6)';
+            ctx2.strokeStyle = 'rgba(0, 229, 255, 0.6)';
             ctx2.lineWidth = 3;
             ctx2.setLineDash([8, 6]);
             ctx2.stroke();
             ctx2.setLineDash([]);
             ctx2.beginPath();
             ctx2.arc(tx, ty, ULTI_RADIUS, 0, Math.PI * 2);
-            ctx2.fillStyle = 'rgba(142,68,173,0.15)';
+            ctx2.fillStyle = 'rgba(0, 229, 255, 0.15)';
             ctx2.fill();
             ctx2.strokeStyle = C_MAIN;
             ctx2.lineWidth = 3;
