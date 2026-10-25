@@ -8,13 +8,13 @@
     const C_ACCENT = '#e67e22';
     const C_LIGHT = '#f5b041';
     const C_WHITE = '#ffffff';
-    const CHAR_HP = 2600;
-    const CHAR_SPEED = 3.8;
+    const CHAR_HP = 3000;
+    const CHAR_SPEED = 4.8;
 
     // ANA SALDIRI
     const BULLET_COUNT = 2;
-    const BULLET_DMG = 300;
-    const BULLET_BONUS_DMG = 450;   // İki mermi aynı bota çarparsa
+    const BULLET_DMG = 350;
+    const BULLET_BONUS_DMG = 550;   // İki mermi aynı bota çarparsa
     const BULLET_SPEED = PLAYER_BULLET_SPEED * 0.9;
     const BULLET_RANGE = 300;
     const BULLET_OFFSET = 15;
@@ -23,7 +23,7 @@
 
     // AKS 1: GENİŞ KISKAÇ
     const QUAD_COUNT = 4;
-    const QUAD_DMG = 200;
+    const QUAD_DMG = 400;
     const QUAD_OFFSET = 20;
     const QUAD_CD = 1200;
 
@@ -32,15 +32,15 @@
     const HOOK_RANGE = 180;
     const HOOK_BOT_DMG = 150;
     const HOOK_WALL_DMG = 250;
-    const HOOK_PULL_SPEED = 20;
+    const HOOK_PULL_SPEED = 50;
     const HOOK_CD = 900;
 
     // ULTİ: KISKAÇ TUZAĞI
     const ULTI_RANGE = 300;
-    const ULTI_KILIT_TIME = 90;      // 1.5s
+    const ULTI_KILIT_TIME = 150;      // 1.5s
     const ULTI_TICK = 18;            // her 0.3s
-    const ULTI_TICK_DMG = 200;
-    const ULTI_FINAL_DMG = 400;
+    const ULTI_TICK_DMG = 500;
+    const ULTI_FINAL_DMG = 800;
 
     window.GAME_EXT.characters[CHAR_ID] = { color: C_MAIN, hp: CHAR_HP, speed: CHAR_SPEED };
 
