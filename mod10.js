@@ -1,7 +1,8 @@
-// ========== mod29.js (CURLOS) - v6 (BUG FIX) ==========
-// - BASE ÇİZİM SARMALAYICI: Zıplayan botlar base tarafından çizilmiyor
-// - PLAYER NaN KURTARICI: Her frame NaN kontrolü + güvenli değere dönüş
-// - TRIGGER BOT JUMP TAM KORUMA: orig değerler de NaN kontrolünden geçiyor
+// ========== mod29.js (CURLOS) - v7 NAN KALKANI ==========
+// - drawEntity sarmalayıcı: NaN olan hiçbir şey çizilmez.
+// - Zıplayan botlar için radius=1 (NaN hesaplamalarını önler).
+// - Her frame player ve botlar için NaN kurtarıcı.
+// - onPreDraw içinde çizim öncesi NaN temizliği.
 
 (function () {
     'use strict';
@@ -60,12 +61,32 @@
     let ultiTarget = { x: 0, y: 0 };
     let ultiDrag = { active: false, startX: 0, startY: 0, angle: 0, pull: 0, touchId: null, isMouse: false };
 
-    // ===== BASE ÇİZİM SARMALAYICI =====
-    // Curlos zıplayan botları kendi çizer, base çizmesin (radius 0.1 sorunu)
+    // ===== ULTIMATE DRAW SARMALAYICI (Çizim Çökmesini Engeller) =====
     if (!window._curlosOrigDrawEntity) {
         window._curlosOrigDrawEntity = window.drawEntity;
         window.drawEntity = function (e, isP) {
-            if (e && e._curlosJumpActive) return;
+            if (!e) return;
+            
+            // 1. Zıplayan botları base'in çizmesini engelle
+            if (e._curlosJumpActive) return;
+
+            // 2. NaN KORUMASI: Konumu bozuk olan HİÇBİR ŞEYİ çizdirme
+            if (!Number.isFinite(e.x) || !Number.isFinite(e.y) || !Number.isFinite(e.radius)) {
+                return;
+            }
+
+            // 3. PLAYER ÖZEL KORUMASI
+            if (isP && player.isJumping) {
+                if (!Number.isFinite(player.jumpProgress)) {
+                    player.jumpProgress = 1;
+                    player.isJumping = false;
+                    player.jumpInvulnerable = false;
+                }
+                if (!Number.isFinite(player.jumpDuration) || player.jumpDuration <= 0) {
+                    player.jumpDuration = 40;
+                }
+            }
+
             return window._curlosOrigDrawEntity(e, isP);
         };
     }
@@ -103,7 +124,6 @@
 
     function triggerBotJump(bot) {
         if (!bot || bot.isDead || bot._curlosJumpActive) return false;
-        // TAM KORUMA
         if (!Number.isFinite(bot.x) || !Number.isFinite(bot.y)) return false;
         if (!Number.isFinite(bot.radius) || bot.radius <= 0) return false;
         if (!Number.isFinite(bot.shootInterval)) bot.shootInterval = 1600;
@@ -116,7 +136,7 @@
         bot._curlosJumpOrigRadius = bot.radius;
         bot._curlosJumpOrigInterval = bot.shootInterval;
         bot.speed = 0;
-        bot.radius = 0.1;
+        bot.radius = 1; // 0.1 yerine 1 (NaN hesaplamalarını önler)
         bot.shootInterval = 999999;
         return true;
     }
@@ -214,7 +234,6 @@
         if (this.charType !== CHAR_ID) return originalActivateGadget.call(this, a, pull);
         if (!this.gadgetReady || this.isDead || dashState.active || this._curlosUltiPending) return;
         const ang = a !== undefined ? a : this.angle;
-        // NaN KORUMASI
         if (!Number.isFinite(ang)) {
             console.warn('[CURLOS] Dash angle NaN, iptal');
             return;
@@ -247,7 +266,6 @@
     const originalFireUlti = Player.prototype.fireUlti;
     Player.prototype.fireUlti = function (a, pull) {
         if (this.charType !== CHAR_ID) return originalFireUlti.call(this, a, pull);
-        // NaN KORUMASI
         if (!Number.isFinite(a)) a = this.angle;
         if (!Number.isFinite(a)) a = 0;
         if (!Number.isFinite(this.x) || !Number.isFinite(this.y)) {
@@ -300,6 +318,19 @@
     chainHook('onReset', function () { clearCurlosState(); });
 
     chainHook('onPreDraw', function (ctx2) {
+        // Çizim öncesi NaN temizliği
+        if (player.charType === CHAR_ID) {
+            if (!Number.isFinite(player.x) || !Number.isFinite(player.y)) {
+                player.x = canvas.width / 2;
+                player.y = canvas.height / 2;
+            }
+            getActiveEnemies().forEach(e => {
+                if (e && (!Number.isFinite(e.x) || !Number.isFinite(e.y))) {
+                    e.x = canvas.width / 2;
+                    e.y = canvas.height / 2;
+                }
+            });
+        }
         if (player.charType === CHAR_ID && aimData.active && !player.isDead && !dashState.active) {
             player._curlosHideBaseAim = true;
             aimData.active = false;
@@ -386,27 +417,28 @@
     requestAnimationFrame(curlosLoop);
 
     function curlosUpdate(ts) {
-        // ===== PLAYER NaN KURTARICI (HER FRAME) =====
+        // ===== PLAYER NaN KURTARICI =====
         if (!Number.isFinite(player.x) || !Number.isFinite(player.y)) {
-            console.warn('[CURLOS] Player NaN kurtarıldı');
+            console.warn('[CURLOS] Player pos NaN -> kurtarıldı');
             player.x = Number.isFinite(player.jumpStartX) ? player.jumpStartX : canvas.width / 2;
             player.y = Number.isFinite(player.jumpStartY) ? player.jumpStartY : canvas.height / 2;
             player.isJumping = false;
             player.jumpInvulnerable = false;
             player._curlosUltiPending = false;
         }
-        if (player.isJumping && !Number.isFinite(player.jumpProgress)) {
-            player.jumpProgress = 0;
+        if (player.isJumping && (!Number.isFinite(player.jumpProgress) || !Number.isFinite(player.jumpDuration))) {
+            console.warn('[CURLOS] Jump verisi NaN -> iptal edildi');
             player.isJumping = false;
+            player.jumpInvulnerable = false;
             player._curlosUltiPending = false;
+            player.jumpProgress = 0;
         }
-        // Dash NaN koruması
         if (dashState.active && (!Number.isFinite(dashState.vx) || !Number.isFinite(dashState.vy))) {
             dashState.active = false;
             dashState.vx = 0;
             dashState.vy = 0;
         }
-        // Bozuk bot temizle
+        // Bot NaN kurtarıcı
         getActiveEnemies().forEach(b => {
             if (!b) return;
             if (!Number.isFinite(b.x) || !Number.isFinite(b.y) || !Number.isFinite(b.radius) || b.radius <= 0) {
@@ -414,7 +446,6 @@
                 b.isDead = true;
             }
         });
-        // Bozuk mermi temizle
         curlosBullets = curlosBullets.filter(b => b && Number.isFinite(b.x) && Number.isFinite(b.y));
 
         if (player.charType === CHAR_ID) {
