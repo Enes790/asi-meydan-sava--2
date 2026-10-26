@@ -20,7 +20,7 @@
     const C_SHRINK = '#8e44ad';
     
     const CHAR_HP = 2600;
-    const CHAR_SPEED = 3.8;
+    const CHAR_SPEED = 5.1;
     
     // ===== ANA SALDIRI =====
     const BULLET_COUNT = 2;
