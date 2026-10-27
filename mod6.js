@@ -24,21 +24,21 @@
     const KAMI_KILL_TRIGGER = 6; const KAMI_TIMER_TRIGGER = 1500;
 
     // ---- Mini-Kamikaze ----
-    const MINI_HP = 400; const MINI_RADIUS = 12; const MINI_SPEED = 1.3; const MINI_MAX = 3;
+    const MINI_HP = 500; const MINI_RADIUS = 12; const MINI_SPEED = 1.3; const MINI_MAX = 3;
     const MINI_TRIGGER_DIST = 60; const MINI_PLAYER_DMG = 300; const MINI_PLAYER_RADIUS = 70;
     const MINI_KNOCKBACK = 20; const MINI_WALL_DMG = 500; const MINI_WALL_AOE = 300;
     const MINI_WALL_AOE_RADIUS = 80; const MINI_STUCK_FRAMES = 30;
 
     // ---- Havan ----
-    const HAVAN_HP = 5000; const HAVAN_RADIUS = 26; const HAVAN_SHOOT_INTERVAL = 180;
-    const HAVAN_MERMI_HASAR = 400; const HAVAN_MERMI_AOE = 100; const HAVAN_SIPER_HASAR = 150;
+    const HAVAN_HP = 6000; const HAVAN_RADIUS = 26; const HAVAN_SHOOT_INTERVAL = 120;
+    const HAVAN_MERMI_HASAR = 500; const HAVAN_MERMI_AOE = 100; const HAVAN_SIPER_HASAR = 220;
     const HAVAN_MERMI_FLIGHT = 90;
 
     // ---- Çavuş ----
     const CAVUS_HP = 6500; const CAVUS_RADIUS = 24; const CAVUS_SPEED = 0.7;
-    const CAVUS_SHOOT_INTERVAL = 120; const CAVUS_MERMI_HASAR = 200;
-    const CAVUS_AURA_RADIUS = 140; const CAVUS_AURA_DURATION = 300; const CAVUS_AURA_COOLDOWN = 300;
-    const CAVUS_DMG_REDIRECT = 0.30; const CAVUS_STOP_DIST = 150;
+    const CAVUS_SHOOT_INTERVAL = 60; const CAVUS_MERMI_HASAR = 400;
+    const CAVUS_AURA_RADIUS = 150; const CAVUS_AURA_DURATION = 390; const CAVUS_AURA_COOLDOWN = 300;
+    const CAVUS_DMG_REDIRECT = 0.40; const CAVUS_STOP_DIST = 150;
 
     // ---- Öfke ----
     const RAGE_DURATION = 180;
@@ -48,7 +48,7 @@
     const HEAVY_SPAWN_TIME = 1500; const HEAVY_SPAWN_WARN = 240;
 
     // ---- Ranger (Lobutçu) ----
-    const RANGER_HP = 1000; const RANGER_RADIUS = 18; const RANGER_SPEED = 1.5;
+    const RANGER_HP = 1000; const RANGER_RADIUS = 18; const RANGER_SPEED = 2.5;
     const RANGER_RANGE = 200; // Lobut atma menzili
     const RANGER_LOBUT_FLIGHT = 60; // 1 saniye havada
     const RANGER_LOBUT_AOE = 60; // Düştüğü alan
@@ -57,11 +57,11 @@
     const RANGER_RMINI_HP = 300; const RANGER_RMINI_SPEED = 2.0;
     const RANGER_RMINI_DMG = 100; const RANGER_RMINI_RADIUS = 8;
     const RANGER_SPAWN_INTERVAL = 2400; const RANGER_SPAWN_WARN = 180;
-    const RANGER_AURA_RADIUS = 60; const RANGER_AURA_HEAL = 200;
-    const RANGER_AURA_HEAL_INTERVAL = 180; const RANGER_AURA_SPEED_BONUS = 0.6;
-    const RANGER_AURA_MAX_BOTS = 3;
+    const RANGER_AURA_RADIUS = 60; const RANGER_AURA_HEAL = 450;
+    const RANGER_AURA_HEAL_INTERVAL = 160; const RANGER_AURA_SPEED_BONUS = 0.8;
+    const RANGER_AURA_MAX_BOTS = 10;
 
-    const SIPER_CAN = 2500;
+    const SIPER_CAN = 3000;
 
     // ---- Durum ----
     let piyade = null; let piyadeSpawnTimer = 0; let piyadeRespawnTimer = 0;
