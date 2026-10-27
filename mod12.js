@@ -1,48 +1,49 @@
-// ========== mod31.js (DONDURUCU) - SES DALGASI USTASI ==========
-// - Ana Saldırı: 3 dilimli koni (Orta 800, yanlar 100, maks 4 bot)
-// - Duvar Dilimleme: Her dilim bağımsız duvara çarpar, diğerleri devam eder
-// - Ulti: Oyuncu zıplar (Curlos gibi) + 2s dondurma + 400 AoE patlama
-// - Aks 1: Bir sonraki ultide +1s donma + 300 heal/bot
-// - Aks 2: Bir sonraki ana saldırı botları 0.4s zıplatır
-// - Menzil: 130 birim
+// ========== mod31.js (DONDURUCU) - v2 ==========
+// Düzeltmeler:
+// 1. HP: 2600 → 3200 (+600)
+// 2. Menzil: 130 → 169 (+%30)
+// 3. Zıplama: base isJumping kullanılıyor (hurda görünüm düzeldi)
+// 4. Donan botlar ateş etmiyor (her frame lastShot sıfırlanıyor)
+// 5. İlk vurulan bot: ORTA dilim önce çarpıyor (800 hasar)
 
 (function () {
     'use strict';
 
     const CHAR_ID = 'dondurucu';
-    const C_MAIN = '#4a5c6a';        // Koyu buz grisi (Buzcu'dan farklı)
-    const C_LIGHT = '#85c1e9';       // Açık buz mavisi
+    const C_MAIN = '#4a5c6a';
+    const C_LIGHT = '#85c1e9';
     const C_DARK = '#1a252f';
     const C_WHITE = '#ffffff';
-    const C_FROZEN = '#00bcd4';      // Dondurma mavisi
-    const CHAR_HP = 2600;
+    const C_FROZEN = '#00bcd4';
+    const CHAR_HP = 3200;          // ← DÜZELTME 1: +600
     const CHAR_SPEED = 3.6;
 
     // ===== ANA SALDIRI =====
-    const WAVE_RANGE = 130;
+    const WAVE_RANGE = 169;        // ← DÜZELTME 2: 130*1.3
     const WAVE_SPEED = PLAYER_BULLET_SPEED * 1.0;
-    const WAVE_ANGLES = [-0.18, 0, 0.18];  // Sol, Orta, Sağ (koni açısı ~20°)
+    // DÜZELTME 5: Center önce ekleniyor (ilk çarpsın diye)
+    const WAVE_ANGLES = [0, -0.18, 0.18];
     const CENTER_DMG = 800;
     const SIDE_DMG = 100;
     const MAX_BOTS_HIT = 4;
     const WALL_DMG = 60;
     const RELOAD_SPEED = 0.014;
 
-    // ===== AKS 1: ULTİ BUFF =====
+    // ===== AKS 1 =====
     const AKS1_HEAL = 300;
-    const AKS1_EXTRA_TIME = 60;      // +1s donma
-    const AKS1_CD = 900;             // 15s
+    const AKS1_EXTRA_TIME = 60;
+    const AKS1_CD = 900;
 
-    // ===== AKS 2: ZIPLATMA =====
-    const AKS2_JUMP_TIME = 24;       // 0.4s
+    // ===== AKS 2 =====
+    const AKS2_JUMP_TIME = 24;
     const AKS2_JUMP_HEIGHT = 60;
     const AKS2_CD = 900;
 
     // ===== ULTİ =====
     const ULTI_RADIUS = 100;
-    const ULTI_JUMP_TIME = 40;       // Curlos gibi
-    const ULTI_DELAY = 30;           // İniş sonrası kısa bekleme
-    const ULTI_FREEZE_TIME = 120;    // 2s = 120 frame
+    const ULTI_JUMP_TIME = 40;
+    const ULTI_DELAY = 30;
+    const ULTI_FREEZE_TIME = 120;
     const ULTI_BURST_DMG = 400;
     const ULTI_BURST_RADIUS = 80;
     const ULTI_MAX_BOTS = 5;
@@ -51,14 +52,14 @@
 
     window.GAME_EXT.characters[CHAR_ID] = { color: C_MAIN, hp: CHAR_HP, speed: CHAR_SPEED };
 
-    let waves = [];                    // Aktif ses dalgaları
-    let frozenBots = new Map();        // Dondurulan botlar → kalan süre
-    let jumpedBots = new Map();        // Aks 2 ile zıplatılan botlar
+    let waves = [];
+    let frozenBots = new Map();
+    let jumpedBots = new Map();
     let aks1Buff = false;
     let aks2Active = false;
     let aks1CD = 0, aks1Ready = true;
     let aks2CD = 0, aks2Ready = true;
-    let ultiState = null;              // { phase, timer, targetX, targetY, affectedBots }
+    let ultiState = null;
     let ultiDrag = { active: false, startX: 0, startY: 0, angle: 0, pull: 0, touchId: null, isMouse: false };
     let dondurucuFX = [];
     let dondurucuTexts = [];
@@ -125,7 +126,6 @@
         aks2CD = 0; aks2Ready = true;
         ultiState = null;
         screenFlash = 0;
-        // Dondurulan botları çöz
         frozenBots.forEach((v, b) => {
             if (b && !b.isDead) {
                 b.speed = v.origSpeed;
@@ -134,7 +134,6 @@
             }
         });
         frozenBots.clear();
-        // Zıplatılan botları indir
         jumpedBots.forEach((v, b) => {
             if (b && !b.isDead) {
                 b.y = v.origY;
@@ -144,6 +143,7 @@
         jumpedBots.clear();
         if (player) {
             player.jumpInvulnerable = false;
+            player.isJumping = false;
             player._dondurucuHideAim = false;
         }
     }
@@ -177,7 +177,7 @@
         }
     };
 
-    // ===== ANA SALDIRI (3 Dilim) =====
+    // ===== ANA SALDIRI =====
     const origFire = Player.prototype.fire;
     Player.prototype.fire = function (a, pull) {
         if (this.charType !== CHAR_ID) return origFire.call(this, a, pull);
@@ -185,7 +185,7 @@
         if (!Number.isFinite(a)) a = this.angle || 0;
 
         const isAks2 = aks2Active;
-        const sharedHitBots = new Set(); // Toplam 4 bot kuralı için
+        const sharedHitBots = new Set();
 
         WAVE_ANGLES.forEach((offset, idx) => {
             const ang = a + offset;
@@ -195,7 +195,7 @@
                 vx: Math.cos(ang) * WAVE_SPEED,
                 vy: Math.sin(ang) * WAVE_SPEED,
                 angle: ang,
-                isCenter: idx === 1,
+                isCenter: idx === 0,   // ← DÜZELTME 5: index 0 center
                 isDead: false,
                 hitBots: sharedHitBots,
                 travelDist: 0,
@@ -209,7 +209,7 @@
         this.lastShotTime = Date.now();
     };
 
-    // ===== AKS 1: ULTİ BUFF =====
+    // ===== AKS 1 =====
     const origGadget = Player.prototype.activateGadget;
     Player.prototype.activateGadget = function (a, pull) {
         if (this.charType !== CHAR_ID) return origGadget.call(this, a, pull);
@@ -223,7 +223,7 @@
         burst(this.x, this.y, 8, C_FROZEN);
     };
 
-    // ===== AKS 2: ZIPLATMA =====
+    // ===== AKS 2 =====
     const origGadget2 = Player.prototype.activateGadget2;
     Player.prototype.activateGadget2 = function (a, pull) {
         if (this.charType !== CHAR_ID) return origGadget2.call(this, a, pull);
@@ -237,7 +237,7 @@
         burst(this.x, this.y, 8, C_LIGHT);
     };
 
-    // ===== ULTİ (ZIPLAMA) =====
+    // ===== ULTİ =====
     const origUlti = Player.prototype.fireUlti;
     Player.prototype.fireUlti = function (a, pull) {
         if (this.charType !== CHAR_ID) return origUlti.call(this, a, pull);
@@ -261,7 +261,19 @@
             targetY: ty,
             affectedBots: []
         };
+        // ← DÜZELTME 3: Base zıplama sistemini kullan (hurda görünüm düzeldi)
+        this.isJumping = true;
         this.jumpInvulnerable = true;
+        this.jumpProgress = 0;
+        this.jumpDuration = ULTI_JUMP_TIME;
+        this.jumpStartX = this.x;
+        this.jumpStartY = this.y;
+        this.jumpTargetX = tx;
+        this.jumpTargetY = ty;
+        this.jumpDamage = 0.01;
+        this.jumpKnockback = 0.01;
+        this.jumpLabel = " ";
+
         addText(this.x, this.y - 40, "DONDUR!", true, C_FROZEN);
         this.ultReady = false;
         this.ultCharge = 0;
@@ -370,11 +382,11 @@
     requestAnimationFrame(loop);
 
     function update(ts) {
-        // NaN Koruması
         if (!Number.isFinite(player.x) || !Number.isFinite(player.y)) {
             player.x = canvas.width / 2;
             player.y = canvas.height / 2;
             player.jumpInvulnerable = false;
+            player.isJumping = false;
             if (ultiState) ultiState = null;
         }
 
@@ -384,20 +396,17 @@
             if (gadgetBtn2 && gadgetBtn2.style.display !== 'flex') gadgetBtn2.style.display = 'flex';
         }
 
-        // Cooldown'lar
         if (aks1CD > 0) { aks1CD -= ts; if (aks1CD <= 0) { aks1CD = 0; aks1Ready = true; if (gadgetBtn) gadgetBtn.classList.remove('cooldown'); if (gadgetTimerText) gadgetTimerText.innerText = ""; } }
         if (aks2CD > 0) { aks2CD -= ts; if (aks2CD <= 0) { aks2CD = 0; aks2Ready = true; if (gadgetBtn2) gadgetBtn2.classList.remove('cooldown'); if (gadgetTimerText2) gadgetTimerText2.innerText = ""; } }
 
-        // ===== ULTİ AKIŞI =====
+        // ===== ULTİ =====
         if (ultiState) {
             if (ultiState.phase === 'jumping') {
+                // ← DÜZELTME 3: Base zıplamayı yönetiyor. Biz sadece inişi bekliyoruz.
                 ultiState.timer -= ts;
-                const prog = 1 - (ultiState.timer / ULTI_JUMP_TIME);
-                if (prog >= 0 && prog <= 1) {
-                    player.x = ultiState.startX + (ultiState.targetX - ultiState.startX) * prog;
-                    player.y = ultiState.startY + (ultiState.targetY - ultiState.startY) * prog;
-                }
-                if (ultiState.timer <= 0) {
+                if (!player.isJumping || ultiState.timer <= 0) {
+                    // İniş anı
+                    player.isJumping = false;
                     player.x = ultiState.targetX;
                     player.y = ultiState.targetY;
                     ultiState.phase = 'landing';
@@ -405,7 +414,7 @@
                     screenShake = 10;
                     screenFlash = 6;
                     burst(player.x, player.y, 25, C_FROZEN, 8);
-                    // Etraftaki botları seç
+                    
                     const inRange = [];
                     getActiveEnemies().forEach(e => {
                         if (getDist(player, e) < ULTI_RADIUS + e.radius) inRange.push(e);
@@ -424,7 +433,6 @@
                             e.shootInterval = 999999;
                             e._frozen = true;
                         } else {
-                            // Zaten dondurulmuşsa süreyi yenile
                             const f = frozenBots.get(e);
                             if (f) f.timer = Math.max(f.timer, freezeDuration);
                         }
@@ -446,17 +454,18 @@
             }
         }
 
-        // ===== DONDURULAN BOTLARIN SÜRE TAKİBİ =====
+        // ===== DONDURULAN BOTLAR =====
         frozenBots.forEach((v, b) => {
             v.timer -= ts;
             if (!b || b.isDead) {
                 frozenBots.delete(b);
                 return;
             }
+            // ← DÜZELTME 4: Her frame lastShot'u sıfırla ki ateş etmesin
             b.speed = 0;
             b.shootInterval = 999999;
+            b.lastShot = Date.now();
             if (v.timer <= 0) {
-                // Süre bitti → 400 AoE patlama
                 b.speed = v.origSpeed;
                 b.shootInterval = v.origShoot;
                 delete b._frozen;
@@ -465,7 +474,6 @@
                 b.hp -= ULTI_BURST_DMG;
                 addFloatingNumber(b.x, b.y, ULTI_BURST_DMG, C_FROZEN);
                 burst(b.x, b.y, 12, C_FROZEN, 6);
-                // Yakındaki botlara AoE
                 getActiveEnemies().forEach(e => {
                     if (e !== b && !e.isDead && getDist(b, e) < ULTI_BURST_RADIUS + e.radius) {
                         e.hp -= ULTI_BURST_DMG;
@@ -473,7 +481,6 @@
                         burst(e.x, e.y, 6, C_LIGHT);
                     }
                 });
-                // Patlama halkası
                 dondurucuFX.push({
                     x: b.x, y: b.y, vx: 0, vy: 0,
                     size: 10, life: 20, maxLife: 20,
@@ -484,7 +491,7 @@
             }
         });
 
-        // ===== AKS 2 ZIPLATMA TAKİBİ =====
+        // ===== AKS 2 ZIPLATMA =====
         jumpedBots.forEach((v, b) => {
             v.timer -= ts;
             if (!b || b.isDead) {
@@ -514,20 +521,14 @@
             w.trail.push({ x: w.x, y: w.y, life: 12 });
             if (w.trail.length > 8) w.trail.shift();
 
-            // Menzil
-            if (w.travelDist > WAVE_RANGE) {
-                waves.splice(i, 1);
-                continue;
-            }
+            if (w.travelDist > WAVE_RANGE) { waves.splice(i, 1); continue; }
 
-            // Ekran sınırları (duvar sayılır)
             if (w.x < WALL_THICKNESS || w.x > canvas.width - WALL_THICKNESS ||
                 w.y < WALL_THICKNESS || w.y > canvas.height - WALL_THICKNESS) {
                 waves.splice(i, 1);
                 continue;
             }
 
-            // Duvar çarpışması (BAĞIMSIZ - her dilim ayrı)
             let hitWall = false;
             for (const o of obstacles.concat(cactusWalls || [])) {
                 if (getDist(w, o) < o.radius + 5) {
@@ -539,25 +540,22 @@
                 }
             }
             if (hitWall) {
-                // Sadece bu dilim ölür, diğerleri devam eder
                 waves.splice(i, 1);
                 continue;
             }
 
-            // Bot çarpışması (maks 4 bot kuralı)
-            if (w.hitBots.size >= MAX_BOTS_HIT) continue; // Bu dilim artık vurmasın
+            if (w.hitBots.size >= MAX_BOTS_HIT) continue;
 
             for (const e of getActiveEnemies()) {
                 if (e.isDead) continue;
-                if (w.hitBots.has(e)) continue; // Bu bot zaten vuruldu
+                if (w.hitBots.has(e)) continue;
                 if (getDist(w, e) < e.radius + 8) {
                     const dmg = w.isCenter ? CENTER_DMG : SIDE_DMG;
                     e.hp -= dmg;
                     addFloatingNumber(e.x, e.y, dmg, w.isCenter ? C_FROZEN : C_LIGHT);
-                    w.hitBots.add(e); // Global set - 4 bot kuralı için
+                    w.hitBots.add(e);
                     burst(e.x, e.y, 4, C_LIGHT);
 
-                    // Aks 2 aktifse botu zıplat
                     if (w.isAks2 && !e._dondurucuJumpActive && !e._frozen) {
                         e._dondurucuJumpActive = true;
                         jumpedBots.set(e, {
@@ -566,13 +564,12 @@
                         });
                     }
 
-                    // Mermi devam eder (pierce), ama aynı bota tekrar vurmayacak
                     if (w.hitBots.size >= MAX_BOTS_HIT) break;
                 }
             }
         }
 
-        // ===== FX GÜNCELLEME =====
+        // ===== FX =====
         for (let i = dondurucuFX.length - 1; i >= 0; i--) {
             const p = dondurucuFX[i];
             if (p.isRing) {
@@ -598,40 +595,14 @@
 
     // ===== ÇİZİM =====
     chainHook('onDraw', function (ctx2) {
-        // Ulti zıplama (base çizimini engelle, kendimiz çizelim)
-        if (ultiState && ultiState.phase === 'jumping') {
-            const prog = 1 - (ultiState.timer / ULTI_JUMP_TIME);
-            const jumpH = Math.sin(prog * Math.PI) * 60;
-            // Gölge
-            ctx2.save();
-            ctx2.globalAlpha = 0.4;
-            ctx2.beginPath();
-            ctx2.ellipse(player.x, player.y, player.radius, player.radius * 0.4, 0, 0, Math.PI * 2);
-            ctx2.fillStyle = '#000'; ctx2.fill();
-            ctx2.restore();
-            // Oyuncu (havada)
-            ctx2.save();
-            ctx2.translate(player.x, player.y - jumpH);
-            ctx2.rotate(player.angle || 0);
-            ctx2.beginPath(); ctx2.arc(0, 0, player.radius + 6, 0, Math.PI * 2);
-            ctx2.strokeStyle = C_FROZEN; ctx2.lineWidth = 3; ctx2.stroke();
-            ctx2.fillStyle = C_MAIN;
-            ctx2.beginPath(); ctx2.arc(0, 0, player.radius, 0, Math.PI * 2); ctx2.fill();
-            ctx2.fillStyle = C_WHITE;
-            ctx2.beginPath(); ctx2.arc(player.radius - 4, 0, 4, 0, Math.PI * 2); ctx2.fill();
-            ctx2.restore();
-        }
-
-        // Dondurulan botların görsel efekti (mavi ton + buz kristali)
+        // Dondurulan bot görseli
         frozenBots.forEach((v, b) => {
             if (!b || b.isDead) return;
             ctx2.save();
-            // Mavi ton
             ctx2.globalAlpha = 0.4;
             ctx2.beginPath(); ctx2.arc(b.x, b.y, b.radius + 4, 0, Math.PI * 2);
             ctx2.fillStyle = C_FROZEN; ctx2.fill();
             ctx2.restore();
-            // Buz kristali ikonu
             ctx2.save();
             ctx2.translate(b.x, b.y - b.radius - 18);
             ctx2.globalAlpha = 0.8 + Math.sin(Date.now() / 150) * 0.2;
@@ -640,7 +611,6 @@
             ctx2.textAlign = 'center';
             ctx2.fillText('❄', 0, 0);
             ctx2.restore();
-            // Buz halkası
             ctx2.save();
             ctx2.beginPath();
             ctx2.arc(b.x, b.y, b.radius + 6, 0, Math.PI * 2);
@@ -652,9 +622,8 @@
             ctx2.restore();
         });
 
-        // Ses dalgaları (3 dilim birleşik koni)
+        // Ses dalgaları
         waves.forEach(w => {
-            // İz
             w.trail.forEach(pt => {
                 ctx2.save();
                 ctx2.globalAlpha = (pt.life / 12) * 0.4;
@@ -662,7 +631,6 @@
                 ctx2.fillStyle = C_LIGHT; ctx2.fill();
                 ctx2.restore();
             });
-            // Mermi
             ctx2.save();
             ctx2.translate(w.x, w.y);
             const grad = ctx2.createRadialGradient(0, 0, 0, 0, 0, 12);
@@ -680,7 +648,6 @@
             ctx2.restore();
         });
 
-        // FX
         dondurucuFX.forEach(p => {
             if (p.isRing) {
                 ctx2.save();
@@ -697,7 +664,6 @@
             }
         });
 
-        // Texts
         dondurucuTexts.forEach(t => {
             ctx2.save();
             ctx2.globalAlpha = Math.min(1, t.life / 20);
@@ -711,20 +677,18 @@
             ctx2.restore();
         });
 
-        // Nişan çizgisi (koni)
+        // Nişan konisi
         if (player.charType === CHAR_ID && player._dondurucuHideAim && !player.isDead && player.ammo >= 1) {
             const ang = aimData.angle;
             ctx2.save();
             ctx2.translate(player.x, player.y);
             ctx2.rotate(ang);
-            // Koni dolgu
             ctx2.beginPath();
             ctx2.moveTo(0, 0);
             ctx2.arc(0, 0, WAVE_RANGE, -0.22, 0.22);
             ctx2.closePath();
             ctx2.fillStyle = 'rgba(133, 193, 233, 0.12)';
             ctx2.fill();
-            // Kenar çizgileri
             ctx2.beginPath();
             ctx2.moveTo(0, 0);
             ctx2.lineTo(Math.cos(-0.18) * WAVE_RANGE, Math.sin(-0.18) * WAVE_RANGE);
@@ -736,7 +700,6 @@
             ctx2.restore();
         }
 
-        // Ekran flaşı
         if (screenFlash > 0) {
             ctx2.save();
             ctx2.globalAlpha = screenFlash / 10 * 0.5;
@@ -745,7 +708,6 @@
             ctx2.restore();
         }
 
-        // Ulti drag
         if (player.charType === CHAR_ID && ultiDrag.active && player.ultReady && !player.isDead && !ultiState) {
             const pullMag = ultiDrag.pull < 0.05 ? 1 : ultiDrag.pull;
             const dist = ULTI_PLACE_MIN + (ULTI_PLACE_MAX - ULTI_PLACE_MIN) * pullMag;
@@ -771,7 +733,6 @@
         }
     });
 
-    // ===== ARENA DÖNÜŞÜ =====
     (function () {
         const n = document.getElementById('diff-normal');
         const e = document.getElementById('diff-easy');
@@ -779,5 +740,5 @@
         if (e) { e.addEventListener('click', () => { window.GAME_MODE = 'arena'; }); e.addEventListener('touchstart', () => { window.GAME_MODE = 'arena'; }, { passive: true }); }
     })();
 
-    console.log('[MOD YÜKLENDİ] dondurucu');
+    console.log('[MOD YÜKLENDİ] dondurucu (v2)');
 })();
