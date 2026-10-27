@@ -30,19 +30,19 @@
     const MINI_WALL_AOE_RADIUS = 80; const MINI_STUCK_FRAMES = 30;
 
     // ---- Havan ----
-    const HAVAN_HP = 6000; const HAVAN_RADIUS = 26; const HAVAN_SHOOT_INTERVAL = 120;
+    const HAVAN_HP = 6000; const HAVAN_RADIUS = 26; const HAVAN_SHOOT_INTERVAL = 80;
     const HAVAN_MERMI_HASAR = 500; const HAVAN_MERMI_AOE = 100; const HAVAN_SIPER_HASAR = 220;
     const HAVAN_MERMI_FLIGHT = 90;
 
     // ---- Çavuş ----
     const CAVUS_HP = 6500; const CAVUS_RADIUS = 24; const CAVUS_SPEED = 0.7;
-    const CAVUS_SHOOT_INTERVAL = 60; const CAVUS_MERMI_HASAR = 400;
+    const CAVUS_SHOOT_INTERVAL = 30; const CAVUS_MERMI_HASAR = 400;
     const CAVUS_AURA_RADIUS = 150; const CAVUS_AURA_DURATION = 390; const CAVUS_AURA_COOLDOWN = 300;
     const CAVUS_DMG_REDIRECT = 0.40; const CAVUS_STOP_DIST = 150;
 
     // ---- Öfke ----
     const RAGE_DURATION = 180;
-    const RAGE_ATK_MULT = 2; const RAGE_SPEED_MULT = 2;
+    const RAGE_ATK_MULT = 4; const RAGE_SPEED_MULT = 3;
 
     // ---- Ağır Bot Spawn ----
     const HEAVY_SPAWN_TIME = 1500; const HEAVY_SPAWN_WARN = 240;
