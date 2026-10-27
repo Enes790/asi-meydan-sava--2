@@ -24,9 +24,9 @@
     const EXPL_PUSH = 30;
 
     // Büyük patlama (Aks 1, içe çeker)
-    const BIG_RADIUS = 100;
+    const BIG_RADIUS = 200;
     const BIG_DAMAGE = 800;
-    const BIG_PULL = 50;
+    const BIG_PULL = 100;
     const BIG_SLOW_FACTOR = 0.7;
     const BIG_SLOW_DURATION = 60;
     const KOZ_COOLDOWN = 960;
@@ -35,7 +35,7 @@
     const BURN_RADIUS = 60;
     const BURN_DURATION = 180;
     const BURN_DPS_BOT = 150;
-    const BURN_DPS_PLAYER = 50;
+    const BURN_DPS_PLAYER = -150;
 
     // Alev Saçılımı (Aks 2)
     const SACILIM_RADIUS = 150;
