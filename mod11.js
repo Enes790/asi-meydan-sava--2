@@ -1,4 +1,4 @@
-// ========== mod30.js (KISKAÇ) - v3 FINAL ==========
+// ========== mod30.js (KISKAÇ) - v4 SİNEMATİK ==========
 (function () {
     'use strict';
 
@@ -13,48 +13,45 @@
     const CHAR_HP = 2600;
     const CHAR_SPEED = 3.8;
     
-    // ===== ANA SALDIRI (Menzil 195) =====
-    const BULLET_COUNT = 2;
+    // ===== ANA SALDIRI =====
     const BULLET_DMG = 300;
     const BULLET_BONUS_DMG = 450;
     const BULLET_HEAL = 100;
     const BULLET_SPEED = PLAYER_BULLET_SPEED * 0.95;
     const BULLET_RANGE = 195;
     const BULLET_OFFSET = 12;
-    const RELOAD_SPEED = 0.015; // Ninja hızı
+    const RELOAD_SPEED = 0.015;
     const SIPER_HASAR = 60;
 
-    // ===== KANCA (Aks 1) =====
-    const HOOK_SPEED = 22;
+    // ===== KANCA =====
+    const HOOK_SPEED = 25;
     const HOOK_RANGE = 180;
     const HOOK_BOT_DMG = 350;
-    const HOOK_WALL_DMG = 80;
-    const HOOK_PULL_SPEED = 18;
+    const HOOK_SIPER_DMG = 1000;
+    const HOOK_PULL_SPEED = 25;
     const HOOK_CD = 540; // 9s
 
-    // ===== KUM FIRTINASI (Aks 2) =====
+    // ===== KUM FIRTINASI =====
     const STORM_DMG = 300;
     const STORM_PUSH = 10;
     const STORM_RADIUS = 60;
     const STORM_SPEED = PLAYER_BULLET_SPEED * 0.8;
-    const STORM_DURATION = 300; // 5s
+    const STORM_DURATION = 300;
     const STORM_TICK = 18;
-    const STORM_CD = 660; // 11s
-    const STORM_FLIGHT_TIME = 40;
+    const STORM_CD = 660;
+    const STORM_FLIGHT_TIME = 30;
     const STORM_PLACE_MAX = 220;
     const STORM_PLACE_MIN = 60;
 
-    // ===== ULTİ (İt-Çek) =====
+    // ===== ULTİ (SİNEMATİK ZIPLAMA) =====
     const ULTI_RADIUS = 100;
-    const ULTI_PUSH = 65;
-    const ULTI_PUSH_TIME = 30;   // 0.5s
-    const ULTI_STUN_TIME = 60;   // 1s
-    const ULTI_PULL_TIME = 30;   // 0.5s
-    const ULTI_DMG = 450;
+    const ULTI_JUMP_TIME = 25;      // 0.4s
+    const ULTI_PULL_TIME = 6;       // 0.1s (ani çekim)
+    const ULTI_DMG = 600;
     const ULTI_MAX_BOTS = 5;
     const ULTI_PLACE_MAX = 260;
     const ULTI_PLACE_MIN = 60;
-    const ULTI_FLIGHT_TIME = 40;
+    const ULTI_KNOCKBACK = 45;      // Fırlatma mesafesi
 
     window.GAME_EXT.characters[CHAR_ID] = { color: C_MAIN, hp: CHAR_HP, speed: CHAR_SPEED };
 
@@ -63,17 +60,32 @@
     let hookPull = null;
     let stormFlight = null;
     let storm = null;
-    let ultiFlight = null;
-    let ultiZone = null;
+    let ultiState = null; // { phase, timer, startX, startY, targetX, targetY, affectedBots }
     let poisonReady = true;
     let poisonCD = 0;
     let stormReady = true;
     let stormCD = 0;
     let kiskacFX = [];
     let kiskacTexts = [];
+    let screenFlash = 0;
     
     let ultiDrag = { active: false, startX: 0, startY: 0, angle: 0, pull: 0, touchId: null, isMouse: false };
     let stormDrag = { active: false, startX: 0, startY: 0, angle: 0, pull: 0, touchId: null, isMouse: false };
+
+    // ===== ÇİZİM SARMALAYICI (ZIPLARKEN BASE ÇİZİMİNİ ENGELLE) =====
+    if (!window._kiskacOrigDrawEntity) {
+        window._kiskacOrigDrawEntity = window.drawEntity;
+        window.drawEntity = function (e, isP) {
+            if (!e) return;
+            // Zıplarken player'ı base'in çizmesini engelle
+            if (isP && player.charType === CHAR_ID && ultiState && ultiState.phase === 'jumping') {
+                return;
+            }
+            // NaN Koruması
+            if (!Number.isFinite(e.x) || !Number.isFinite(e.y)) return;
+            return window._kiskacOrigDrawEntity(e, isP);
+        };
+    }
 
     function chainHook(name, fn) {
         const prev = window.GAME_EXT.hooks[name];
@@ -90,11 +102,11 @@
         if (!Number.isFinite(x) || !Number.isFinite(y)) return;
         kiskacTexts.push({ x, y, val: v, life: 55, maxLife: 55, isLabel: !!l, color: col || C_LIGHT });
     }
-    function burst(x, y, n, c) {
+    function burst(x, y, n, c, speed = 4) {
         if (!Number.isFinite(x) || !Number.isFinite(y)) return;
         for (let i = 0; i < n; i++) {
-            const a = Math.random() * Math.PI * 2, sp = 2 + Math.random() * 4;
-            kiskacFX.push({ x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, size: 1.5 + Math.random() * 2, life: 15 + Math.random() * 15, maxLife: 30, color: c, gravity: 0.05 });
+            const a = Math.random() * Math.PI * 2, sp = (1 + Math.random() * speed);
+            kiskacFX.push({ x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, size: 1.5 + Math.random() * 2, life: 20 + Math.random() * 20, maxLife: 40, color: c, gravity: 0.05 });
         }
     }
 
@@ -107,7 +119,7 @@
         card.innerHTML =
             '<div class="char-color-preview" style="background:' + C_MAIN + ';"></div>' +
             '<span>Kıskaç</span>' +
-            '<small>Hasar: 2×300 (kıskaç 750)<br>Güç: Kanca + Fırtına<br>Ulti: İt-Çek Alanı</small>';
+            '<small>Hasar: 2×300 (kıskaç 750)<br>Güç: Kanca + Fırtına<br>Ulti: Çekim Zıplaması</small>';
         container.appendChild(card);
         card.addEventListener('click', () => {
             selectedCharacter = CHAR_ID;
@@ -118,14 +130,10 @@
 
     function clearAll() {
         kiskacBullets = []; hook = null; hookPull = null;
-        stormFlight = null; storm = null; ultiFlight = null; ultiZone = null;
-        kiskacFX = []; kiskacTexts = [];
+        stormFlight = null; storm = null; ultiState = null;
+        kiskacFX = []; kiskacTexts = []; screenFlash = 0;
         poisonReady = true; poisonCD = 0; stormReady = true; stormCD = 0;
-        getActiveEnemies().forEach(b => {
-            if (b._ultiPhase) {
-                delete b._ultiPhase; delete b._ultiTimer; delete b._ultiOrigPos;
-            }
-        });
+        if (player) { player.jumpInvulnerable = false; player._kiskacAimHide = false; }
     }
 
     const origSet = Player.prototype.setCharacter;
@@ -150,7 +158,7 @@
     const origFire = Player.prototype.fire;
     Player.prototype.fire = function (a, pull) {
         if (this.charType !== CHAR_ID) return origFire.call(this, a, pull);
-        if (this.ammo < 1 || this.isDead || ultiZone) return;
+        if (this.ammo < 1 || this.isDead || (ultiState && ultiState.phase !== 'idle')) return;
         if (!Number.isFinite(a)) a = this.angle || 0;
 
         const perpAngle = a + Math.PI / 2;
@@ -170,11 +178,11 @@
         this.lastShotTime = Date.now();
     };
 
-    // AKS 1: KANCA
+    // AKS 1: KANCA (Düzeltildi: Siper yıkma + Çekilme)
     const origGadget = Player.prototype.activateGadget;
     Player.prototype.activateGadget = function (a, pull) {
         if (this.charType !== CHAR_ID) return origGadget.call(this, a, pull);
-        if (!poisonReady || this.isDead || ultiZone || hook) return;
+        if (!poisonReady || this.isDead || (ultiState && ultiState.phase !== 'idle') || hook) return;
         const ang = safe(a, this.angle || 0);
         if (!Number.isFinite(ang)) return;
         hook = {
@@ -191,7 +199,7 @@
     const origGadget2 = Player.prototype.activateGadget2;
     Player.prototype.activateGadget2 = function (a, pull) {
         if (this.charType !== CHAR_ID) return origGadget2.call(this, a, pull);
-        if (!stormReady || this.isDead || ultiZone || stormFlight || storm) return;
+        if (!stormReady || this.isDead || (ultiState && ultiState.phase !== 'idle') || stormFlight || storm) return;
         const ang = safe(a, this.angle || 0);
         if (!Number.isFinite(ang)) return;
         
@@ -211,13 +219,13 @@
         if (gadgetTimerText2) gadgetTimerText2.innerText = Math.ceil(STORM_CD / 60) + "s";
     };
 
-    // ULTİ (Drag)
+    // ULTİ (Zıplama + Çekim)
     const origUlti = Player.prototype.fireUlti;
     Player.prototype.fireUlti = function (a, pull) {
         if (this.charType !== CHAR_ID) return origUlti.call(this, a, pull);
         if (!Number.isFinite(a)) a = this.angle || 0;
         if (!Number.isFinite(pull)) pull = 1;
-        if (!this.ultReady || this.isDead || ultiZone || ultiFlight) return;
+        if (!this.ultReady || this.isDead || (ultiState && ultiState.phase !== 'idle')) return;
 
         const pullMag = pull > 0.05 ? pull : 1;
         const dist = ULTI_PLACE_MIN + (ULTI_PLACE_MAX - ULTI_PLACE_MIN) * pullMag;
@@ -225,12 +233,19 @@
         const ty = clampPos(this.y + Math.sin(a) * dist, WALL_THICKNESS + 40, canvas.height - WALL_THICKNESS - 40);
         if (!Number.isFinite(tx) || !Number.isFinite(ty)) return;
 
-        ultiFlight = {
-            x: this.x, y: this.y, startX: this.x, startY: this.y,
-            targetX: tx, targetY: ty, progress: 0, duration: ULTI_FLIGHT_TIME
+        // Zıplama başlat
+        ultiState = {
+            phase: 'jumping',
+            timer: ULTI_JUMP_TIME,
+            startX: this.x,
+            startY: this.y,
+            targetX: tx,
+            targetY: ty,
+            affectedBots: []
         };
+        this.jumpInvulnerable = true; // Dokunulmazlık
 
-        addText(this.x, this.y - 40, "İT-ÇEK!", true, C_MAIN);
+        addText(this.x, this.y - 40, "ÇEKİM!", true, C_MAIN);
         this.ultReady = false;
         this.ultCharge = 0;
         if (ultFill) ultFill.style.width = "0%";
@@ -249,6 +264,7 @@
     });
 
     chainHook('onReset', function () { clearAll(); });
+    
     chainHook('onPreDraw', function (ctx2) {
         if (player.charType === CHAR_ID && aimData.active && !player.isDead) {
             player._kiskacHideAim = true; aimData.active = false;
@@ -261,7 +277,7 @@
     // Drag Kontrolleri
     function uS(cx, cy) {
         if (player.charType !== CHAR_ID) return;
-        if (!player.ultReady || player.isDead || ultiZone) return;
+        if (!player.ultReady || player.isDead || (ultiState && ultiState.phase !== 'idle')) return;
         const r = ultiBtn.getBoundingClientRect();
         ultiDrag.active = true; ultiDrag.startX = r.left + r.width / 2; ultiDrag.startY = r.top + r.height / 2;
         ultiDrag.angle = player.angle; ultiDrag.pull = 0;
@@ -280,10 +296,10 @@
     window.addEventListener('mousemove', e => { if (ultiDrag.active && ultiDrag.isMouse) uM(e.clientX, e.clientY); });
     window.addEventListener('mouseup', () => { if (ultiDrag.active && ultiDrag.isMouse) { ultiDrag.isMouse = false; uE(); } });
 
-    // Fırtına Drag Kontrolleri (Opsiyonel ama görsel için)
+    // Fırtına Drag
     function sS(cx, cy) {
         if (player.charType !== CHAR_ID) return;
-        if (!stormReady || player.isDead || ultiZone || storm) return;
+        if (!stormReady || player.isDead || (ultiState && ultiState.phase !== 'idle') || storm) return;
         const r = gadgetBtn2.getBoundingClientRect();
         stormDrag.active = true; stormDrag.startX = r.left + r.width / 2; stormDrag.startY = r.top + r.height / 2;
         stormDrag.angle = player.angle; stormDrag.pull = 0;
@@ -313,6 +329,7 @@
     requestAnimationFrame(loop);
 
     function update(ts) {
+        // NaN Güvenlik Kalkanı
         if (!Number.isFinite(player.x) || !Number.isFinite(player.y)) {
             player.x = canvas.width / 2; player.y = canvas.height / 2;
         }
@@ -326,93 +343,92 @@
         if (poisonCD > 0) { poisonCD -= ts; if (poisonCD <= 0) { poisonCD = 0; poisonReady = true; if (gadgetBtn) gadgetBtn.classList.remove('cooldown'); if (gadgetTimerText) gadgetTimerText.innerText = ""; } }
         if (stormCD > 0) { stormCD -= ts; if (stormCD <= 0) { stormCD = 0; stormReady = true; if (gadgetBtn2) gadgetBtn2.classList.remove('cooldown'); if (gadgetTimerText2) gadgetTimerText2.innerText = ""; } }
 
-        // ===== ULTİ PROJEKTİL =====
-        if (ultiFlight) {
-            ultiFlight.progress += ts / ultiFlight.duration;
-            if (ultiFlight.progress >= 1) {
-                ultiZone = {
-                    x: ultiFlight.targetX, y: ultiFlight.targetY,
-                    radius: ULTI_RADIUS, phase: 'push', timer: ULTI_PUSH_TIME,
-                    affectedBots: []
-                };
-                ultiFlight = null;
-                burst(ultiZone.x, ultiZone.y, 20, C_MAIN);
-                screenShake = 8;
-                addText(ultiZone.x, ultiZone.y - 40, "İT!", true, C_MAIN);
-
-                // İtme anında etkilenecek botları seç (Max 5)
-                const inRange = [];
-                getActiveEnemies().forEach(e => {
-                    if (getDist(ultiZone, e) < ULTI_RADIUS + e.radius) inRange.push(e);
-                });
-                inRange.slice(0, ULTI_MAX_BOTS).forEach(e => {
-                    ultiZone.affectedBots.push(e);
-                    e._ultiPhase = 'push';
-                    e._ultiTimer = ULTI_PUSH_TIME;
-                    e._ultiOrigPos = { x: e.x, y: e.y };
-                    if (e._origSpeed === undefined) e._origSpeed = e.speed;
-                    e.speed = 0; // Sersemletme
-                });
-            }
-        }
-
-        // ===== ULTİ ALANI (İt-Çek Döngüsü) =====
-        if (ultiZone) {
-            if (ultiZone.phase === 'push') {
-                ultiZone.timer -= ts;
-                ultiZone.affectedBots.forEach(e => {
-                    if (!e || e.isDead) return;
-                    const ang = Math.atan2(e.y - ultiZone.y, e.x - ultiZone.x);
-                    // İtme hızı: 65 birim / 30 frame = ~2.1 birim/frame
-                    e.x += Math.cos(ang) * 2.1 * ts;
-                    e.y += Math.sin(ang) * 2.1 * ts;
-                    e.x = clampPos(e.x, e.radius + WALL_THICKNESS, canvas.width - e.radius - WALL_THICKNESS);
-                    e.y = clampPos(e.y, e.radius + WALL_THICKNESS, canvas.height - e.radius - WALL_THICKNESS);
-                });
-                if (ultiZone.timer <= 0) {
-                    ultiZone.phase = 'stun';
-                    ultiZone.timer = ULTI_STUN_TIME;
-                    addText(ultiZone.x, ultiZone.y - 40, "SERSEM!", true, C_SHRINK || '#8e44ad');
-                    ultiZone.affectedBots.forEach(e => { if (e) e.speed = 0; });
+        // ===== ULTİ SİNEMATİK AKIŞI =====
+        if (ultiState) {
+            if (ultiState.phase === 'jumping') {
+                ultiState.timer -= ts;
+                const prog = 1 - (ultiState.timer / ULTI_JUMP_TIME);
+                // Yay çizerek zıplama
+                player.x = ultiState.startX + (ultiState.targetX - ultiState.startX) * prog;
+                player.y = ultiState.startY + (ultiState.targetY - ultiState.startY) * prog;
+                
+                if (ultiState.timer <= 0) {
+                    // Varış ve Çekme Aşaması
+                    ultiState.phase = 'pulling';
+                    ultiState.timer = ULTI_PULL_TIME;
+                    screenShake = 10;
+                    screenFlash = 5;
+                    burst(player.x, player.y, 25, C_WHITE, 8);
+                    
+                    // Çekilecek botları seç
+                    const inRange = [];
+                    getActiveEnemies().forEach(e => {
+                        if (getDist(player, e) < ULTI_RADIUS + e.radius) inRange.push(e);
+                    });
+                    ultiState.affectedBots = inRange.slice(0, ULTI_MAX_BOTS);
+                    
+                    ultiState.affectedBots.forEach(e => {
+                        if (e._origSpeed === undefined) e._origSpeed = e.speed;
+                        e.speed = 0; // Sersemletme (Çekim sırasında)
+                    });
                 }
-            } else if (ultiZone.phase === 'stun') {
-                ultiZone.timer -= ts;
-                if (ultiZone.timer <= 0) {
-                    ultiZone.phase = 'pull';
-                    ultiZone.timer = ULTI_PULL_TIME;
-                    addText(ultiZone.x, ultiZone.y - 40, "ÇEK!", true, C_ACCENT);
-                }
-            } else if (ultiZone.phase === 'pull') {
-                ultiZone.timer -= ts;
-                ultiZone.affectedBots.forEach(e => {
+            } else if (ultiState.phase === 'pulling') {
+                ultiState.timer -= ts;
+                const prog = 1 - (ultiState.timer / ULTI_PULL_TIME);
+                
+                ultiState.affectedBots.forEach((e, idx) => {
                     if (!e || e.isDead) return;
-                    const ang = Math.atan2(ultiZone.y - e.y, ultiZone.x - e.x);
-                    const d = getDist(e, ultiZone);
-                    // Çekme: eğer merkeze 20 birimden fazla uzaksa çek
-                    if (d > 20) {
-                        e.x += Math.cos(ang) * 2.5 * ts;
-                        e.y += Math.sin(ang) * 2.5 * ts;
-                    }
+                    // Botları anında merkeze çek (prog 0'dan 1'e hızla gider)
+                    const angleOffset = (idx / ULTI_MAX_BOTS) * Math.PI * 2;
+                    const targetX = player.x + Math.cos(angleOffset) * 5; // Hafif ofset (üst üste binmesinler)
+                    const targetY = player.y + Math.sin(angleOffset) * 5;
+                    
+                    e.x = e.x + (targetX - e.x) * (prog > 0.8 ? 1 : prog * 1.5);
+                    e.y = e.y + (targetY - e.y) * (prog > 0.8 ? 1 : prog * 1.5);
                 });
-                if (ultiZone.timer <= 0) {
-                    // PATLAMA ANI
-                    ultiZone.affectedBots.forEach(e => {
+
+                if (ultiState.timer <= 0) {
+                    // Patlama Aşaması
+                    ultiState.phase = 'exploding';
+                    screenShake = 15;
+                    screenFlash = 10;
+                    
+                    // Çift katmanlı patlama halkası
+                    kiskacFX.push({ x: player.x, y: player.y, vx: 0, vy: 0, size: 10, life: 20, maxLife: 20, color: C_WHITE, isRing: true, ringRadius: 0, maxRing: ULTI_RADIUS * 1.5, ringSpeed: 10 });
+                    kiskacFX.push({ x: player.x, y: player.y, vx: 0, vy: 0, size: 10, life: 30, maxLife: 30, color: C_MAIN, isRing: true, ringRadius: 0, maxRing: ULTI_RADIUS * 2, ringSpeed: 5 });
+                    
+                    // Hasar ve Fırlatma
+                    ultiState.affectedBots.forEach(e => {
                         if (!e || e.isDead) return;
                         e.hp -= ULTI_DMG;
-                        addFloatingNumber(e.x, e.y, ULTI_DMG, C_MAIN);
+                        addFloatingNumber(e.x, e.y, ULTI_DMG, C_WHITE);
+                        
+                        // 45 birim dışa fırlatma
+                        const ang = Math.atan2(e.y - player.y, e.x - player.x);
+                        e.kbX = Math.cos(ang) * ULTI_KNOCKBACK;
+                        e.kbY = Math.sin(ang) * ULTI_KNOCKBACK;
+                        
                         if (e._origSpeed !== undefined) e.speed = e._origSpeed;
-                        delete e._ultiPhase; delete e._ultiTimer; delete e._ultiOrigPos; delete e._origSpeed;
-                        burst(e.x, e.y, 8, C_LIGHT);
+                        delete e._origSpeed;
                     });
-                    burst(ultiZone.x, ultiZone.y, 30, C_MAIN);
-                    screenShake = 12;
-                    addText(ultiZone.x, ultiZone.y - 40, "PATLADI!", true, C_WHITE);
-                    ultiZone = null;
+                    
+                    // Etrafa yayılan parçacıklar
+                    burst(player.x, player.y, 40, C_ACCENT, 12);
+                    burst(player.x, player.y, 20, C_LIGHT, 8);
+                }
+            } else if (ultiState.phase === 'exploding') {
+                // Patlama sonrası kısa bir bekleme (efektlerin oturması için)
+                ultiState.timer -= ts;
+                if (ultiState.timer <= 0) {
+                    player.jumpInvulnerable = false;
+                    ultiState = null;
                 }
             }
+        } else {
+            player.jumpInvulnerable = false;
         }
 
-        // ===== KUM FIRTINASI PROJEKTİL =====
+        // ===== KUM FIRTINASI =====
         if (stormFlight) {
             stormFlight.progress += ts / stormFlight.duration;
             if (stormFlight.progress >= 1) {
@@ -422,21 +438,19 @@
                     tickTimer: 0, angle: 0
                 };
                 stormFlight = null;
-                burst(storm.x, storm.y, 10, C_ACCENT);
+                burst(storm.x, storm.y, 15, C_ACCENT);
             }
         }
 
-        // ===== KUM FIRTINASI =====
         if (storm) {
             storm.timer -= ts;
             storm.angle += 0.2 * ts;
             
-            // Sadece mermiyi takip et
+            // Sadece Kıskaç'ın mermilerini takip et
             if (kiskacBullets.length > 0) {
                 const target = kiskacBullets[0];
                 const ang = Math.atan2(target.y - storm.y, target.x - storm.x);
-                const d = getDist(storm, target);
-                if (d > 20) {
+                if (getDist(storm, target) > 20) {
                     storm.x += Math.cos(ang) * STORM_SPEED * ts;
                     storm.y += Math.sin(ang) * STORM_SPEED * ts;
                 }
@@ -468,21 +482,36 @@
         if (hook && !hook.isDead) {
             hook.x += hook.vx * ts; hook.y += hook.vy * ts;
             const traveled = getDist({ x: hook.sx, y: hook.sy }, hook);
+            
             if (traveled > HOOK_RANGE) { hook = null; }
             else {
-                let hitWall = false;
+                let hitSipe = false;
+                // Siper kontrolü
                 for (const o of obstacles.concat(cactusWalls || [])) {
                     if (getDist(hook, o) < o.radius + 8) {
-                        o.hp -= HOOK_WALL_DMG;
-                        addFloatingNumber(o.x, o.y, HOOK_WALL_DMG, C_MAIN);
+                        o.hp = 0; // Siperi anında yok et
+                        // Çevredeki botlara 1000 AoE hasar
+                        getActiveEnemies().forEach(e => {
+                            if (getDist(o, e) < o.radius + 60) {
+                                e.hp -= HOOK_SIPER_DMG;
+                                addFloatingNumber(e.x, e.y, HOOK_SIPER_DMG, C_MAIN);
+                                burst(e.x, e.y, 8, C_ACCENT);
+                            }
+                        });
+                        burst(o.x, o.y, 20, C_MAIN, 8);
+                        screenShake = 10;
+                        
+                        // Oyuncuyu sipere çek
                         const ang = Math.atan2(o.y - player.y, o.x - player.x);
                         const dist = getDist(player, o) - o.radius - player.radius - 10;
                         hookPull = { targetX: player.x + Math.cos(ang) * dist, targetY: player.y + Math.sin(ang) * dist };
-                        hitWall = true; break;
+                        hitSipe = true; break;
                     }
                 }
-                if (hitWall) hook = null;
+                
+                if (hitSipe) hook = null;
                 else {
+                    // Bot kontrolü
                     for (const e of getActiveEnemies()) {
                         if (e.isDead) continue;
                         if (getDist(hook, e) < e.radius + 8) {
@@ -523,7 +552,6 @@
             const traveled = getDist({ x: b.sx, y: b.sy }, b);
             let stopped = false;
 
-            // SİPER KONTROLÜ (Düzeltildi: 60 hasar)
             for (const o of obstacles.concat(cactusWalls || [])) {
                 if (getDist(b, o) < o.radius + 5) {
                     o.hp -= SIPER_HASAR;
@@ -559,7 +587,6 @@
             }
         }
 
-        // Birleşik hasar yazıları
         hitLog.forEach(h => {
             if (h.bot.isDead) return;
             const label = h.isPincer ? "KISKAÇ! " : "";
@@ -567,56 +594,82 @@
             if (h.heal > 0) addText(player.x, player.y - 20, "+" + h.heal, false, C_HEAL);
         });
 
-        // FX
+        // FX Güncelleme
         for (let i = kiskacFX.length - 1; i >= 0; i--) {
             const p = kiskacFX[i];
-            p.x += p.vx * ts; p.y += p.vy * ts;
-            p.vy += p.gravity * ts; p.vx *= 0.95; p.vy *= 0.95; p.life -= ts;
-            if (p.life <= 0) kiskacFX.splice(i, 1);
+            if (p.isRing) {
+                p.ringRadius += p.ringSpeed * ts;
+                p.life -= ts;
+                if (p.life <= 0) kiskacFX.splice(i, 1);
+            } else {
+                p.x += p.vx * ts; p.y += p.vy * ts;
+                p.vy += p.gravity * ts; p.vx *= 0.95; p.vy *= 0.95; p.life -= ts;
+                if (p.life <= 0) kiskacFX.splice(i, 1);
+            }
         }
         for (let i = kiskacTexts.length - 1; i >= 0; i--) {
             const t = kiskacTexts[i];
             t.y -= 0.7 * ts; t.life -= ts;
             if (t.life <= 0) kiskacTexts.splice(i, 1);
         }
+        if (screenFlash > 0) screenFlash -= ts;
     }
 
     // ÇİZİM
     chainHook('onDraw', function (ctx2) {
-        // Ulti Alanı
-        if (ultiZone) {
-            ctx2.save();
-            const alpha = ultiZone.phase === 'stun' ? 0.6 : 0.3;
-            ctx2.globalAlpha = alpha + Math.sin(Date.now() / 150) * 0.1;
-            ctx2.beginPath(); ctx2.arc(ultiZone.x, ultiZone.y, ULTI_RADIUS, 0, Math.PI * 2);
-            ctx2.strokeStyle = ultiZone.phase === 'pull' ? C_ACCENT : C_MAIN;
-            ctx2.lineWidth = 4; ctx2.setLineDash([8, 6]); ctx2.stroke(); ctx2.setLineDash([]);
+        // ULTİ Zıplama Çizimi (Base player'ı engelledik, kendimiz çiziyoruz)
+        if (ultiState && ultiState.phase === 'jumping') {
+            const prog = 1 - (ultiState.timer / ULTI_JUMP_TIME);
+            const jumpH = Math.sin(prog * Math.PI) * 60; // Yay yüksekliği
             
-            // İç çekim çizgileri (çekme fazındaysa)
-            if (ultiZone.phase === 'pull') {
-                for(let i=0; i<8; i++) {
-                    const a = (i/8)*Math.PI*2 + Date.now()/200;
-                    ctx2.beginPath(); ctx2.moveTo(ultiZone.x + Math.cos(a)*ULTI_RADIUS, ultiZone.y + Math.sin(a)*ULTI_RADIUS);
-                    ctx2.lineTo(ultiZone.x + Math.cos(a)*20, ultiZone.y + Math.sin(a)*20);
-                    ctx2.strokeStyle = 'rgba(230,126,34,0.5)'; ctx2.lineWidth = 2; ctx2.stroke();
+            // Gölge
+            ctx2.save();
+            ctx2.globalAlpha = 0.4;
+            ctx2.beginPath();
+            ctx2.ellipse(player.x, player.y, player.radius, player.radius * 0.4, 0, 0, Math.PI * 2);
+            ctx2.fillStyle = '#000'; ctx2.fill();
+            ctx2.restore();
+
+            // Oyuncu (Havada)
+            ctx2.save();
+            ctx2.translate(player.x, player.y - jumpH);
+            ctx2.rotate(player.angle || 0);
+            // Turuncu Enerji Kalkanı
+            ctx2.beginPath(); ctx2.arc(0, 0, player.radius + 8, 0, Math.PI * 2);
+            ctx2.strokeStyle = C_MAIN; ctx2.lineWidth = 3; ctx2.stroke();
+            ctx2.fillStyle = C_DARK;
+            ctx2.beginPath(); ctx2.arc(0, 0, player.radius, 0, Math.PI * 2); ctx2.fill();
+            // Gövde detayı
+            ctx2.fillStyle = C_MAIN;
+            ctx2.beginPath(); ctx2.moveTo(0, -player.radius); ctx2.lineTo(player.radius, 0); ctx2.lineTo(0, player.radius); ctx2.lineTo(-player.radius, 0); ctx2.closePath(); ctx2.fill();
+            ctx2.restore();
+        }
+
+        // ULTİ Çekim ve Patlama Alanı
+        if (ultiState && ultiState.phase !== 'jumping') {
+            const prog = ultiState.phase === 'pulling' ? 1 - (ultiState.timer / ULTI_PULL_TIME) : 1;
+            
+            ctx2.save();
+            ctx2.translate(player.x, player.y);
+            // Çekim Alanı
+            ctx2.globalAlpha = 0.3 + Math.sin(Date.now() / 100) * 0.1;
+            ctx2.beginPath(); ctx2.arc(0, 0, ULTI_RADIUS, 0, Math.PI * 2);
+            ctx2.strokeStyle = C_MAIN; ctx2.lineWidth = 4; ctx2.setLineDash([10, 5]); ctx2.stroke(); ctx2.setLineDash([]);
+            
+            // Çekim çizgileri (içe doğru)
+            if (ultiState.phase === 'pulling') {
+                for (let i = 0; i < 8; i++) {
+                    const a = (i / 8) * Math.PI * 2 + Date.now() / 200;
+                    ctx2.beginPath();
+                    ctx2.moveTo(Math.cos(a) * ULTI_RADIUS, Math.sin(a) * ULTI_RADIUS);
+                    ctx2.lineTo(Math.cos(a) * 10, Math.sin(a) * 10);
+                    ctx2.strokeStyle = C_WHITE; ctx2.lineWidth = 2; ctx2.globalAlpha = 0.5 * prog; ctx2.stroke();
                 }
             }
             ctx2.restore();
         }
 
-        if (ultiFlight) {
-            const prog = ultiFlight.progress;
-            const cx = ultiFlight.startX + (ultiFlight.targetX - ultiFlight.startX) * prog;
-            const cy = ultiFlight.startY + (ultiFlight.targetY - ultiFlight.startY) * prog;
-            const arc = Math.sin(prog * Math.PI) * 100;
-            ctx2.save();
-            ctx2.globalAlpha = 0.5; ctx2.beginPath(); ctx2.arc(ultiFlight.targetX, ultiFlight.targetY, ULTI_RADIUS, 0, Math.PI * 2);
-            ctx2.strokeStyle = C_MAIN; ctx2.lineWidth = 2; ctx2.setLineDash([5,5]); ctx2.stroke(); ctx2.setLineDash([]);
-            ctx2.globalAlpha = 1; ctx2.beginPath(); ctx2.arc(cx, cy - arc, 12, 0, Math.PI * 2);
-            ctx2.fillStyle = C_MAIN; ctx2.fill(); ctx2.strokeStyle = C_WHITE; ctx2.lineWidth = 2; ctx2.stroke();
-            ctx2.restore();
-        }
-
+        // Kum Fırtınası
         if (storm) {
             ctx2.save(); ctx2.translate(storm.x, storm.y); ctx2.rotate(storm.angle);
             ctx2.globalAlpha = 0.6; ctx2.beginPath(); ctx2.arc(0, 0, STORM_RADIUS, 0, Math.PI * 2);
@@ -636,10 +689,8 @@
             const cy = stormFlight.startY + (stormFlight.targetY - stormFlight.startY) * prog;
             const arc = Math.sin(prog * Math.PI) * 80;
             ctx2.save();
-            // Fırtına hedef işareti (yerde)
             ctx2.globalAlpha = 0.5; ctx2.beginPath(); ctx2.arc(stormFlight.targetX, stormFlight.targetY, STORM_RADIUS, 0, Math.PI * 2);
             ctx2.strokeStyle = C_ACCENT; ctx2.lineWidth = 2; ctx2.setLineDash([4,4]); ctx2.stroke(); ctx2.setLineDash([]);
-            // Mermi
             ctx2.globalAlpha = 1; ctx2.beginPath(); ctx2.arc(cx, cy - arc, 8, 0, Math.PI * 2);
             ctx2.fillStyle = C_ACCENT; ctx2.fill(); ctx2.strokeStyle = C_WHITE; ctx2.lineWidth = 2; ctx2.stroke();
             ctx2.restore();
@@ -669,18 +720,24 @@
         });
 
         kiskacFX.forEach(p => {
-            ctx2.save(); ctx2.globalAlpha = Math.min(1, p.life / 15);
-            ctx2.beginPath(); ctx2.arc(p.x, p.y, p.size, 0, Math.PI * 2); ctx2.fillStyle = p.color; ctx2.fill(); ctx2.restore();
+            if (p.isRing) {
+                ctx2.save(); ctx2.globalAlpha = Math.max(0, p.life / p.maxLife) * 0.8;
+                ctx2.beginPath(); ctx2.arc(p.x, p.y, p.ringRadius, 0, Math.PI * 2);
+                ctx2.strokeStyle = p.color; ctx2.lineWidth = 4; ctx2.stroke(); ctx2.restore();
+            } else {
+                ctx2.save(); ctx2.globalAlpha = Math.min(1, p.life / 15);
+                ctx2.beginPath(); ctx2.arc(p.x, p.y, p.size, 0, Math.PI * 2); ctx2.fillStyle = p.color; ctx2.fill(); ctx2.restore();
+            }
         });
 
         kiskacTexts.forEach(t => {
             ctx2.save(); ctx2.globalAlpha = Math.min(1, t.life / 20);
-            ctx2.font = t.isLabel ? 'bold 15px Arial' : 'bold 13px Arial'; ctx2.textAlign = 'center';
+            ctx2.font = t.isLabel ? 'bold 16px Arial' : 'bold 13px Arial'; ctx2.textAlign = 'center';
             ctx2.fillStyle = t.color || C_LIGHT; ctx2.strokeStyle = 'rgba(20,10,5,0.9)'; ctx2.lineWidth = 3;
             ctx2.strokeText(t.val, t.x, t.y); ctx2.fillText(t.val, t.x, t.y); ctx2.restore();
         });
 
-        // Nişan Çizgisi (İçi boş beyaz dikdörtgen)
+        // Nişan Çizgisi
         if (player.charType === CHAR_ID && player._kiskacHideAim && !player.isDead && player.ammo >= 1) {
             const ang = aimData.angle;
             ctx2.save(); ctx2.translate(player.x, player.y); ctx2.rotate(ang);
@@ -691,8 +748,17 @@
             ctx2.restore();
         }
 
-        // Ulti Drag
-        if (player.charType === CHAR_ID && ultiDrag.active && player.ultReady && !player.isDead) {
+        // Ekran Flaşı (Patlama)
+        if (screenFlash > 0) {
+            ctx2.save();
+            ctx2.globalAlpha = screenFlash / 10 * 0.6;
+            ctx2.fillStyle = C_WHITE;
+            ctx2.fillRect(0, 0, canvas.width, canvas.height);
+            ctx2.restore();
+        }
+
+        // Ulti Drag (Sadece zıplarken değil)
+        if (player.charType === CHAR_ID && ultiDrag.active && player.ultReady && !player.isDead && !ultiState) {
             const pullMag = ultiDrag.pull < 0.05 ? 1 : ultiDrag.pull;
             const dist = ULTI_PLACE_MIN + (ULTI_PLACE_MAX - ULTI_PLACE_MIN) * pullMag;
             const tx = clampPos(player.x + Math.cos(ultiDrag.angle) * dist, WALL_THICKNESS + 40, canvas.width - WALL_THICKNESS - 40);
@@ -704,20 +770,6 @@
             ctx2.strokeStyle = C_MAIN; ctx2.lineWidth = 3; ctx2.stroke();
             ctx2.restore();
         }
-
-        // Fırtına Drag (Gösterge)
-        if (player.charType === CHAR_ID && stormDrag.active && stormReady && !player.isDead) {
-            const pullMag = stormDrag.pull < 0.05 ? 1 : stormDrag.pull;
-            const dist = STORM_PLACE_MIN + (STORM_PLACE_MAX - STORM_PLACE_MIN) * pullMag;
-            const tx = clampPos(player.x + Math.cos(stormDrag.angle) * dist, WALL_THICKNESS + 40, canvas.width - WALL_THICKNESS - 40);
-            const ty = clampPos(player.y + Math.sin(stormDrag.angle) * dist, WALL_THICKNESS + 40, canvas.height - WALL_THICKNESS - 40);
-            ctx2.save(); ctx2.beginPath(); ctx2.moveTo(player.x, player.y); ctx2.lineTo(tx, ty);
-            ctx2.strokeStyle = 'rgba(230,126,34,0.6)'; ctx2.lineWidth = 2; ctx2.setLineDash([6, 6]); ctx2.stroke(); ctx2.setLineDash([]);
-            ctx2.beginPath(); ctx2.arc(tx, ty, STORM_RADIUS, 0, Math.PI * 2);
-            ctx2.fillStyle = 'rgba(230,126,34,0.15)'; ctx2.fill();
-            ctx2.strokeStyle = C_ACCENT; ctx2.lineWidth = 2; ctx2.stroke();
-            ctx2.restore();
-        }
     });
 
     (function () {
@@ -727,5 +779,5 @@
         if (e) { e.addEventListener('click', () => { window.GAME_MODE = 'arena'; }); e.addEventListener('touchstart', () => { window.GAME_MODE = 'arena'; }, { passive: true }); }
     })();
 
-    console.log('[MOD YÜKLENDİ] kiskac (v3 Final)');
+    console.log('[MOD YÜKLENDİ] kiskac (v4 Sinematik)');
 })();
