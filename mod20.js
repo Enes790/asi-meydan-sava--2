@@ -64,7 +64,7 @@
     const HEYKEL_ILK_INSAA_SURESI = 220;
 
     // ========== Heykel ==========
-    const HEYKEL_HP = 1500;
+    const HEYKEL_HP = 15000;
     const HEYKEL_SPEED = 0.7;
     const HEYKEL_RADIUS = 30;
     const HEYKEL_SALDIRI_HASAR = 30;
@@ -79,9 +79,9 @@
     const BOGA_HP = 12000;
     const BOGA_NORMAL_HIZ = 0.5;
     const BOGA_KOSMA_HIZ = 12.8;
-    const BOGA_BEKLEME_SURE = 60;
-    const BOGA_SARJ_SURE = 60;
-    const BOGA_OFKE_SURE = 70;
+    const BOGA_BEKLEME_SURE = 40;
+    const BOGA_SARJ_SURE = 40;
+    const BOGA_OFKE_SURE = 60;
     const BOGA_TEMAS_HASAR = 800;
     const BOGA_ITME_MESAFE = 45;
     const BOGA_SERSEMLE_SURE = 50;
