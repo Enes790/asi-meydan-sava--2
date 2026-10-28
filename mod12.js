@@ -1,9 +1,6 @@
-// ========== mod31.js (DONDURUCU) - v3 ==========
-// Düzeltmeler:
-// 1. İlk vurulan bot artık ORTA dilim (800 hasar) — wave sırası düzeltildi
-// 2. Her bot vuruşunda +200 HP heal
-// 3. Menzil 169 → 200 (+%18 daha)
-// 4. (Önceki) HP 3200, zıplama hurda fix, donan bot ateş etmiyor
+// ========== mod31.js (DONDURUCU) - v4 (BUG FIX) ==========
+// DÜZELTME: Dondurulan bot öldüğünde speed ve shootInterval geri yükleniyor
+// Bu sayede respawn olan mor botlar normal çalışıyor
 
 (function () {
     'use strict';
@@ -18,28 +15,24 @@
     const CHAR_HP = 3200;
     const CHAR_SPEED = 3.6;
 
-    // ===== ANA SALDIRI =====
-    const WAVE_RANGE = 200;                    // ← YENİ: 169 → 200
+    const WAVE_RANGE = 200;
     const WAVE_SPEED = PLAYER_BULLET_SPEED * 1.0;
-    const WAVE_ANGLES = [-0.18, 0.18, 0];      // ← YENİ: Orta en sonda (backwards iterasyonda ilk çarpar)
+    const WAVE_ANGLES = [-0.18, 0.18, 0];
     const CENTER_DMG = 800;
     const SIDE_DMG = 100;
     const MAX_BOTS_HIT = 4;
     const WALL_DMG = 60;
     const RELOAD_SPEED = 0.014;
-    const HEAL_PER_HIT = 200;                  // ← YENİ: Her bot vuruşunda +200 HP
+    const HEAL_PER_HIT = 200;
 
-    // ===== AKS 1 =====
     const AKS1_HEAL = 300;
     const AKS1_EXTRA_TIME = 60;
     const AKS1_CD = 900;
 
-    // ===== AKS 2 =====
     const AKS2_JUMP_TIME = 24;
     const AKS2_JUMP_HEIGHT = 60;
     const AKS2_CD = 900;
 
-    // ===== ULTİ =====
     const ULTI_RADIUS = 100;
     const ULTI_JUMP_TIME = 40;
     const ULTI_DELAY = 30;
@@ -89,8 +82,7 @@
             const a = Math.random() * Math.PI * 2;
             const v = 1 + Math.random() * sp;
             dondurucuFX.push({
-                x, y,
-                vx: Math.cos(a) * v, vy: Math.sin(a) * v,
+                x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v,
                 size: 1.5 + Math.random() * 2,
                 life: 20 + Math.random() * 20, maxLife: 40,
                 color: c, gravity: 0.05
@@ -195,7 +187,7 @@
                 vx: Math.cos(ang) * WAVE_SPEED,
                 vy: Math.sin(ang) * WAVE_SPEED,
                 angle: ang,
-                isCenter: idx === 2,   // ← DÜZELTME: Orta index 2'de
+                isCenter: idx === 2,
                 isDead: false,
                 hitBots: sharedHitBots,
                 travelDist: 0,
@@ -253,13 +245,9 @@
         if (!Number.isFinite(tx) || !Number.isFinite(ty)) return;
 
         ultiState = {
-            phase: 'jumping',
-            timer: ULTI_JUMP_TIME,
-            startX: this.x,
-            startY: this.y,
-            targetX: tx,
-            targetY: ty,
-            affectedBots: []
+            phase: 'jumping', timer: ULTI_JUMP_TIME,
+            startX: this.x, startY: this.y,
+            targetX: tx, targetY: ty, affectedBots: []
         };
         this.isJumping = true;
         this.jumpInvulnerable = true;
@@ -411,7 +399,7 @@
                     screenShake = 10;
                     screenFlash = 6;
                     burst(player.x, player.y, 25, C_FROZEN, 8);
-                    
+
                     const inRange = [];
                     getActiveEnemies().forEach(e => {
                         if (getDist(player, e) < ULTI_RADIUS + e.radius) inRange.push(e);
@@ -451,10 +439,19 @@
             }
         }
 
-        // ===== DONDURULAN BOTLAR =====
+        // ===== DONDURULAN BOTLAR (BUG FIX) =====
         frozenBots.forEach((v, b) => {
             v.timer -= ts;
-            if (!b || b.isDead) {
+            if (!b) {
+                frozenBots.delete(b);
+                return;
+            }
+            // KRİTİK FIX: Bot öldüyse orijinal değerleri geri yükle
+            // Yoksa respawn olan bot kalıcı olarak donuk kalır
+            if (b.isDead) {
+                if (v.origSpeed !== undefined) b.speed = v.origSpeed;
+                if (v.origShoot !== undefined) b.shootInterval = v.origShoot;
+                delete b._frozen;
                 frozenBots.delete(b);
                 return;
             }
@@ -490,7 +487,13 @@
         // ===== AKS 2 ZIPLATMA =====
         jumpedBots.forEach((v, b) => {
             v.timer -= ts;
-            if (!b || b.isDead) {
+            if (!b) {
+                jumpedBots.delete(b);
+                return;
+            }
+            if (b.isDead) {
+                if (v.origY !== undefined) b.y = v.origY;
+                delete b._dondurucuJumpActive;
                 jumpedBots.delete(b);
                 return;
             }
@@ -549,7 +552,6 @@
                     const dmg = w.isCenter ? CENTER_DMG : SIDE_DMG;
                     e.hp -= dmg;
                     addFloatingNumber(e.x, e.y, dmg, w.isCenter ? C_FROZEN : C_LIGHT);
-                    // YENİ: Her bot vuruşunda +200 HP
                     player.hp = Math.min(player.maxHp, player.hp + HEAL_PER_HIT);
                     addFloatingNumber(player.x, player.y - 20, "+" + HEAL_PER_HIT, C_HEAL);
                     w.hitBots.add(e);
@@ -557,10 +559,7 @@
 
                     if (w.isAks2 && !e._dondurucuJumpActive && !e._frozen) {
                         e._dondurucuJumpActive = true;
-                        jumpedBots.set(e, {
-                            timer: AKS2_JUMP_TIME,
-                            origY: e.y
-                        });
+                        jumpedBots.set(e, { timer: AKS2_JUMP_TIME, origY: e.y });
                     }
 
                     if (w.hitBots.size >= MAX_BOTS_HIT) break;
@@ -736,5 +735,5 @@
         if (e) { e.addEventListener('click', () => { window.GAME_MODE = 'arena'; }); e.addEventListener('touchstart', () => { window.GAME_MODE = 'arena'; }, { passive: true }); }
     })();
 
-    console.log('[MOD YÜKLENDİ] dondurucu (v3)');
+    console.log('[MOD YÜKLENDİ] dondurucu (v4 bug fix)');
 })();
