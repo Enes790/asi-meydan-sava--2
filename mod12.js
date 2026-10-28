@@ -23,7 +23,7 @@
     const MAX_BOTS_HIT = 4;
     const WALL_DMG = 60;
     const RELOAD_SPEED = 0.014;
-    const HEAL_PER_HIT = 200;
+    const HEAL_PER_HIT = 70;
 
     const AKS1_HEAL = 300;
     const AKS1_EXTRA_TIME = 60;
