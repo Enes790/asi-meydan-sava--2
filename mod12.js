@@ -1,10 +1,9 @@
-// ========== mod31.js (DONDURUCU) - v2 ==========
+// ========== mod31.js (DONDURUCU) - v3 ==========
 // Düzeltmeler:
-// 1. HP: 2600 → 3200 (+600)
-// 2. Menzil: 130 → 169 (+%30)
-// 3. Zıplama: base isJumping kullanılıyor (hurda görünüm düzeldi)
-// 4. Donan botlar ateş etmiyor (her frame lastShot sıfırlanıyor)
-// 5. İlk vurulan bot: ORTA dilim önce çarpıyor (800 hasar)
+// 1. İlk vurulan bot artık ORTA dilim (800 hasar) — wave sırası düzeltildi
+// 2. Her bot vuruşunda +200 HP heal
+// 3. Menzil 169 → 200 (+%18 daha)
+// 4. (Önceki) HP 3200, zıplama hurda fix, donan bot ateş etmiyor
 
 (function () {
     'use strict';
@@ -15,19 +14,20 @@
     const C_DARK = '#1a252f';
     const C_WHITE = '#ffffff';
     const C_FROZEN = '#00bcd4';
-    const CHAR_HP = 3200;          // ← DÜZELTME 1: +600
+    const C_HEAL = '#2ecc71';
+    const CHAR_HP = 3200;
     const CHAR_SPEED = 3.6;
 
     // ===== ANA SALDIRI =====
-    const WAVE_RANGE = 169;        // ← DÜZELTME 2: 130*1.3
+    const WAVE_RANGE = 200;                    // ← YENİ: 169 → 200
     const WAVE_SPEED = PLAYER_BULLET_SPEED * 1.0;
-    // DÜZELTME 5: Center önce ekleniyor (ilk çarpsın diye)
-    const WAVE_ANGLES = [0, -0.18, 0.18];
+    const WAVE_ANGLES = [-0.18, 0.18, 0];      // ← YENİ: Orta en sonda (backwards iterasyonda ilk çarpar)
     const CENTER_DMG = 800;
     const SIDE_DMG = 100;
     const MAX_BOTS_HIT = 4;
     const WALL_DMG = 60;
     const RELOAD_SPEED = 0.014;
+    const HEAL_PER_HIT = 200;                  // ← YENİ: Her bot vuruşunda +200 HP
 
     // ===== AKS 1 =====
     const AKS1_HEAL = 300;
@@ -195,7 +195,7 @@
                 vx: Math.cos(ang) * WAVE_SPEED,
                 vy: Math.sin(ang) * WAVE_SPEED,
                 angle: ang,
-                isCenter: idx === 0,   // ← DÜZELTME 5: index 0 center
+                isCenter: idx === 2,   // ← DÜZELTME: Orta index 2'de
                 isDead: false,
                 hitBots: sharedHitBots,
                 travelDist: 0,
@@ -261,7 +261,6 @@
             targetY: ty,
             affectedBots: []
         };
-        // ← DÜZELTME 3: Base zıplama sistemini kullan (hurda görünüm düzeldi)
         this.isJumping = true;
         this.jumpInvulnerable = true;
         this.jumpProgress = 0;
@@ -402,10 +401,8 @@
         // ===== ULTİ =====
         if (ultiState) {
             if (ultiState.phase === 'jumping') {
-                // ← DÜZELTME 3: Base zıplamayı yönetiyor. Biz sadece inişi bekliyoruz.
                 ultiState.timer -= ts;
                 if (!player.isJumping || ultiState.timer <= 0) {
-                    // İniş anı
                     player.isJumping = false;
                     player.x = ultiState.targetX;
                     player.y = ultiState.targetY;
@@ -438,7 +435,7 @@
                         }
                         if (aks1Buff) {
                             player.hp = Math.min(player.maxHp, player.hp + AKS1_HEAL);
-                            addFloatingNumber(player.x, player.y - 20, "+" + AKS1_HEAL, "#2ecc71");
+                            addFloatingNumber(player.x, player.y - 20, "+" + AKS1_HEAL, C_HEAL);
                         }
                         burst(e.x, e.y, 6, C_FROZEN);
                     });
@@ -461,7 +458,6 @@
                 frozenBots.delete(b);
                 return;
             }
-            // ← DÜZELTME 4: Her frame lastShot'u sıfırla ki ateş etmesin
             b.speed = 0;
             b.shootInterval = 999999;
             b.lastShot = Date.now();
@@ -553,6 +549,9 @@
                     const dmg = w.isCenter ? CENTER_DMG : SIDE_DMG;
                     e.hp -= dmg;
                     addFloatingNumber(e.x, e.y, dmg, w.isCenter ? C_FROZEN : C_LIGHT);
+                    // YENİ: Her bot vuruşunda +200 HP
+                    player.hp = Math.min(player.maxHp, player.hp + HEAL_PER_HIT);
+                    addFloatingNumber(player.x, player.y - 20, "+" + HEAL_PER_HIT, C_HEAL);
                     w.hitBots.add(e);
                     burst(e.x, e.y, 4, C_LIGHT);
 
@@ -595,7 +594,6 @@
 
     // ===== ÇİZİM =====
     chainHook('onDraw', function (ctx2) {
-        // Dondurulan bot görseli
         frozenBots.forEach((v, b) => {
             if (!b || b.isDead) return;
             ctx2.save();
@@ -622,7 +620,6 @@
             ctx2.restore();
         });
 
-        // Ses dalgaları
         waves.forEach(w => {
             w.trail.forEach(pt => {
                 ctx2.save();
@@ -677,7 +674,6 @@
             ctx2.restore();
         });
 
-        // Nişan konisi
         if (player.charType === CHAR_ID && player._dondurucuHideAim && !player.isDead && player.ammo >= 1) {
             const ang = aimData.angle;
             ctx2.save();
@@ -740,5 +736,5 @@
         if (e) { e.addEventListener('click', () => { window.GAME_MODE = 'arena'; }); e.addEventListener('touchstart', () => { window.GAME_MODE = 'arena'; }, { passive: true }); }
     })();
 
-    console.log('[MOD YÜKLENDİ] dondurucu (v2)');
+    console.log('[MOD YÜKLENDİ] dondurucu (v3)');
 })();
