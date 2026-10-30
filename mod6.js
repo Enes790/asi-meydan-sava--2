@@ -1359,7 +1359,7 @@
 
     window.GAME_EXT.modKartiEkle('turuncu', 'Turuncu Baskın', 'Piyade + Turuncu + Kamikaze + Havan/Çavuş + Ranger + Falcer');
     console.log('[MOD YÜKLENDİ] turuncu (v14)');
-})();// ===== BRIDGE (mod10_fx.js için salt-okunur erişim) =====
+// ===== BRIDGE (mod10_fx.js için salt-okunur erişim) =====
 window._mod10 = {
     get MOD_ID()        { return 'turuncu'; },
     getPi:              () => piyade,
