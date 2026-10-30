@@ -1359,31 +1359,4 @@
 
     window.GAME_EXT.modKartiEkle('turuncu', 'Turuncu Baskın', 'Piyade + Turuncu + Kamikaze + Havan/Çavuş + Ranger + Falcer');
     console.log('[MOD YÜKLENDİ] turuncu (v14)');
-// ===== BRIDGE (mod10_fx.js için salt-okunur erişim) =====
-window._mod10 = {
-    get MOD_ID()        { return 'turuncu'; },
-    getPi:              () => piyade,
-    getTuruncu:         () => turuncuBot,
-    getKamikaze:        () => kamikazeler,
-    getMini:            () => miniKamikazeler,
-    getHeavy:           () => heavyBot,
-    getHeavyType:       () => heavyBotType,
-    getHavanMermi:      () => havanMermiler,
-    getHavanFlash:      () => havanMuzzleFlash,
-    getCavusAura:       () => ({ active: cavusAuraActive, radius: CAVUS_AURA_RADIUS }),
-    getRanger:          () => ranger,
-    getRangerLobut:     () => rangerLobuts,
-    getFalcer:          () => falcerler,
-    getKamiUyari:       () => kamiSpawnUyarilari,
-    getFalcerUyari:     () => falcerUyarilar,
-    getPiyadeUyari:     () => ({ timer: piyadeSpawnTimer, x: piyadeSpawnX, y: piyadeSpawnY }),
-    getTuruncuUyari:    () => ({ timer: turuncuSpawnUyari, x: turuncuSpawnX, y: turuncuSpawnY, has: !!turuncuBot }),
-    getHeavyUyari:      () => ({ timer: heavySpawnUyari, x: heavySpawnX, y: heavySpawnY, type: heavyBotType, has: !!heavyBot }),
-    getRangerUyari:     () => ({ timer: rangerSpawnUyari, x: rangerSpawnX, y: rangerSpawnY, has: !!ranger }),
-    getRage:            () => ({ active: rageActive, timer: rageTimer }),
-    getPiDeathMermi:    () => piyadeDeathMermiler,
-    getSabitler:        () => ({ PIYADE_RADIUS, TURUNCU_RADIUS, KAMI_RADIUS, MINI_RADIUS,
-                                 HAVAN_MERMI_AOE, HAVAN_RADIUS, CAVUS_RADIUS,
-                                 RANGER_LOBUT_AOE, RANGER_RADIUS, RANGER_AURA_RADIUS,
-                                 FALCER_RADIUS, FALCER_SPAWN_WARN })
-};
+})();
