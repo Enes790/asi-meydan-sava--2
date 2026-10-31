@@ -1,4 +1,13 @@
-// ========== mod14.js — 25 Dalga Arena (Base Botlar + Full Kartlar) ==========
+// ========== mod14.js — 25 Dalga Arena (FULL v3, Dondurucu uyumlu) ==========
+// Düzeltmeler:
+// - İlk kart seçiminden sonra wave 1 spawn (eskiden wave 2'ye atlıyordu)
+// - Bot HP: +200/tur, +30 hasar/tur (her 3 dalgada bir)
+// - Regen: 50/100/180/300 + float
+// - Ek Hasar %15/seviye, Maks HP %35/seviye, Hız %8/seviye
+// - Elektro: kalıcı halka + pasif her saniye hasar
+// - Slime büyük (stage 0, bölünür)
+// - Kart değerleri güçlendirildi
+// - Dondurucu uyumu: window._waveSTATE açık
 (function () {
     'use strict';
 
@@ -22,6 +31,9 @@
     let _turret = null;
     let _friendlyBots = [];
     let _friendlyBullets = [];
+    let _morSlotUsed = 0;
+    let _initialPickDone = false;
+    let _waveBotDmgBonus = 0;
 
     // Slime sayıları 1/3'e düşürüldü (her slime = 7 kill)
     const WAVES = [
@@ -53,21 +65,22 @@
     ];
 
     const CARDS = {
-        maxhp:    { name:'Maks HP',           rarity:'common', max:4, desc:'+%25 max HP / seviye' },
-        hiz:      { name:'Hız',               rarity:'common', max:4, desc:'+%5 hız + +%5 cephane' },
-        regen:    { name:'Regen',             rarity:'common', max:4, desc:'+30/60/100/150 HP/sn pasif' },
-        hasar:    { name:'Ek Hasar',          rarity:'common', max:4, desc:'+%10 hasar / seviye' },
+        maxhp:    { name:'Maks HP',           rarity:'common', max:4, desc:'+%35 max HP / seviye' },
+        hiz:      { name:'Hız',               rarity:'common', max:4, desc:'+%8 hız + +%8 cephane' },
+        regen:    { name:'Regen',             rarity:'common', max:4, desc:'+50/100/180/300 HP/sn pasif' },
+        hasar:    { name:'Ek Hasar',          rarity:'common', max:4, desc:'+%15 hasar / seviye' },
         cancalma: { name:'Can Çalma',         rarity:'rare',   max:4, desc:'Ana saldırı hasarının %X i can' },
-        yansima:  { name:'Yansıma',           rarity:'rare',   max:4, desc:'Her N. vuruşta yansıma + heal' },
+        yansima:  { name:'Yansıma',           rarity:'rare',   max:4, desc:'Her N. vuruşta %60 yansıma + heal' },
         dostbot:  { name:'Dost Bot',          rarity:'rare',   max:4, desc:'Yardımcı botlar + güç' },
         meteor:   { name:'Meteor',            rarity:'rare',   max:4, desc:'Periyodik AOE göktaşı' },
-        elektro:  { name:'Elektro Aura',      rarity:'epic',   max:4, desc:'Yakın düşmanlara şok' },
+        elektro:  { name:'Elektro Aura',      rarity:'epic',   max:4, desc:'Yakın düşmanlara şok + pasif' },
         kule:     { name:'Kule',              rarity:'epic',   max:4, desc:'Otomatik ateş eden kule' },
         hayat:    { name:'Hayat Sigortası',   rarity:'epic',   max:4, desc:'Can≤500 iken kurtarma' }
     };
 
     const STATE = {};
     Object.keys(CARDS).forEach(k => STATE[k] = 0);
+    window._waveSTATE = STATE;   // ← Dondurucu uyumu
 
     const safe = (v, f) => Number.isFinite(v) ? v : (f || 0);
 
@@ -82,7 +95,7 @@
         return spawnPos('random');
     }
 
-    // ===== BASE BOTLAR (custom YOK) =====
+    // ===== BASE BOTLAR =====
     function spawnSlime(x, y) {
         spawnSlimeBot(x, y, 0);   // stage 0 = büyük, bölünür
         return slimeBots[slimeBots.length-1];
@@ -99,8 +112,6 @@
         const b={x,y,radius:35,color:'#7f8c8d',isFog:true,speed:1.0,hp:5000,maxHp:5000,isDead:false,angle:0,kbX:0,kbY:0,alerted:false,bombaBulasti:false,bombaSayaci:0,ghostRingDebounce:0};
         fogBots.push(b); return b;
     }
-    // Mor bot = base bot / bot2 slotları
-    let _morSlotUsed = 0;
     function spawnMor(x, y) {
         const slot = _morSlotUsed === 0 ? bot : bot2;
         _morSlotUsed++;
@@ -112,7 +123,6 @@
         slot._morActive = true;
         return slot;
     }
-    // Nest = base nests
     function spawnNest(x, y) {
         const n = {x, y, radius:40, color:'#27ae60', isNest:true, speed:0, hp:3000, maxHp:3000,
                    isDead:false, kbX:0, kbY:0, alerted:false, lastSpawn:Date.now(),
@@ -127,7 +137,10 @@
         const dirs = ['top','bottom','left','right'];
         let dIdx = 0;
         const turIdx = Math.floor(idx / 3);
-        const hpBonus = turIdx * 25;
+        const hpBonus = turIdx * 200;
+        const dmgBonus = turIdx * 30;
+        _waveBotDmgBonus = dmgBonus;
+        window._waveBotDmgBonus = dmgBonus;
 
         w.e.forEach(group => {
             for (let i = 0; i < group.c; i++) {
@@ -154,13 +167,11 @@
         waveActive = true;
         _hayatUsedThisWave = false;
 
-        // Kule
         if (STATE.kule > 0) {
             const mh = 2000 + (STATE.kule-1)*600;
             _turret = { x: player.x, y: player.y, radius: 22, hp: mh, maxHp: mh, angle: 0, lastShot: 0, _isTurret: true };
         } else { _turret = null; }
 
-        // Dost botlar
         _friendlyBots = [];
         if (STATE.dostbot > 0) {
             const types = ['piyade','ranger','havan'];
@@ -170,7 +181,7 @@
                 _friendlyBots.push({
                     x: player.x + (Math.random()-0.5)*100, y: player.y + 60,
                     radius: 15, angle: 0, lastShot: 0, type: types[i], color: '#3498db',
-                    hp: 800 * mult, maxHp: 800 * mult, damage: 100 * mult, _isFriendly: true
+                    hp: 800 * mult, maxHp: 800 * mult, damage: 150 * mult, _isFriendly: true
                 });
             }
         }
@@ -211,12 +222,16 @@
     function showUpgrade() {
         window.GAME_PAUSED = true;
         const picks = pick3();
-        if (picks.length === 0) { nextWave(); return; }
+        if (picks.length === 0) {
+            if (!_initialPickDone) { _initialPickDone = true; spawnWave(0); }
+            else nextWave();
+            return;
+        }
         const overlay = document.createElement('div');
         overlay.id = 'wave-upgrade';
         overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.88);z-index:100;display:flex;flex-direction:column;justify-content:center;align-items:center;padding:20px;';
         const title = document.createElement('h2');
-        title.textContent = waveIndex === 0 ? 'BAŞLANGIÇ' : `DALGA ${waveIndex} BİTTİ`;
+        title.textContent = waveIndex === 0 && !_initialPickDone ? 'BAŞLANGIÇ' : `DALGA ${waveIndex} BİTTİ`;
         title.style.cssText = 'color:#f1c40f;font-size:26px;margin-bottom:24px;';
         overlay.appendChild(title);
         const row = document.createElement('div');
@@ -247,28 +262,33 @@
         const ov = document.getElementById('wave-upgrade');
         if (ov) ov.remove();
         window.GAME_PAUSED = false;
-        nextWave();
+        if (!_initialPickDone) {
+            _initialPickDone = true;
+            spawnWave(0);
+        } else {
+            nextWave();
+        }
     }
 
     function applyCard(k, lv) {
         if (k === 'maxhp') {
             if (!_baseMaxHp) _baseMaxHp = player.maxHp;
-            const target = _baseMaxHp * (1 + lv * 0.25);
+            const target = _baseMaxHp * (1 + lv * 0.35);
             const diff = target - player.maxHp;
             player.maxHp = target;
             player.hp += diff;
         } else if (k === 'hiz') {
-            const pct = lv * 0.05;
+            const pct = lv * 0.08;
             player.speed = (player.originalSpeed || player.speed) * (1 + pct);
             player.reloadSpeed = 0.015 * (1 + pct);
         } else if (k === 'hasar') {
-            _waveDamageMult = 1 + lv * 0.10;
+            _waveDamageMult = 1 + lv * 0.15;
+            window._waveDamageMult = _waveDamageMult;
         }
     }
 
     function nextWave() {
         waveIndex++;
-        // Tur sonu %50 heal
         if (waveIndex > 0 && waveIndex % 6 === 0 && !player.isDead) {
             const heal = player.maxHp * 0.5;
             player.hp = Math.min(player.maxHp, player.hp + heal);
@@ -276,6 +296,7 @@
         }
         if (waveIndex >= WAVES.length) { victory(); return; }
         _friendlyBots = [];
+        _turret = null;
         setTimeout(() => spawnWave(waveIndex), 300);
     }
 
@@ -310,7 +331,7 @@
             const need = thresholds[lv-1];
             if (_reflectCounter >= need) {
                 _reflectCounter = 0;
-                const reflect = dmg * 0.50;
+                const reflect = dmg * 0.60;
                 getActiveEnemies().forEach(e => {
                     if (!e.isDead && getDist(e, player) < 300) {
                         e.hp -= reflect;
@@ -329,7 +350,7 @@
             const lv = STATE.hayat;
             const push = 150 + (lv-1) * 50;
             const hdmg = 200 + (lv-1) * 200;
-            player.hp = Math.min(player.maxHp, player.hp + 1000);
+            player.hp = Math.min(player.maxHp, player.hp + 1500);
             player.jumpInvulnerable = true;
             player._waveHayatUntil = Date.now() + 2000;
             screenShake = 20;
@@ -351,7 +372,7 @@
 
     function applyEnemyDamage(dmg) {
         if (STATE.cancalma > 0) {
-            const pcts = [0.05, 0.15, 0.30, 0.50];
+            const pcts = [0.10, 0.20, 0.35, 0.50];
             const heal = dmg * pcts[STATE.cancalma - 1];
             player.hp = Math.min(player.maxHp, player.hp + heal);
             if (heal >= 1) addFloatingNumber(player.x, player.y - 20, '+' + Math.floor(heal), '#2ecc71');
@@ -372,7 +393,7 @@
                 if (s > bestScore) { bestScore = s; best = e; }
             });
             if (!best) best = enemies[0];
-            const dmg = [500, 750, 1000, 1250][STATE.meteor-1];
+            const dmg = [700, 1200, 1800, 2500][STATE.meteor-1];
             _meteors.push({ x: best.x, y: best.y, startY: best.y - 400, t: 0, dur: 60, dmg: dmg });
         }
         for (let i = _meteors.length-1; i >= 0; i--) {
@@ -411,6 +432,25 @@
             });
             if (enemies.length > 0) _elektroFlashes.push({ x: player.x, y: player.y, r: r, life: 20, maxLife: 20 });
         }
+        // Kalıcı pasif hasar
+        const eRanges = [130, 180, 230, 280];
+        const eDpss = [30, 80, 150, 250];
+        const eR = eRanges[STATE.elektro-1];
+        const eDps = eDpss[STATE.elektro-1];
+        let passiveTotal = 0;
+        getActiveEnemies().forEach(e => {
+            if (!e.isDead && getDist(e, player) < eR) {
+                const d = eDps / 60 * ts;
+                e.hp -= d;
+                passiveTotal += d;
+            }
+        });
+        player._elektroFloat = (player._elektroFloat || 0) + ts;
+        if (player._elektroFloat >= 60 && passiveTotal > 0) {
+            player._elektroFloat = 0;
+            addFloatingNumber(player.x, player.y - 30, '+' + Math.floor(passiveTotal), '#00e5ff');
+        }
+
         for (let i = _elektroFlashes.length-1; i >= 0; i--) {
             _elektroFlashes[i].life -= ts;
             if (_elektroFlashes[i].life <= 0) _elektroFlashes.splice(i, 1);
@@ -433,7 +473,7 @@
                 _turret.lastShot = 0;
                 const target = enemies[0];
                 _turret.angle = Math.atan2(target.y - _turret.y, target.x - _turret.x);
-                const dmg = 120 + (STATE.kule-1)*36;
+                const dmg = 180 + (STATE.kule-1)*60;
                 target.hp -= dmg;
                 addFloatingNumber(target.x, target.y, dmg, '#94a3b8');
                 _turret.hp -= 50;
@@ -502,15 +542,16 @@
             waveIndex = 0; waveActive = false;
             _baseMaxHp = 0; _lastEpicWave = -10;
             _hayatUsedThisWave = false; _lastPlayerHp = 0;
-            _reflectCounter = 0; _waveDamageMult = 1;
+            _reflectCounter = 0; _waveDamageMult = 1; _waveBotDmgBonus = 0;
             _meteorTimer = 0; _meteors = [];
             _elektroTimer = 0; _elektroFlashes = [];
             _turret = null; _friendlyBots = []; _friendlyBullets = [];
-            _morSlotUsed = 0;
+            _morSlotUsed = 0; _initialPickDone = false;
             Object.keys(STATE).forEach(k => STATE[k] = 0);
             window.GAME_PAUSED = false;
+            window._waveDamageMult = 1;
+            window._waveBotDmgBonus = 0;
 
-            // Base botları KAPAT
             bot.isActive = false; bot.isDead = true; bot.x = -9999; bot.y = -9999;
             bot2.isActive = false; bot2.isDead = true; bot2.x = -9999; bot2.y = -9999;
             slimeBots = []; stationaryBots = []; boomerangBots = []; fogBots = [];
@@ -518,6 +559,7 @@
             window.GAME_MODE_DISABLED_BOT_TYPES = ['slime','stationary','boomerang','fog'];
 
             updateHUD();
+            window.GAME_PAUSED = true;
             setTimeout(() => showUpgrade(), 200);
         },
 
@@ -527,12 +569,11 @@
             slimeTimer = 0; stationaryTimer = 0; boomerangTimer = 0; fogBotTimer = 0;
             spawnIndicators = [];
             lastNestKillCount = botsKilled;
-            botsKilled = 0;   // base bot2 otomatik aktivasyonu engelle
+            botsKilled = 0;
             if (nests.length > 1) nests.length = 1;
 
-            // Regen
             if (STATE.regen > 0 && !player.isDead) {
-                const regenVals = [30, 60, 100, 150];
+                const regenVals = [50, 100, 180, 300];
                 player.hp = Math.min(player.maxHp, player.hp + (regenVals[STATE.regen-1] / 60) * ts);
                 player._regenFloat = (player._regenFloat || 0) + ts;
                 if (player._regenFloat >= 60) {
@@ -541,13 +582,11 @@
                 }
             }
 
-            // Hayat invuln
             if (player._waveHayatUntil) {
                 if (Date.now() < player._waveHayatUntil) player.jumpInvulnerable = true;
                 else { if (!player.isJumping) player.jumpInvulnerable = false; player._waveHayatUntil = 0; }
             }
 
-            // Yansıma için player hasar takibi
             if (_lastPlayerHp > 0 && player.hp < _lastPlayerHp && !player.isDead) {
                 applyPlayerDamage(_lastPlayerHp - player.hp);
             }
@@ -559,7 +598,6 @@
             if (STATE.kule > 0) updateTurret(ts);
             if (STATE.dostbot > 0) updateFriendlyBots(ts);
 
-            // Base bot/bot2 AI (mor bot olarak kullanılıyor)
             [bot, bot2].forEach(b => {
                 if (!b.isActive || b.isDead) return;
                 if (b.hp <= 0) {
@@ -589,7 +627,6 @@
                 b.y = clampPos(b.y, b.radius+WALL_THICKNESS, canvas.height-b.radius-WALL_THICKNESS);
             });
 
-            // Yuvalar (base nests)
             nests.forEach(n => {
                 if (n.isDead) return;
                 if (n.hp <= 0) { n.isDead = true; spawnParticles(n.x, n.y, n.color || '#27ae60'); triggerBotKill(n.x, n); return; }
@@ -603,14 +640,12 @@
             });
             for (let i = nests.length-1; i >= 0; i--) if (nests[i].isDead) nests.splice(i, 1);
 
-            // Grace sonrası hız geri
             const allEnemies = [bot, bot2, ...slimeBots, ...stationaryBots, ...boomerangBots, ...fogBots, ...nests];
             allEnemies.forEach(e => {
                 if (e._grace > 0) e._grace -= ts;
                 if (e._grace <= 0 && e.speed === 0 && e._baseSpeed) e.speed = e._baseSpeed;
             });
 
-            // Dalga bitiş — tüm düşmanlar öldü mü?
             if (waveActive) {
                 const enemiesLeft =
                     (bot.isActive && !bot.isDead ? 1 : 0) +
@@ -631,13 +666,15 @@
             waveIndex = 0; waveActive = false;
             _baseMaxHp = 0; _lastEpicWave = -10;
             _hayatUsedThisWave = false; _lastPlayerHp = 0;
-            _reflectCounter = 0; _waveDamageMult = 1;
+            _reflectCounter = 0; _waveDamageMult = 1; _waveBotDmgBonus = 0;
             _meteorTimer = 0; _meteors = [];
             _elektroTimer = 0; _elektroFlashes = [];
             _turret = null; _friendlyBots = []; _friendlyBullets = [];
-            _morSlotUsed = 0;
+            _morSlotUsed = 0; _initialPickDone = false;
             Object.keys(STATE).forEach(k => STATE[k] = 0);
             window.GAME_PAUSED = false;
+            window._waveDamageMult = 1;
+            window._waveBotDmgBonus = 0;
             const ov = document.getElementById('wave-upgrade');
             if (ov) ov.remove();
             const hud = document.getElementById('wave-hud');
@@ -682,9 +719,20 @@
                 }
             }
         }
+
         const enemySnap = new Map();
         if (!isBot && window.GAME_MODE === MOD_ID) getActiveEnemies().forEach(e => enemySnap.set(e, e.hp));
+        const playerHpBefore = player.hp;
+
         _origUBL(list, isBot, ts);
+
+        // Bot hasar bonusu — base bot mermileri için
+        if (isBot && window.GAME_MODE === MOD_ID && _waveBotDmgBonus > 0) {
+            const taken = playerHpBefore - player.hp;
+            if (taken > 0) player.hp -= _waveBotDmgBonus;
+        }
+
+        // Oyuncu hasar bonusu + can çalma
         if (!isBot && window.GAME_MODE === MOD_ID) {
             const hasBase = list.some(b => {
                 const t = b.type;
@@ -710,7 +758,6 @@
     window.GAME_EXT.chainHook('onDraw', function (ctx2) {
         if (window.GAME_MODE !== MOD_ID || !gameStarted) return;
 
-        // Turret
         if (_turret && _turret.hp > 0) {
             ctx2.save(); ctx2.translate(_turret.x, _turret.y);
             ctx2.fillStyle = '#94a3b8';
@@ -723,7 +770,6 @@
             ctx2.fillStyle='#94a3b8'; ctx2.fillRect(_turret.x-22, _turret.y-_turret.radius-12, 44*(_turret.hp/_turret.maxHp), 5);
         }
 
-        // Dost botlar
         _friendlyBots.forEach(b => {
             if (b.hp <= 0) return;
             ctx2.save(); ctx2.translate(b.x, b.y); ctx2.rotate(b.angle);
@@ -741,7 +787,6 @@
             ctx2.restore();
         });
 
-        // Meteorlar
         _meteors.forEach(m => {
             const prog = m.t / m.dur;
             const curY = m.startY + (m.y - m.startY) * prog;
@@ -756,7 +801,6 @@
             ctx2.restore();
         });
 
-        // Elektro aura kalıcı halka
         if (STATE.elektro > 0) {
             const ranges = [130, 180, 230, 280];
             const r = ranges[STATE.elektro-1];
@@ -778,7 +822,6 @@
         });
     });
 
-    // Grace soluklaştırma
     if (!window._waveOrigDrawEntity) {
         window._waveOrigDrawEntity = window.drawEntity;
         window.drawEntity = function (e, isP) {
@@ -800,5 +843,5 @@
     }
 
     window.GAME_EXT.modKartiEkle('wave', '25 Dalga Arena', 'Klasik botlarla 25 dalga roguelite');
-    console.log('[MOD YÜKLENDİ] wave (25 Dalga Arena - BASE BOTS)');
+    console.log('[MOD YÜKLENDİ] wave (v3 FULL - Dondurucu uyumlu)');
 })();
