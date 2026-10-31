@@ -1,8 +1,6 @@
-// ========== mod31.js (DONDURUCU) - v6 (v4 görseller + wave uyum) ==========
-// v4 görselleri AYNEN korundu. Sadece wave modu uyumu eklendi:
-// 1. Pause guard (kart seçiminde Dondurucu durur)
-// 2. Ek Hasar + Can Çalma çalışır (ses dalgası + ulti için)
-// 3. Hayat Sigortası ile jumpInvulnerable çakışması çözüldü
+// ========== mod31.js (DONDURUCU) - v4 (BUG FIX) ==========
+// DÜZELTME: Dondurulan bot öldüğünde speed ve shootInterval geri yükleniyor
+// Bu sayede respawn olan mor botlar normal çalışıyor
 
 (function () {
     'use strict';
@@ -71,29 +69,6 @@
     }
 
     function safe(v, fb) { return Number.isFinite(v) ? v : (fb !== undefined ? fb : 0); }
-
-    // ===== WAVE UYUM: Ek Hasar + Can Çalma =====
-    function applyWaveBonus(dmg, enemy) {
-        let finalDmg = dmg;
-        if (window.GAME_MODE === 'wave' && window._waveDamageMult > 1) {
-            finalDmg *= window._waveDamageMult;
-            const extra = finalDmg - dmg;
-            if (extra >= 1 && enemy) {
-                addFloatingNumber(enemy.x + 15, enemy.y - 25, '+' + Math.floor(extra), '#f1c40f');
-            }
-        }
-        if (enemy) enemy.hp -= finalDmg;
-        if (window.GAME_MODE === 'wave') {
-            const state = window._waveSTATE;
-            if (state && state.cancalma > 0) {
-                const pcts = [0.10, 0.20, 0.35, 0.50];
-                const heal = finalDmg * pcts[state.cancalma - 1];
-                player.hp = Math.min(player.maxHp, player.hp + heal);
-                if (heal >= 1) addFloatingNumber(player.x, player.y - 20, '+' + Math.floor(heal), C_HEAL);
-            }
-        }
-        return finalDmg;
-    }
 
     function addText(x, y, v, l, col) {
         if (!Number.isFinite(x) || !Number.isFinite(y)) return;
@@ -388,8 +363,7 @@
         if (!lastT) lastT = t;
         const ts = Math.min(3, (t - lastT) / 16.666);
         lastT = t;
-        // WAVE UYUM: pause guard
-        if (gameStarted && !window.GAME_PAUSED) { try { update(ts); } catch (e) { console.error('[DONDURUCU]', e); } }
+        if (gameStarted) { try { update(ts); } catch (e) { console.error('[DONDURUCU]', e); } }
         requestAnimationFrame(loop);
     }
     requestAnimationFrame(loop);
@@ -459,22 +433,21 @@
             } else if (ultiState.phase === 'landing') {
                 ultiState.timer -= ts;
                 if (ultiState.timer <= 0) {
-                    // WAVE UYUM: Hayat Sigortası aktifse jumpInvulnerable'ı bozma
-                    if (!player._waveHayatUntil || Date.now() >= player._waveHayatUntil) {
-                        player.jumpInvulnerable = false;
-                    }
+                    player.jumpInvulnerable = false;
                     ultiState = null;
                 }
             }
         }
 
-        // ===== DONDURULAN BOTLAR =====
+        // ===== DONDURULAN BOTLAR (BUG FIX) =====
         frozenBots.forEach((v, b) => {
             v.timer -= ts;
             if (!b) {
                 frozenBots.delete(b);
                 return;
             }
+            // KRİTİK FIX: Bot öldüyse orijinal değerleri geri yükle
+            // Yoksa respawn olan bot kalıcı olarak donuk kalır
             if (b.isDead) {
                 if (v.origSpeed !== undefined) b.speed = v.origSpeed;
                 if (v.origShoot !== undefined) b.shootInterval = v.origShoot;
@@ -491,14 +464,13 @@
                 delete b._frozen;
                 frozenBots.delete(b);
 
-                // WAVE UYUM: Ek Hasar + Can Çalma burada
-                const finalBurst = applyWaveBonus(ULTI_BURST_DMG, b);
-                addFloatingNumber(b.x, b.y, Math.floor(finalBurst), C_FROZEN);
+                b.hp -= ULTI_BURST_DMG;
+                addFloatingNumber(b.x, b.y, ULTI_BURST_DMG, C_FROZEN);
                 burst(b.x, b.y, 12, C_FROZEN, 6);
                 getActiveEnemies().forEach(e => {
                     if (e !== b && !e.isDead && getDist(b, e) < ULTI_BURST_RADIUS + e.radius) {
-                        const finalAoe = applyWaveBonus(ULTI_BURST_DMG, e);
-                        addFloatingNumber(e.x, e.y, Math.floor(finalAoe), C_LIGHT);
+                        e.hp -= ULTI_BURST_DMG;
+                        addFloatingNumber(e.x, e.y, ULTI_BURST_DMG, C_LIGHT);
                         burst(e.x, e.y, 6, C_LIGHT);
                     }
                 });
@@ -577,10 +549,9 @@
                 if (e.isDead) continue;
                 if (w.hitBots.has(e)) continue;
                 if (getDist(w, e) < e.radius + 8) {
-                    // WAVE UYUM: Ek Hasar + Can Çalma
-                    const baseDmg = w.isCenter ? CENTER_DMG : SIDE_DMG;
-                    const finalDmg = applyWaveBonus(baseDmg, e);
-                    addFloatingNumber(e.x, e.y, Math.floor(finalDmg), w.isCenter ? C_FROZEN : C_LIGHT);
+                    const dmg = w.isCenter ? CENTER_DMG : SIDE_DMG;
+                    e.hp -= dmg;
+                    addFloatingNumber(e.x, e.y, dmg, w.isCenter ? C_FROZEN : C_LIGHT);
                     player.hp = Math.min(player.maxHp, player.hp + HEAL_PER_HIT);
                     addFloatingNumber(player.x, player.y - 20, "+" + HEAL_PER_HIT, C_HEAL);
                     w.hitBots.add(e);
@@ -648,7 +619,6 @@
             ctx2.restore();
         });
 
-        // === ANA SALDIRI — OK MERMİLERİ (ESKİ GÖRSEL) ===
         waves.forEach(w => {
             w.trail.forEach(pt => {
                 ctx2.save();
@@ -765,5 +735,5 @@
         if (e) { e.addEventListener('click', () => { window.GAME_MODE = 'arena'; }); e.addEventListener('touchstart', () => { window.GAME_MODE = 'arena'; }, { passive: true }); }
     })();
 
-    console.log('[MOD YÜKLENDİ] dondurucu (v6 v4 görseller + wave uyum)');
+    console.log('[MOD YÜKLENDİ] dondurucu (v4 bug fix)');
 })();
