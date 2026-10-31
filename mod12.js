@@ -1,6 +1,8 @@
-// ========== mod31.js (DONDURUCU) - v4 (BUG FIX) ==========
-// DÜZELTME: Dondurulan bot öldüğünde speed ve shootInterval geri yükleniyor
-// Bu sayede respawn olan mor botlar normal çalışıyor
+// ========== mod31.js (DONDURUCU) - v5 (GÖRSEL REVİZYON) ==========
+// Değişiklikler:
+// 1. Ana saldırı: Emz tarzı konik sprey bulutu (ok başı + gradient kaldırıldı)
+// 2. Ulti patlama: çizgi sayısı yarıya indirildi, halka kaldırıldı
+// Mekanik (hasar, hız, menzil, MAX_BOTS_HIT) DEĞİŞMEDİ
 
 (function () {
     'use strict';
@@ -439,15 +441,13 @@
             }
         }
 
-        // ===== DONDURULAN BOTLAR (BUG FIX) =====
+        // ===== DONDURULAN BOTLAR =====
         frozenBots.forEach((v, b) => {
             v.timer -= ts;
             if (!b) {
                 frozenBots.delete(b);
                 return;
             }
-            // KRİTİK FIX: Bot öldüyse orijinal değerleri geri yükle
-            // Yoksa respawn olan bot kalıcı olarak donuk kalır
             if (b.isDead) {
                 if (v.origSpeed !== undefined) b.speed = v.origSpeed;
                 if (v.origShoot !== undefined) b.shootInterval = v.origShoot;
@@ -466,19 +466,12 @@
 
                 b.hp -= ULTI_BURST_DMG;
                 addFloatingNumber(b.x, b.y, ULTI_BURST_DMG, C_FROZEN);
-                burst(b.x, b.y, 12, C_FROZEN, 6);
+                burst(b.x, b.y, 6, C_FROZEN, 4);
                 getActiveEnemies().forEach(e => {
                     if (e !== b && !e.isDead && getDist(b, e) < ULTI_BURST_RADIUS + e.radius) {
                         e.hp -= ULTI_BURST_DMG;
                         addFloatingNumber(e.x, e.y, ULTI_BURST_DMG, C_LIGHT);
-                        burst(e.x, e.y, 6, C_LIGHT);
                     }
-                });
-                dondurucuFX.push({
-                    x: b.x, y: b.y, vx: 0, vy: 0,
-                    size: 10, life: 20, maxLife: 20,
-                    color: C_FROZEN, isRing: true,
-                    ringRadius: 0, maxRing: ULTI_BURST_RADIUS, ringSpeed: 8
                 });
                 screenShake = Math.max(screenShake, 6);
             }
@@ -619,28 +612,45 @@
             ctx2.restore();
         });
 
+        // === ANA SALDIRI — EMZ TARZI KONİK SPREY ===
         waves.forEach(w => {
+            // Sprey izi — geride küçük buz bulutçukları
             w.trail.forEach(pt => {
                 ctx2.save();
-                ctx2.globalAlpha = (pt.life / 12) * 0.4;
-                ctx2.beginPath(); ctx2.arc(pt.x, pt.y, 4, 0, Math.PI * 2);
+                const fade = pt.life / 12;
+                const tSize = 6 + (1 - fade) * 10;
+                ctx2.globalAlpha = fade * 0.3;
+                ctx2.beginPath(); ctx2.arc(pt.x, pt.y, tSize, 0, Math.PI * 2);
                 ctx2.fillStyle = C_LIGHT; ctx2.fill();
                 ctx2.restore();
             });
+
+            // Ana sprey bulutu — mesafeyle genişler
             ctx2.save();
             ctx2.translate(w.x, w.y);
-            const grad = ctx2.createRadialGradient(0, 0, 0, 0, 0, 12);
-            grad.addColorStop(0, C_WHITE);
-            grad.addColorStop(0.4, w.isCenter ? C_FROZEN : C_LIGHT);
-            grad.addColorStop(1, 'rgba(133,193,233,0)');
-            ctx2.beginPath(); ctx2.arc(0, 0, 12, 0, Math.PI * 2);
-            ctx2.fillStyle = grad; ctx2.fill();
-            ctx2.rotate(w.angle);
-            ctx2.beginPath();
-            ctx2.moveTo(8, 0); ctx2.lineTo(-6, -4); ctx2.lineTo(-6, 4);
-            ctx2.closePath();
-            ctx2.fillStyle = w.isCenter ? C_FROZEN : C_LIGHT;
-            ctx2.fill();
+            const expand = 1 + (w.travelDist / WAVE_RANGE) * 2.5;
+            const baseSize = (w.isCenter ? 22 : 16) * expand;
+
+            // Yumuşak bulut (3 katman)
+            for (let L = 0; L < 3; L++) {
+                const r = baseSize * (1 - L * 0.28);
+                ctx2.globalAlpha = 0.18 - L * 0.04;
+                ctx2.beginPath(); ctx2.arc(0, 0, r, 0, Math.PI * 2);
+                ctx2.fillStyle = w.isCenter ? C_FROZEN : C_LIGHT;
+                ctx2.fill();
+            }
+
+            // İçinde buz tozu noktaları
+            const seed = (w.sx + w.sy) * 0.013;
+            for (let i = 0; i < 5; i++) {
+                const a = seed + i * 1.7;
+                const rad = baseSize * (0.2 + ((seed * 0.7 + i * 0.31) % 0.7));
+                ctx2.globalAlpha = 0.55;
+                ctx2.beginPath();
+                ctx2.arc(Math.cos(a) * rad, Math.sin(a) * rad, 1.5 + (i % 2), 0, Math.PI * 2);
+                ctx2.fillStyle = C_WHITE;
+                ctx2.fill();
+            }
             ctx2.restore();
         });
 
@@ -735,5 +745,5 @@
         if (e) { e.addEventListener('click', () => { window.GAME_MODE = 'arena'; }); e.addEventListener('touchstart', () => { window.GAME_MODE = 'arena'; }, { passive: true }); }
     })();
 
-    console.log('[MOD YÜKLENDİ] dondurucu (v4 bug fix)');
+    console.log('[MOD YÜKLENDİ] dondurucu (v5 görsel revizyon)');
 })();
