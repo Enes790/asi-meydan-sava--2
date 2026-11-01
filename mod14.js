@@ -1,13 +1,10 @@
-// ========== mod14.js — 25 Dalga Arena (FULL v3, Dondurucu uyumlu) ==========
-// Düzeltmeler:
-// - İlk kart seçiminden sonra wave 1 spawn (eskiden wave 2'ye atlıyordu)
-// - Bot HP: +200/tur, +30 hasar/tur (her 3 dalgada bir)
-// - Regen: 50/100/180/300 + float
-// - Ek Hasar %15/seviye, Maks HP %35/seviye, Hız %8/seviye
-// - Elektro: kalıcı halka + pasif her saniye hasar
-// - Slime büyük (stage 0, bölünür)
-// - Kart değerleri güçlendirildi
-// - Dondurucu uyumu: window._waveSTATE açık
+// ========== mod14.js — 25 Dalga Arena (v4 TAM) ==========
+// Değişiklikler:
+// - Bot HP: +50/dalga, hasar: +5/dalga
+// - Can Çalma kartı KALDIRILDI
+// - 4 yeni kart: Temas, Dönen Pet, Cephane Peti, Siper AOE
+// - Elektro: alan küçültüldü (100/125/150/180), DPS aynı, 4sn şok
+// - Dondurucu uyumu korundu
 (function () {
     'use strict';
 
@@ -34,8 +31,10 @@
     let _morSlotUsed = 0;
     let _initialPickDone = false;
     let _waveBotDmgBonus = 0;
+    let _donenPet = { angle: 0, x: 0, y: 0, lastShot: 0 };
+    let _donenPetBullets = [];
+    let _obstacleSnapshot = new Map();
 
-    // Slime sayıları 1/3'e düşürüldü (her slime = 7 kill)
     const WAVES = [
         { e:[{t:'slime',c:1}], d:4 },
         { e:[{t:'mor',c:1}], d:3 },
@@ -65,22 +64,25 @@
     ];
 
     const CARDS = {
-        maxhp:    { name:'Maks HP',           rarity:'common', max:4, desc:'+%35 max HP / seviye' },
-        hiz:      { name:'Hız',               rarity:'common', max:4, desc:'+%8 hız + +%8 cephane' },
-        regen:    { name:'Regen',             rarity:'common', max:4, desc:'+50/100/180/300 HP/sn pasif' },
-        hasar:    { name:'Ek Hasar',          rarity:'common', max:4, desc:'+%15 hasar / seviye' },
-        cancalma: { name:'Can Çalma',         rarity:'rare',   max:4, desc:'Ana saldırı hasarının %X i can' },
-        yansima:  { name:'Yansıma',           rarity:'rare',   max:4, desc:'Her N. vuruşta %60 yansıma + heal' },
-        dostbot:  { name:'Dost Bot',          rarity:'rare',   max:4, desc:'Yardımcı botlar + güç' },
-        meteor:   { name:'Meteor',            rarity:'rare',   max:4, desc:'Periyodik AOE göktaşı' },
-        elektro:  { name:'Elektro Aura',      rarity:'epic',   max:4, desc:'Yakın düşmanlara şok + pasif' },
-        kule:     { name:'Kule',              rarity:'epic',   max:4, desc:'Otomatik ateş eden kule' },
-        hayat:    { name:'Hayat Sigortası',   rarity:'epic',   max:4, desc:'Can≤500 iken kurtarma' }
+        maxhp:       { name:'Maks HP',          rarity:'common', max:4, desc:'+%35 max HP / seviye' },
+        hiz:         { name:'Hız',              rarity:'common', max:4, desc:'+%8 hız + +%8 cephane' },
+        regen:       { name:'Regen',            rarity:'common', max:4, desc:'+50/100/180/300 HP/sn' },
+        hasar:       { name:'Ek Hasar',         rarity:'common', max:4, desc:'+%15 hasar / seviye' },
+        temas:       { name:'Temas Hasarı',     rarity:'rare',   max:4, desc:'Değdiğin düşmana 600/900/1400/2000 (3sn cd)' },
+        donen_pet:   { name:'Dönen Pet',        rarity:'rare',   max:4, desc:'Etrafında dönen pet, bot+siper 100-250 DPS' },
+        yansima:     { name:'Yansıma',          rarity:'rare',   max:4, desc:'Her N. vuruşta %60 yansıma + heal' },
+        dostbot:     { name:'Dost Bot',         rarity:'rare',   max:4, desc:'Yardımcı botlar' },
+        meteor:      { name:'Meteor',           rarity:'rare',   max:4, desc:'Periyodik AOE göktaşı' },
+        siper_aoe:   { name:'Siper Patlatma',   rarity:'rare',   max:4, desc:'Siper kırılınca AOE 400/700/1100/1600' },
+        cephane_pet: { name:'Cephane Peti',     rarity:'epic',   max:4, desc:'Her ateşlemede +100 can (0.75sn cd)' },
+        elektro:     { name:'Elektro Aura',     rarity:'epic',   max:4, desc:'Yakın düşmanlara şok + pasif' },
+        kule:        { name:'Kule',             rarity:'epic',   max:4, desc:'Otomatik ateş eden kule' },
+        hayat:       { name:'Hayat Sigortası',  rarity:'epic',   max:4, desc:'Can≤500 iken kurtarma (1/dalga)' }
     };
 
     const STATE = {};
     Object.keys(CARDS).forEach(k => STATE[k] = 0);
-    window._waveSTATE = STATE;   // ← Dondurucu uyumu
+    window._waveSTATE = STATE;
 
     const safe = (v, f) => Number.isFinite(v) ? v : (f || 0);
 
@@ -95,23 +97,10 @@
         return spawnPos('random');
     }
 
-    // ===== BASE BOTLAR =====
-    function spawnSlime(x, y) {
-        spawnSlimeBot(x, y, 0);   // stage 0 = büyük, bölünür
-        return slimeBots[slimeBots.length-1];
-    }
-    function spawnTur(x, y) {
-        const b={x,y,radius:25,color:'#e67e22',speed:0,hp:1500,maxHp:1500,isDead:false,angle:0,lastShot:0,shootInterval:750,kbX:0,kbY:0,alerted:false,bombaBulasti:false,bombaSayaci:0,ghostRingDebounce:0};
-        stationaryBots.push(b); return b;
-    }
-    function spawnBoom(x, y) {
-        const b={x,y,radius:20,color:'#00ced1',speed:0.5,hp:1600,maxHp:1600,isDead:false,angle:0,lastShot:0,shootInterval:1500,kbX:0,kbY:0,alerted:false,bombaBulasti:false,bombaSayaci:0,ghostRingDebounce:0};
-        boomerangBots.push(b); return b;
-    }
-    function spawnFog(x, y) {
-        const b={x,y,radius:35,color:'#7f8c8d',isFog:true,speed:1.0,hp:5000,maxHp:5000,isDead:false,angle:0,kbX:0,kbY:0,alerted:false,bombaBulasti:false,bombaSayaci:0,ghostRingDebounce:0};
-        fogBots.push(b); return b;
-    }
+    function spawnSlime(x, y) { spawnSlimeBot(x, y, 0); return slimeBots[slimeBots.length-1]; }
+    function spawnTur(x, y) { const b={x,y,radius:25,color:'#e67e22',speed:0,hp:1500,maxHp:1500,isDead:false,angle:0,lastShot:0,shootInterval:750,kbX:0,kbY:0,alerted:false,bombaBulasti:false,bombaSayaci:0,ghostRingDebounce:0}; stationaryBots.push(b); return b; }
+    function spawnBoom(x, y) { const b={x,y,radius:20,color:'#00ced1',speed:0.5,hp:1600,maxHp:1600,isDead:false,angle:0,lastShot:0,shootInterval:1500,kbX:0,kbY:0,alerted:false,bombaBulasti:false,bombaSayaci:0,ghostRingDebounce:0}; boomerangBots.push(b); return b; }
+    function spawnFog(x, y) { const b={x,y,radius:35,color:'#7f8c8d',isFog:true,speed:1.0,hp:5000,maxHp:5000,isDead:false,angle:0,kbX:0,kbY:0,alerted:false,bombaBulasti:false,bombaSayaci:0,ghostRingDebounce:0}; fogBots.push(b); return b; }
     function spawnMor(x, y) {
         const slot = _morSlotUsed === 0 ? bot : bot2;
         _morSlotUsed++;
@@ -136,9 +125,8 @@
         _morSlotUsed = 0;
         const dirs = ['top','bottom','left','right'];
         let dIdx = 0;
-        const turIdx = Math.floor(idx / 3);
-        const hpBonus = turIdx * 200;
-        const dmgBonus = turIdx * 30;
+        const hpBonus = idx * 50;
+        const dmgBonus = idx * 5;
         _waveBotDmgBonus = dmgBonus;
         window._waveBotDmgBonus = dmgBonus;
 
@@ -188,6 +176,13 @@
 
         _meteorTimer = 0;
         _elektroTimer = 0;
+        _donenPet.lastShot = 0;
+        _donenPetBullets = [];
+        _obstacleSnapshot.clear();
+        obstacles.concat(cactusWalls || []).forEach(o => {
+            _obstacleSnapshot.set(o, { x: o.x, y: o.y, hp: o.hp });
+        });
+
         updateHUD();
     }
 
@@ -370,15 +365,6 @@
         }
     }
 
-    function applyEnemyDamage(dmg) {
-        if (STATE.cancalma > 0) {
-            const pcts = [0.10, 0.20, 0.35, 0.50];
-            const heal = dmg * pcts[STATE.cancalma - 1];
-            player.hp = Math.min(player.maxHp, player.hp + heal);
-            if (heal >= 1) addFloatingNumber(player.x, player.y - 20, '+' + Math.floor(heal), '#2ecc71');
-        }
-    }
-
     function updateMeteor(ts) {
         const intervals = [900, 840, 780, 720];
         _meteorTimer += ts;
@@ -415,42 +401,40 @@
 
     function updateElektro(ts) {
         _elektroTimer += ts;
-        if (_elektroTimer >= 180) {
+        const ranges = [100, 125, 150, 180];
+        const dpss   = [40, 90, 160, 250];
+        const stuns  = [30, 60, 90, 90];
+        const shockDps = [80, 180, 300, 450];
+        const r = ranges[STATE.elektro-1];
+        const dps = dpss[STATE.elektro-1];
+        const stun = stuns[STATE.elektro-1];
+        const sDps = shockDps[STATE.elektro-1];
+
+        if (_elektroTimer >= 240) {
             _elektroTimer = 0;
-            const ranges = [130, 180, 230, 280];
-            const dpss   = [50, 150, 250, 350];
-            const stuns  = [30, 60, 90, 90];
-            const r = ranges[STATE.elektro-1];
-            const dps = dpss[STATE.elektro-1];
-            const stun = stuns[STATE.elektro-1];
-            const enemies = getActiveEnemies().filter(e => getDist(e, player) < r);
+            const shockR = r * 1.2;
+            const enemies = getActiveEnemies().filter(e => getDist(e, player) < shockR);
             enemies.slice(0, 3).forEach(e => {
                 e._stunTimer = Math.max(e._stunTimer || 0, stun);
                 e._elektroDot = Math.max(e._elektroDot || 0, 60);
-                e._elektroDps = dps;
+                e._elektroDps = sDps;
                 addFloatingNumber(e.x, e.y, 'ŞOK!', '#00e5ff');
             });
-            if (enemies.length > 0) _elektroFlashes.push({ x: player.x, y: player.y, r: r, life: 20, maxLife: 20 });
+            if (enemies.length > 0) _elektroFlashes.push({ x: player.x, y: player.y, r: shockR, life: 12, maxLife: 12 });
         }
-        // Kalıcı pasif hasar
-        const eRanges = [130, 180, 230, 280];
-        const eDpss = [30, 80, 150, 250];
-        const eR = eRanges[STATE.elektro-1];
-        const eDps = eDpss[STATE.elektro-1];
         let passiveTotal = 0;
         getActiveEnemies().forEach(e => {
-            if (!e.isDead && getDist(e, player) < eR) {
-                const d = eDps / 60 * ts;
+            if (!e.isDead && getDist(e, player) < r) {
+                const d = dps / 60 * ts;
                 e.hp -= d;
                 passiveTotal += d;
             }
         });
         player._elektroFloat = (player._elektroFloat || 0) + ts;
-        if (player._elektroFloat >= 60 && passiveTotal > 0) {
+        if (player._elektroFloat >= 120 && passiveTotal > 0) {
             player._elektroFloat = 0;
             addFloatingNumber(player.x, player.y - 30, '+' + Math.floor(passiveTotal), '#00e5ff');
         }
-
         for (let i = _elektroFlashes.length-1; i >= 0; i--) {
             _elektroFlashes[i].life -= ts;
             if (_elektroFlashes[i].life <= 0) _elektroFlashes.splice(i, 1);
@@ -516,6 +500,96 @@
         }
     }
 
+    function updateTemas(ts) {
+        if (player.isDead) return;
+        const dmg = [600, 900, 1400, 2000][STATE.temas-1];
+        getActiveEnemies().forEach(e => {
+            if (e.isDead) return;
+            if (slimeBots.includes(e)) return;
+            if (e._temasCD > 0) { e._temasCD -= ts; return; }
+            if (getDist(player, e) < player.radius + e.radius + 4) {
+                e.hp -= dmg;
+                e._temasCD = 180;
+                addFloatingNumber(e.x, e.y, dmg, '#f1c40f');
+                screenShake = Math.max(screenShake, 3);
+            }
+        });
+    }
+
+    function updateDonenPet(ts) {
+        _donenPet.angle += 0.08 * ts;
+        const petR = 55;
+        _donenPet.x = player.x + Math.cos(_donenPet.angle) * petR;
+        _donenPet.y = player.y + Math.sin(_donenPet.angle) * petR;
+        _donenPet.lastShot += ts;
+        const dmg = [100, 150, 200, 250][STATE.donen_pet-1];
+        if (_donenPet.lastShot >= 45) {
+            _donenPet.lastShot = 0;
+            const enemies = getActiveEnemies().filter(e => !e.isDead);
+            let target = null, minD = Infinity;
+            enemies.forEach(e => { const d = getDist(_donenPet, e); if (d < minD) { minD = d; target = e; } });
+            if (target) {
+                const ang = Math.atan2(target.y - _donenPet.y, target.x - _donenPet.x);
+                _donenPetBullets.push({
+                    x: _donenPet.x, y: _donenPet.y,
+                    vx: Math.cos(ang) * 8, vy: Math.sin(ang) * 8,
+                    life: 60, damage: dmg
+                });
+            }
+        }
+        for (let i = _donenPetBullets.length-1; i >= 0; i--) {
+            const b = _donenPetBullets[i];
+            b.x += b.vx * ts; b.y += b.vy * ts;
+            b.life -= ts;
+            if (b.life <= 0) { _donenPetBullets.splice(i,1); continue; }
+            let hit = false;
+            for (const o of obstacles.concat(cactusWalls || [])) {
+                if (getDist(b, o) < o.radius + 3) {
+                    o.hp -= b.damage * 0.5;
+                    hit = true; break;
+                }
+            }
+            if (!hit) {
+                for (const e of getActiveEnemies()) {
+                    if (e.isDead || e._grace > 0) continue;
+                    if (getDist(b, e) < e.radius + 4) {
+                        e.hp -= b.damage;
+                        addFloatingNumber(e.x, e.y, b.damage, '#a78bfa');
+                        hit = true; break;
+                    }
+                }
+            }
+            if (hit) _donenPetBullets.splice(i,1);
+        }
+    }
+
+    function updateSiperAOE() {
+        const dmg = [400, 700, 1100, 1600][STATE.siper_aoe-1];
+        const radius = 55 + STATE.siper_aoe * 8;
+        _obstacleSnapshot.forEach((snap, o) => {
+            const alive = obstacles.includes(o) || (cactusWalls && cactusWalls.includes(o));
+            if (!alive) {
+                getActiveEnemies().forEach(e => {
+                    if (e.isDead) return;
+                    if (getDist(snap, e) < radius + e.radius) {
+                        e.hp -= dmg;
+                        addFloatingNumber(e.x, e.y, dmg, '#f39c12');
+                    }
+                });
+                explosions.push({ x: snap.x, y: snap.y, radius: 10, maxRadius: radius, life: 15, maxLife: 15 });
+                screenShake = Math.max(screenShake, 5);
+                _obstacleSnapshot.delete(o);
+            } else {
+                snap.x = o.x; snap.y = o.y; snap.hp = o.hp;
+            }
+        });
+        obstacles.concat(cactusWalls || []).forEach(o => {
+            if (!_obstacleSnapshot.has(o)) {
+                _obstacleSnapshot.set(o, { x: o.x, y: o.y, hp: o.hp });
+            }
+        });
+    }
+
     function updateStun(ts) {
         getActiveEnemies().forEach(e => {
             if (e._stunTimer > 0) {
@@ -547,6 +621,9 @@
             _elektroTimer = 0; _elektroFlashes = [];
             _turret = null; _friendlyBots = []; _friendlyBullets = [];
             _morSlotUsed = 0; _initialPickDone = false;
+            _donenPet = { angle: 0, x: 0, y: 0, lastShot: 0 };
+            _donenPetBullets = [];
+            _obstacleSnapshot.clear();
             Object.keys(STATE).forEach(k => STATE[k] = 0);
             window.GAME_PAUSED = false;
             window._waveDamageMult = 1;
@@ -597,6 +674,9 @@
             if (STATE.elektro > 0) updateElektro(ts);
             if (STATE.kule > 0) updateTurret(ts);
             if (STATE.dostbot > 0) updateFriendlyBots(ts);
+            if (STATE.temas > 0) updateTemas(ts);
+            if (STATE.donen_pet > 0) updateDonenPet(ts);
+            if (STATE.siper_aoe > 0) updateSiperAOE();
 
             [bot, bot2].forEach(b => {
                 if (!b.isActive || b.isDead) return;
@@ -671,6 +751,9 @@
             _elektroTimer = 0; _elektroFlashes = [];
             _turret = null; _friendlyBots = []; _friendlyBullets = [];
             _morSlotUsed = 0; _initialPickDone = false;
+            _donenPet = { angle: 0, x: 0, y: 0, lastShot: 0 };
+            _donenPetBullets = [];
+            _obstacleSnapshot.clear();
             Object.keys(STATE).forEach(k => STATE[k] = 0);
             window.GAME_PAUSED = false;
             window._waveDamageMult = 1;
@@ -726,19 +809,12 @@
 
         _origUBL(list, isBot, ts);
 
-        // Bot hasar bonusu — base bot mermileri için
         if (isBot && window.GAME_MODE === MOD_ID && _waveBotDmgBonus > 0) {
             const taken = playerHpBefore - player.hp;
             if (taken > 0) player.hp -= _waveBotDmgBonus;
         }
 
-        // Oyuncu hasar bonusu + can çalma
         if (!isBot && window.GAME_MODE === MOD_ID) {
-            const hasBase = list.some(b => {
-                const t = b.type;
-                return !t || t==='main' || t==='sprout_bullet' || t==='hayalet_bullet'
-                    || t==='ninja_bullet' || t==='sam_punch_light' || t==='sam_punch_heavy';
-            });
             enemySnap.forEach((prevHp, e) => {
                 if (e.hp < prevHp) {
                     let dmg = prevHp - e.hp;
@@ -748,9 +824,22 @@
                         dmg += extra;
                         if (extra >= 1) addFloatingNumber(e.x + 15, e.y - 25, '+' + Math.floor(extra), '#f1c40f');
                     }
-                    if (hasBase && STATE.cancalma > 0) applyEnemyDamage(dmg);
                 }
             });
+        }
+    };
+
+    // Cephane Peti — consumeAmmo override
+    const _origConsumeAmmo = Player.prototype.consumeAmmo;
+    Player.prototype.consumeAmmo = function () {
+        _origConsumeAmmo.call(this);
+        if (window.GAME_MODE === 'wave' && window._waveSTATE && window._waveSTATE.cephane_pet > 0) {
+            const now = Date.now();
+            if (!this._cephanePetLast || now - this._cephanePetLast >= 750) {
+                this._cephanePetLast = now;
+                this.hp = Math.min(this.maxHp, this.hp + 100);
+                addFloatingNumber(this.x, this.y - 30, '+100', '#2ecc71');
+            }
         }
     };
 
@@ -777,13 +866,32 @@
             ctx2.beginPath(); ctx2.arc(0, 0, b.radius, 0, Math.PI*2); ctx2.fill();
             ctx2.strokeStyle = '#fff'; ctx2.lineWidth = 2; ctx2.stroke();
             ctx2.restore();
-            ctx2.fillStyle='#444'; ctx2.fillRect(b.x-15, b.y-b.radius-12, 30, 4);
-            ctx2.fillStyle='#3498db'; ctx2.fillRect(b.x-15, b.y-b.radius-12, 30*(b.hp/b.maxHp), 4);
         });
         _friendlyBullets.forEach(b => {
             ctx2.save();
             ctx2.beginPath(); ctx2.arc(b.x, b.y, 4, 0, Math.PI*2);
             ctx2.fillStyle = '#60a5fa'; ctx2.fill();
+            ctx2.restore();
+        });
+
+        // Dönen Pet
+        if (STATE.donen_pet > 0 && !player.isDead) {
+            ctx2.save();
+            ctx2.translate(_donenPet.x, _donenPet.y);
+            const petGrad = ctx2.createRadialGradient(0, 0, 0, 0, 0, 9);
+            petGrad.addColorStop(0, '#a78bfa');
+            petGrad.addColorStop(1, '#7c3aed');
+            ctx2.fillStyle = petGrad;
+            ctx2.beginPath(); ctx2.arc(0, 0, 9, 0, Math.PI*2); ctx2.fill();
+            ctx2.strokeStyle = '#fff'; ctx2.lineWidth = 2; ctx2.stroke();
+            ctx2.beginPath(); ctx2.arc(0, 0, 3, 0, Math.PI*2);
+            ctx2.fillStyle = '#fff'; ctx2.fill();
+            ctx2.restore();
+        }
+        _donenPetBullets.forEach(b => {
+            ctx2.save();
+            ctx2.beginPath(); ctx2.arc(b.x, b.y, 4, 0, Math.PI*2);
+            ctx2.fillStyle = '#a78bfa'; ctx2.fill();
             ctx2.restore();
         });
 
@@ -802,11 +910,11 @@
         });
 
         if (STATE.elektro > 0) {
-            const ranges = [130, 180, 230, 280];
+            const ranges = [100, 125, 150, 180];
             const r = ranges[STATE.elektro-1];
             const now = Date.now();
             ctx2.save();
-            ctx2.globalAlpha = 0.25 + Math.sin(now/400)*0.1;
+            ctx2.globalAlpha = 0.3 + Math.sin(now/400)*0.1;
             ctx2.beginPath(); ctx2.arc(player.x, player.y, r, 0, Math.PI*2);
             ctx2.strokeStyle = '#00e5ff'; ctx2.lineWidth = 2;
             ctx2.setLineDash([10, 8]); ctx2.lineDashOffset = -now/40;
@@ -843,5 +951,5 @@
     }
 
     window.GAME_EXT.modKartiEkle('wave', '25 Dalga Arena', 'Klasik botlarla 25 dalga roguelite');
-    console.log('[MOD YÜKLENDİ] wave (v3 FULL - Dondurucu uyumlu)');
+    console.log('[MOD YÜKLENDİ] wave (v4 TAM - 14 kart)');
 })();
