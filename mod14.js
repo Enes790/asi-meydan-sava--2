@@ -1,10 +1,4 @@
-// ========== mod14.js — 25 Dalga Arena (v4 TAM) ==========
-// Değişiklikler:
-// - Bot HP: +50/dalga, hasar: +5/dalga
-// - Can Çalma kartı KALDIRILDI
-// - 4 yeni kart: Temas, Dönen Pet, Cephane Peti, Siper AOE
-// - Elektro: alan küçültüldü (100/125/150/180), DPS aynı, 4sn şok
-// - Dondurucu uyumu korundu
+// ========== mod14.js — 25 Dalga Arena (v5 FINAL) ==========
 (function () {
     'use strict';
 
@@ -33,6 +27,7 @@
     let _waveBotDmgBonus = 0;
     let _donenPet = { angle: 0, x: 0, y: 0, lastShot: 0 };
     let _donenPetBullets = [];
+    let _cephanePet = { angle: 0, x: 0, y: 0, lastHeal: 0, flash: 0 };
     let _obstacleSnapshot = new Map();
 
     const WAVES = [
@@ -67,14 +62,13 @@
         maxhp:       { name:'Maks HP',          rarity:'common', max:4, desc:'+%35 max HP / seviye' },
         hiz:         { name:'Hız',              rarity:'common', max:4, desc:'+%8 hız + +%8 cephane' },
         regen:       { name:'Regen',            rarity:'common', max:4, desc:'+50/100/180/300 HP/sn' },
-        hasar:       { name:'Ek Hasar',         rarity:'common', max:4, desc:'+%15 hasar / seviye' },
-        temas:       { name:'Temas Hasarı',     rarity:'rare',   max:4, desc:'Değdiğin düşmana 600/900/1400/2000 (3sn cd)' },
+        temas:       { name:'Temas Hasarı',     rarity:'rare',   max:4, desc:'Değdiğin düşmana 600/900/1400/2000 (3sn cd) + itme' },
         donen_pet:   { name:'Dönen Pet',        rarity:'rare',   max:4, desc:'Etrafında dönen pet, bot+siper 100-250 DPS' },
         yansima:     { name:'Yansıma',          rarity:'rare',   max:4, desc:'Her N. vuruşta %60 yansıma + heal' },
         dostbot:     { name:'Dost Bot',         rarity:'rare',   max:4, desc:'Yardımcı botlar' },
         meteor:      { name:'Meteor',           rarity:'rare',   max:4, desc:'Periyodik AOE göktaşı' },
         siper_aoe:   { name:'Siper Patlatma',   rarity:'rare',   max:4, desc:'Siper kırılınca AOE 400/700/1100/1600' },
-        cephane_pet: { name:'Cephane Peti',     rarity:'epic',   max:4, desc:'Her ateşlemede +100 can (0.75sn cd)' },
+        cephane_pet: { name:'Cephane Peti',     rarity:'epic',   max:4, desc:'Ateşlemede +175/215/260/300 can (0.75sn cd)' },
         elektro:     { name:'Elektro Aura',     rarity:'epic',   max:4, desc:'Yakın düşmanlara şok + pasif' },
         kule:        { name:'Kule',             rarity:'epic',   max:4, desc:'Otomatik ateş eden kule' },
         hayat:       { name:'Hayat Sigortası',  rarity:'epic',   max:4, desc:'Can≤500 iken kurtarma (1/dalga)' }
@@ -178,6 +172,8 @@
         _elektroTimer = 0;
         _donenPet.lastShot = 0;
         _donenPetBullets = [];
+        _cephanePet.lastHeal = 0;
+        _cephanePet.flash = 0;
         _obstacleSnapshot.clear();
         obstacles.concat(cactusWalls || []).forEach(o => {
             _obstacleSnapshot.set(o, { x: o.x, y: o.y, hp: o.hp });
@@ -276,9 +272,6 @@
             const pct = lv * 0.08;
             player.speed = (player.originalSpeed || player.speed) * (1 + pct);
             player.reloadSpeed = 0.015 * (1 + pct);
-        } else if (k === 'hasar') {
-            _waveDamageMult = 1 + lv * 0.15;
-            window._waveDamageMult = _waveDamageMult;
         }
     }
 
@@ -510,6 +503,11 @@
             if (getDist(player, e) < player.radius + e.radius + 4) {
                 e.hp -= dmg;
                 e._temasCD = 180;
+                const ang = getAngle(player, e);
+                e.x += Math.cos(ang) * 10;
+                e.y += Math.sin(ang) * 10;
+                e.x = clampPos(e.x, e.radius + WALL_THICKNESS, canvas.width - e.radius - WALL_THICKNESS);
+                e.y = clampPos(e.y, e.radius + WALL_THICKNESS, canvas.height - e.radius - WALL_THICKNESS);
                 addFloatingNumber(e.x, e.y, dmg, '#f1c40f');
                 screenShake = Math.max(screenShake, 3);
             }
@@ -530,6 +528,7 @@
             enemies.forEach(e => { const d = getDist(_donenPet, e); if (d < minD) { minD = d; target = e; } });
             if (target) {
                 const ang = Math.atan2(target.y - _donenPet.y, target.x - _donenPet.x);
+                _donenPet.aimAngle = ang;
                 _donenPetBullets.push({
                     x: _donenPet.x, y: _donenPet.y,
                     vx: Math.cos(ang) * 8, vy: Math.sin(ang) * 8,
@@ -561,6 +560,14 @@
             }
             if (hit) _donenPetBullets.splice(i,1);
         }
+    }
+
+    function updateCephanePet(ts) {
+        _cephanePet.angle += 0.08 * ts;
+        const petR = 55;
+        _cephanePet.x = player.x + Math.cos(_cephanePet.angle + Math.PI) * petR;
+        _cephanePet.y = player.y + Math.sin(_cephanePet.angle + Math.PI) * petR;
+        if (_cephanePet.flash > 0) _cephanePet.flash -= ts;
     }
 
     function updateSiperAOE() {
@@ -600,7 +607,7 @@
                 e.speed = 0;
                 if (e.shootInterval) e.shootInterval = 999999;
                 e._stunTimer -= ts;
-                if (e._stunTimer <= 0) {
+                if (e._stunTimer <= 0 && !e._frozen) {
                     e.speed = e._stunSavedSpeed || e.baseSpeed || 1;
                     if (e._stunSavedInterval) e.shootInterval = e._stunSavedInterval;
                     delete e._stunSavedSpeed; delete e._stunSavedInterval;
@@ -623,6 +630,7 @@
             _morSlotUsed = 0; _initialPickDone = false;
             _donenPet = { angle: 0, x: 0, y: 0, lastShot: 0 };
             _donenPetBullets = [];
+            _cephanePet = { angle: 0, x: 0, y: 0, lastHeal: 0, flash: 0 };
             _obstacleSnapshot.clear();
             Object.keys(STATE).forEach(k => STATE[k] = 0);
             window.GAME_PAUSED = false;
@@ -676,6 +684,7 @@
             if (STATE.dostbot > 0) updateFriendlyBots(ts);
             if (STATE.temas > 0) updateTemas(ts);
             if (STATE.donen_pet > 0) updateDonenPet(ts);
+            if (STATE.cephane_pet > 0) updateCephanePet(ts);
             if (STATE.siper_aoe > 0) updateSiperAOE();
 
             [bot, bot2].forEach(b => {
@@ -688,7 +697,7 @@
                     return;
                 }
                 if (b._grace > 0) { b._grace -= ts; return; }
-                if (b._stunTimer > 0) return;
+                if (b._stunTimer > 0 || b._frozen) return;
                 const canSee = !player.isDead && !player.isInvisible;
                 if (canSee) {
                     const dP = getDist(b, player);
@@ -723,7 +732,7 @@
             const allEnemies = [bot, bot2, ...slimeBots, ...stationaryBots, ...boomerangBots, ...fogBots, ...nests];
             allEnemies.forEach(e => {
                 if (e._grace > 0) e._grace -= ts;
-                if (e._grace <= 0 && e.speed === 0 && e._baseSpeed) e.speed = e._baseSpeed;
+                if (e._grace <= 0 && e.speed === 0 && e._baseSpeed && !e._frozen && !(e._stunTimer > 0)) e.speed = e._baseSpeed;
             });
 
             if (waveActive) {
@@ -753,6 +762,7 @@
             _morSlotUsed = 0; _initialPickDone = false;
             _donenPet = { angle: 0, x: 0, y: 0, lastShot: 0 };
             _donenPetBullets = [];
+            _cephanePet = { angle: 0, x: 0, y: 0, lastHeal: 0, flash: 0 };
             _obstacleSnapshot.clear();
             Object.keys(STATE).forEach(k => STATE[k] = 0);
             window.GAME_PAUSED = false;
@@ -803,29 +813,16 @@
             }
         }
 
-        const enemySnap = new Map();
-        if (!isBot && window.GAME_MODE === MOD_ID) getActiveEnemies().forEach(e => enemySnap.set(e, e.hp));
         const playerHpBefore = player.hp;
 
         _origUBL(list, isBot, ts);
 
         if (isBot && window.GAME_MODE === MOD_ID && _waveBotDmgBonus > 0) {
             const taken = playerHpBefore - player.hp;
-            if (taken > 0) player.hp -= _waveBotDmgBonus;
-        }
-
-        if (!isBot && window.GAME_MODE === MOD_ID) {
-            enemySnap.forEach((prevHp, e) => {
-                if (e.hp < prevHp) {
-                    let dmg = prevHp - e.hp;
-                    if (_waveDamageMult > 1) {
-                        const extra = dmg * (_waveDamageMult - 1);
-                        e.hp -= extra;
-                        dmg += extra;
-                        if (extra >= 1) addFloatingNumber(e.x + 15, e.y - 25, '+' + Math.floor(extra), '#f1c40f');
-                    }
-                }
-            });
+            if (taken > 0) {
+                player.hp -= _waveBotDmgBonus;
+                addFloatingNumber(player.x + 20, player.y + 5, '+' + _waveBotDmgBonus, '#f39c12');
+            }
         }
     };
 
@@ -837,8 +834,11 @@
             const now = Date.now();
             if (!this._cephanePetLast || now - this._cephanePetLast >= 750) {
                 this._cephanePetLast = now;
-                this.hp = Math.min(this.maxHp, this.hp + 100);
-                addFloatingNumber(this.x, this.y - 30, '+100', '#2ecc71');
+                const heals = [175, 215, 260, 300];
+                const heal = heals[window._waveSTATE.cephane_pet - 1];
+                this.hp = Math.min(this.maxHp, this.hp + heal);
+                addFloatingNumber(this.x, this.y - 30, '+' + heal, '#2ecc71');
+                _cephanePet.flash = 12;
             }
         }
     };
@@ -874,26 +874,70 @@
             ctx2.restore();
         });
 
-        // Dönen Pet
+        // Dönen Pet — mor, göz + ateş flash + trail
         if (STATE.donen_pet > 0 && !player.isDead) {
             ctx2.save();
+            ctx2.globalAlpha = 0.3;
+            ctx2.beginPath(); ctx2.arc(_donenPet.x - Math.cos(_donenPet.angle)*8, _donenPet.y - Math.sin(_donenPet.angle)*8, 6, 0, Math.PI*2);
+            ctx2.fillStyle = '#a78bfa'; ctx2.fill();
+            ctx2.restore();
+            ctx2.save();
             ctx2.translate(_donenPet.x, _donenPet.y);
-            const petGrad = ctx2.createRadialGradient(0, 0, 0, 0, 0, 9);
+            const petGrad = ctx2.createRadialGradient(0, 0, 0, 0, 0, 10);
             petGrad.addColorStop(0, '#a78bfa');
             petGrad.addColorStop(1, '#7c3aed');
             ctx2.fillStyle = petGrad;
-            ctx2.beginPath(); ctx2.arc(0, 0, 9, 0, Math.PI*2); ctx2.fill();
+            ctx2.beginPath(); ctx2.arc(0, 0, 10, 0, Math.PI*2); ctx2.fill();
             ctx2.strokeStyle = '#fff'; ctx2.lineWidth = 2; ctx2.stroke();
-            ctx2.beginPath(); ctx2.arc(0, 0, 3, 0, Math.PI*2);
+            const aim = _donenPet.aimAngle || _donenPet.angle;
+            ctx2.beginPath(); ctx2.arc(Math.cos(aim)*4, Math.sin(aim)*4, 2, 0, Math.PI*2);
             ctx2.fillStyle = '#fff'; ctx2.fill();
+            if (_donenPet.lastShot < 8) {
+                ctx2.beginPath(); ctx2.arc(Math.cos(aim)*12, Math.sin(aim)*12, 5, 0, Math.PI*2);
+                ctx2.fillStyle = 'rgba(255,255,255,0.7)'; ctx2.fill();
+            }
             ctx2.restore();
         }
         _donenPetBullets.forEach(b => {
+            ctx2.save();
+            ctx2.globalAlpha = 0.4;
+            ctx2.beginPath(); ctx2.arc(b.x - b.vx*2, b.y - b.vy*2, 3, 0, Math.PI*2);
+            ctx2.fillStyle = '#a78bfa'; ctx2.fill();
+            ctx2.restore();
             ctx2.save();
             ctx2.beginPath(); ctx2.arc(b.x, b.y, 4, 0, Math.PI*2);
             ctx2.fillStyle = '#a78bfa'; ctx2.fill();
             ctx2.restore();
         });
+
+        // Cephane Peti — yeşil, göz + heal flash + trail
+        if (STATE.cephane_pet > 0 && !player.isDead) {
+            ctx2.save();
+            ctx2.globalAlpha = 0.3;
+            ctx2.beginPath(); ctx2.arc(_cephanePet.x - Math.cos(_cephanePet.angle+Math.PI)*8, _cephanePet.y - Math.sin(_cephanePet.angle+Math.PI)*8, 6, 0, Math.PI*2);
+            ctx2.fillStyle = '#2ecc71'; ctx2.fill();
+            ctx2.restore();
+            ctx2.save();
+            ctx2.translate(_cephanePet.x, _cephanePet.y);
+            const cpGrad = ctx2.createRadialGradient(0, 0, 0, 0, 0, 10);
+            cpGrad.addColorStop(0, '#2ecc71');
+            cpGrad.addColorStop(1, '#1e8449');
+            ctx2.fillStyle = cpGrad;
+            ctx2.beginPath(); ctx2.arc(0, 0, 10, 0, Math.PI*2); ctx2.fill();
+            ctx2.strokeStyle = '#fff'; ctx2.lineWidth = 2; ctx2.stroke();
+            const caim = _cephanePet.angle + Math.PI;
+            ctx2.beginPath(); ctx2.arc(Math.cos(caim)*4, Math.sin(caim)*4, 2, 0, Math.PI*2);
+            ctx2.fillStyle = '#fff'; ctx2.fill();
+            if (_cephanePet.flash > 0) {
+                ctx2.globalAlpha = _cephanePet.flash / 12;
+                ctx2.beginPath(); ctx2.arc(0, 0, 16, 0, Math.PI*2);
+                ctx2.strokeStyle = '#fff'; ctx2.lineWidth = 2; ctx2.stroke();
+                ctx2.beginPath(); ctx2.moveTo(0, 0);
+                ctx2.lineTo(player.x - _cephanePet.x, player.y - _cephanePet.y);
+                ctx2.strokeStyle = 'rgba(46,204,113,0.7)'; ctx2.lineWidth = 2; ctx2.stroke();
+            }
+            ctx2.restore();
+        }
 
         _meteors.forEach(m => {
             const prog = m.t / m.dur;
@@ -951,5 +995,5 @@
     }
 
     window.GAME_EXT.modKartiEkle('wave', '25 Dalga Arena', 'Klasik botlarla 25 dalga roguelite');
-    console.log('[MOD YÜKLENDİ] wave (v4 TAM - 14 kart)');
+    console.log('[MOD YÜKLENDİ] wave (v5 FINAL)');
 })();
