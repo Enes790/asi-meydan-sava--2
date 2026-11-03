@@ -62,25 +62,25 @@
         // TUR 1 (1-7)
         { e:[{t:'slime',c:1}], d:4 },
         { e:[{t:'slime',c:2}], d:3 },
-        { e:[{t:'slime',c:3},{t:'tur',c:1}] },
+        { e:[{t:'growing,c:3},{t:'tur',c:1}] },
         { e:[{t:'tur',c:1},{t:'slime',c:2}] },
-        { e:[{t:'tur',c:2},{t:'slime',c:2}] },
-        { e:[{t:'mor',c:2},{t:'slime',c:1}] },
-        { e:[{t:'slime',c:3},{t:'tur',c:2}], boss:true },
+        { e:[{t:'tur',c:3},{t:'slime',c:2}] },
+        { e:[{t:'mor',c:3},{t:'slime',c:1}] },
+        { e:[{t:'slime',c:3},{t:'tur',c:2},{t:'growing',c:2}], boss:true },
         // TUR 2 (8-14)
         { e:[{t:'slime',c:4},{t:'nest',c:1},{t:'boom',c:2}] },
         { e:[{t:'mor',c:2},{t:'boom',c:2}] },
-        { e:[{t:'fog',c:1},{t:'slime',c:2}] },
-        { e:[{t:'tur',c:3},{t:'mor',c:2}] },
-        { e:[{t:'fog',c:2},{t:'mor',c:2},{t:'slime',c:1}] },
-        { e:[{t:'boom',c:3},{t:'tur',c:2},{t:'slime',c:1}] },
+        { e:[{t:'fog',c:1},{t:'slime',c:2},{t:'growing',c:2}] },
+        { e:[{t:'tur',c:6},{t:'mor',c:1}] },
+        { e:[{t:'armored',c:1},{t:'mor',c:3},{t:'slime',c:1}] },
+        { e:[{t:'boom',c:7},{t:'tur',c:1},{t:'growing',c:1}] },
         { e:[{t:'fog',c:2},{t:'tur',c:3}], boss:true },
         // TUR 3 (15-21)
-        { e:[{t:'armored',c:1},{t:'slime',c:2}] },
-        { e:[{t:'armored',c:1},{t:'tur',c:2},{t:'slime',c:1}] },
-        { e:[{t:'armored',c:1},{t:'boom',c:2},{t:'fog',c:1}] },
-        { e:[{t:'armored',c:2},{t:'slime',c:3}] },
-        { e:[{t:'armored',c:2},{t:'mor',c:2},{t:'fog',c:1}] },
+        { e:[{t:'growing',c:5},{t:'slime',c:2}] },
+        { e:[{t:'armored',c:1},{t:'tur',c:9},{t:'slime',c:1}] },
+        { e:[{t:'armored',c:1},{t:'boom',c:2},{t:'mor',c:6}] },
+        { e:[{t:'armored',c:5},{t:'slime',c:1}] },
+        { e:[{t:'armored',c:2},{t:'nest',c:4},{t:'fog',c:2}] },
         { e:[{t:'armored',c:2},{t:'tur',c:3}] },
         { e:[{t:'mor',c:7}], boss:true },
         // TUR 4 (22-28)
@@ -95,10 +95,10 @@
         { e:[{t:'boom',c:4},{t:'tur',c:2}] },
         { e:[{t:'slime',c:5},{t:'mor',c:2},{t:'growing',c:2}] },
         { e:[{t:'armored',c:3},{t:'fog',c:2},{t:'growing',c:1}] },
-        { e:[{t:'nest',c:10}], d:10, special:'yuva' },
-        { e:[{t:'slime',c:6},{t:'mor',c:2},{t:'growing',c:2}] },
-        { e:[{t:'armored',c:4},{t:'fog',c:2},{t:'growing',c:1}] },
-        { e:[{t:'armored',c:4},{t:'fog',c:1},{t:'growing',c:1},{t:'tur',c:1},{t:'boom',c:1},{t:'slime',c:1}], boss:true, final:true }
+        { e:[{t:'nest',c:10},{t:'boom',c:4], d:10, special:'yuva' },
+        { e:[{t:'slime',c:5},{t:'boom',c:1},{t:'growing',c:4}] },
+        { e:[{t:'armored',c:4},{t:'fog',c:1},{t:'mor',c:3}] },
+        { e:[{t:'armored',c:1},{t:'tur',c:10},{t:'growing',c:1},{t:'tur',c:7},{t:'boom',c:7},{t:'slime',c:3}], boss:true, final:true }
     ];
 
     const CARDS = {
