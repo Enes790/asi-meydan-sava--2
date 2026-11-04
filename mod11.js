@@ -1,8 +1,8 @@
-// ========== mod32.js (YRICT) — Zehir + Yalnızlık ==========
+// ========== mod32.js (ANACHOR) — Zehir + Yalnızlık ==========
 (function () {
     'use strict';
 
-    const CHAR_ID = 'yrict';
+    const CHAR_ID = 'anachor';
     const C_MAIN = '#7c5c9a';
     const C_LIGHT = '#b8a0d4';
     const C_DARK = '#4a3a5a';
@@ -14,8 +14,7 @@
 
     const CHAR_HP = 2000;
     const CHAR_SPEED = 3.6;
-    const YRICT_RANGE = 170;
-    const ALONE_RADIUS = 250;
+    const ALONE_RADIUS = 125;
 
     const BULLET_DMG = 200;
     const POISON_TICK_DMG = 200;
@@ -55,8 +54,9 @@
     let yrictBullets = [];
     let yrictPoisonBots = new Map();
     let yrictSilenced = new Map();
+    let poisonPools = [];
     let yrictDash = null;
-    let yrictAks2Aim = { active: false, angle: 0, pull: 0, isMouse: false, touchId: null };
+    let yrictAks2Aim = { active: false, angle: 0, isMouse: false, touchId: null };
     let yrictAks1Cd = 0, yrictAks1Ready = true;
     let yrictAks2Cd = 0, yrictAks2Ready = true;
     let yrictIsAlone = true;
@@ -95,14 +95,12 @@
         if (ultFill) ultFill.style.width = player.ultCharge + '%';
     }
 
-    // Base chargeUlti'yi Yrict için blokla (heal float'lar ulti doldurmasın)
     const _origChargeUlti = window.chargeUlti;
     window.chargeUlti = function (amount) {
         if (player && player.charType === CHAR_ID) return;
         return _origChargeUlti.call(this, amount);
     };
 
-    // ===== KART =====
     const container = document.querySelector('.char-select-container');
     if (container && !document.getElementById('char-' + CHAR_ID)) {
         const card = document.createElement('div');
@@ -110,7 +108,7 @@
         card.id = 'char-' + CHAR_ID;
         card.innerHTML =
             '<div class="char-color-preview" style="background:' + C_MAIN + ';"></div>' +
-            '<span>Yrict</span>' +
+            '<span>Anachor</span>' +
             '<small>Zehir + Yalnızlık<br>Güç: Kalkan + Dash<br>Ulti: Karanlık Patlama</small>';
         container.appendChild(card);
         card.addEventListener('click', () => {
@@ -124,8 +122,9 @@
         yrictBullets = [];
         yrictPoisonBots.clear();
         yrictSilenced.clear();
+        poisonPools = [];
         yrictDash = null;
-        yrictAks2Aim = { active: false, angle: 0, pull: 0, isMouse: false, touchId: null };
+        yrictAks2Aim = { active: false, angle: 0, isMouse: false, touchId: null };
         yrictAks1Cd = 0; yrictAks1Ready = true;
         yrictAks2Cd = 0; yrictAks2Ready = true;
         yrictIsAlone = true;
@@ -139,7 +138,6 @@
         }
     }
 
-    // ===== SET CHARACTER =====
     const origSet = Player.prototype.setCharacter;
     Player.prototype.setCharacter = function (type) {
         origSet.call(this, type);
@@ -169,7 +167,6 @@
         }
     };
 
-    // ===== ANA SALDIRI =====
     const origFire = Player.prototype.fire;
     Player.prototype.fire = function (a, pull) {
         if (this.charType !== CHAR_ID) return origFire.call(this, a, pull);
@@ -186,7 +183,6 @@
         this.lastShotTime = Date.now();
     };
 
-    // ===== AKS 1 — KALKAN =====
     const origGadget = Player.prototype.activateGadget;
     Player.prototype.activateGadget = function (a, pull) {
         if (this.charType !== CHAR_ID) return origGadget.call(this, a, pull);
@@ -204,7 +200,6 @@
         yrictFX.push({ type: 'shieldBurst', x: this.x, y: this.y, life: 20, maxLife: 20 });
     };
 
-    // ===== AKS 2 — DASH (nişan çizgisi) =====
     const origGadget2 = Player.prototype.activateGadget2;
     Player.prototype.activateGadget2 = function (a, pull) {
         if (this.charType !== CHAR_ID) return origGadget2.call(this, a, pull);
@@ -227,7 +222,6 @@
         yrictFX.push({ type: 'dashStart', x: this.x, y: this.y, life: 15, maxLife: 15 });
     };
 
-    // ===== ULTİ — KARANLIK PATLAMA =====
     const origUlti = Player.prototype.fireUlti;
     Player.prototype.fireUlti = function (a, pull) {
         if (this.charType !== CHAR_ID) return origUlti.call(this, a, pull);
@@ -271,23 +265,22 @@
 
     chainHook('onReset', function () { clearAll(); });
 
-    // ===== UPDATE =====
     chainHook('onUpdate', function (ts) {
         if (player.charType !== CHAR_ID || player.isDead) return;
         if (!gameStarted) return;
+        if (ultiBtn && ultiBtn.style.display !== 'flex') ultiBtn.style.display = 'flex';
+        if (gadgetBtn && gadgetBtn.style.display !== 'flex') gadgetBtn.style.display = 'flex';
+        if (gadgetBtn2 && gadgetBtn2.style.display !== 'flex') gadgetBtn2.style.display = 'flex';
 
-        // Yalnızlık kontrolü
         const alone = isYrictAlone();
         yrictIsAlone = alone;
 
-        // Hız çarpanı
         const targetMult = alone ? SPEED_MULT : 1;
         if (Math.abs(targetMult - yrictSpeedMult) > 0.001) {
             player.speed = player.speed / yrictSpeedMult * targetMult;
             yrictSpeedMult = targetMult;
         }
 
-        // Aks 1 CD
         if (yrictAks1Cd > 0) {
             yrictAks1Cd -= ts;
             if (yrictAks1Cd <= 0) {
@@ -296,7 +289,6 @@
                 if (gadgetTimerText) gadgetTimerText.innerText = '';
             }
         }
-        // Aks 2 CD
         if (yrictAks2Cd > 0) {
             yrictAks2Cd -= ts;
             if (yrictAks2Cd <= 0) {
@@ -306,23 +298,19 @@
             }
         }
 
-        // Kalkan erimesi (16s)
         if (yrictShield > 0) {
             yrictShield -= (yrictShieldMax / AKS1_SHIELD_DURATION) * ts;
             if (yrictShield < 0) yrictShield = 0;
             player._yrictShield = yrictShield;
         }
 
-        // Kalkan emme + yalnızlık heal
         if (yrictLastHp > 0 && player.hp < yrictLastHp) {
             let taken = yrictLastHp - player.hp;
-            // Yalnızlık heal %20
             if (alone && taken > 0) {
                 const heal = taken * HEAL_PCT;
                 player.hp = Math.min(player.maxHp, player.hp + heal);
                 taken -= heal;
             }
-            // Kalkan emer
             if (yrictShield > 0 && taken > 0) {
                 const absorbed = Math.min(yrictShield, taken);
                 yrictShield -= absorbed;
@@ -336,9 +324,11 @@
         }
         yrictLastHp = player.hp;
 
-        // Zehir tick
         yrictPoisonBots.forEach((v, e) => {
             if (!e || e.isDead) {
+                if (e && v.timer > 0) {
+                    poisonPools.push({ x: e.x, y: e.y, timer: v.timer, tickTimer: v.tickTimer });
+                }
                 yrictPoisonBots.delete(e);
                 return;
             }
@@ -351,7 +341,6 @@
                 yrictCharge(3);
             }
             if (v.timer <= 0) {
-                // Zehir bitimi: AOE
                 const aoe = POISON_AOE_DMG;
                 e.hp -= aoe;
                 addFloatingNumber(e.x, e.y, aoe, C_POISON);
@@ -367,7 +356,6 @@
             }
         });
 
-        // Silenced decay
         yrictSilenced.forEach((v, e) => {
             if (!e || e.isDead) { yrictSilenced.delete(e); return; }
             const remaining = v - ts;
@@ -379,7 +367,31 @@
             }
         });
 
-        // Temas
+        for (let i = poisonPools.length - 1; i >= 0; i--) {
+            const p = poisonPools[i];
+            p.timer -= ts;
+            p.tickTimer += ts;
+            if (p.tickTimer >= POISON_TICK_INTERVAL && p.timer > 0) {
+                p.tickTimer = 0;
+                getActiveEnemies().forEach(e => {
+                    if (!e.isDead && getDist(p, e) < 50 + e.radius) {
+                        e.hp -= POISON_TICK_DMG;
+                        addFloatingNumber(e.x, e.y - 10, POISON_TICK_DMG, C_POISON);
+                    }
+                });
+            }
+            if (p.timer <= 0) {
+                getActiveEnemies().forEach(e => {
+                    if (!e.isDead && getDist(p, e) < 100 + e.radius) {
+                        e.hp -= POISON_AOE_DMG;
+                        addFloatingNumber(e.x, e.y, POISON_AOE_DMG, C_POISON);
+                    }
+                });
+                yrictFX.push({ type: 'poisonAoe', x: p.x, y: p.y, radius: 0, maxRadius: 100, life: 15, maxLife: 15 });
+                poisonPools.splice(i, 1);
+            }
+        }
+
         getActiveEnemies().forEach(e => {
             if (e.isDead) return;
             if (e._yrictTemasCd > 0) { e._yrictTemasCd -= ts; return; }
@@ -391,14 +403,12 @@
             }
         });
 
-        // Dash hareket
         if (yrictDash && yrictDash.active) {
             yrictDash.timer -= ts;
             const prog = 1 - (yrictDash.timer / DASH_FRAMES);
             player.x = yrictDash.startX + (yrictDash.targetX - yrictDash.startX) * Math.min(1, prog);
             player.y = yrictDash.startY + (yrictDash.targetY - yrictDash.startY) * Math.min(1, prog);
 
-            // Çarpışma: dash çizgisindeki botlar
             getActiveEnemies().forEach(e => {
                 if (e.isDead || yrictDash.hitBots.has(e)) return;
                 if (yrictDash.hitBots.size >= DASH_MAX_BOTS) return;
@@ -423,7 +433,6 @@
             }
         }
 
-        // FX
         for (let i = yrictFX.length - 1; i >= 0; i--) {
             yrictFX[i].life -= ts;
             if (yrictFX[i].radius !== undefined) {
@@ -432,11 +441,9 @@
             if (yrictFX[i].life <= 0) yrictFX.splice(i, 1);
         }
 
-        // Buton durumları
         if (ultiBtn && player.ultReady) ultiBtn.classList.add('ready');
     });
 
-    // ===== MERMİ ÇARPIŞMA =====
     const _origUBL = window.updateBulletLogic;
     window.updateBulletLogic = function (list, isBot, ts) {
         if (!isBot && player.charType === CHAR_ID) {
@@ -449,7 +456,6 @@
                     b.y < WALL_THICKNESS || b.y > canvas.height - WALL_THICKNESS) {
                     yrictBullets.splice(i, 1); continue;
                 }
-                // Siper
                 let hitWall = false;
                 for (const o of obstacles.concat(cactusWalls || [])) {
                     if (getDist(b, o) < o.radius + 5) {
@@ -460,7 +466,6 @@
                     }
                 }
                 if (hitWall) { yrictBullets.splice(i, 1); continue; }
-                // Düşman
                 let hitEnemy = null;
                 for (const e of getActiveEnemies()) {
                     if (e.isDead) continue;
@@ -469,7 +474,6 @@
                 if (hitEnemy) {
                     hitEnemy.hp -= BULLET_DMG;
                     addFloatingNumber(hitEnemy.x, hitEnemy.y, BULLET_DMG, C_LIGHT);
-                    // Zehir uygula
                     const dur = yrictIsAlone ? POISON_ALONE_TIME : POISON_CROWD_TIME;
                     const existing = yrictPoisonBots.get(hitEnemy);
                     if (existing) {
@@ -486,11 +490,9 @@
         return _origUBL(list, isBot, ts);
     };
 
-    // ===== ÇİZİM =====
     chainHook('onDraw', function (ctx2) {
         if (player.charType !== CHAR_ID || !gameStarted) return;
 
-        // Yrict özel çizim (boyut + renk)
         const alone = yrictIsAlone;
         const scale = alone ? 1.10 : 0.90;
         const bodyColor = alone ? C_ALONE : C_CROWD;
@@ -500,20 +502,15 @@
         ctx2.translate(player.x, player.y);
         ctx2.scale(scale, scale);
         ctx2.rotate(player.angle);
-        // Gölge
         ctx2.fillStyle = 'rgba(0,0,0,0.35)';
         ctx2.beginPath(); ctx2.ellipse(0, player.radius * 0.4, player.radius * 0.9, player.radius * 0.35, 0, 0, Math.PI * 2); ctx2.fill();
-        // Gövde
         ctx2.fillStyle = bodyColor;
         ctx2.beginPath(); ctx2.arc(0, 0, player.radius + pulse, 0, Math.PI * 2); ctx2.fill();
-        // Kontur
         ctx2.strokeStyle = C_DARK; ctx2.lineWidth = 2.5; ctx2.stroke();
-        // Göz
         ctx2.beginPath(); ctx2.arc(player.radius - 4, 0, 5, 0, Math.PI * 2);
         ctx2.fillStyle = 'rgba(0,0,0,.4)'; ctx2.fill();
         ctx2.restore();
 
-        // Kalkan halkası
         if (yrictShield > 0) {
             const alpha = yrictShield / yrictShieldMax;
             ctx2.save();
@@ -526,7 +523,6 @@
             ctx2.restore();
         }
 
-        // Dash sırasında karanlık sis
         if (yrictDash && yrictDash.active) {
             ctx2.save();
             ctx2.globalAlpha = 0.75;
@@ -538,7 +534,6 @@
             ctx2.restore();
         }
 
-        // Zehirli düşmanlar
         yrictPoisonBots.forEach((v, e) => {
             if (!e || e.isDead) return;
             ctx2.save();
@@ -548,7 +543,22 @@
             ctx2.restore();
         });
 
-        // Yrict mermileri
+        poisonPools.forEach(p => {
+            ctx2.save();
+            const pl = 1 + Math.sin(Date.now() / 200) * 0.1;
+            ctx2.globalAlpha = 0.25;
+            ctx2.beginPath(); ctx2.arc(p.x, p.y, 50 * pl, 0, Math.PI * 2);
+            ctx2.fillStyle = C_POISON; ctx2.fill();
+            ctx2.globalAlpha = 0.55;
+            ctx2.beginPath(); ctx2.arc(p.x, p.y, 50 * pl, 0, Math.PI * 2);
+            ctx2.strokeStyle = C_POISON; ctx2.lineWidth = 2;
+            ctx2.setLineDash([6, 4]); ctx2.stroke(); ctx2.setLineDash([]);
+            ctx2.globalAlpha = 0.7;
+            ctx2.beginPath(); ctx2.arc(p.x, p.y, 8, 0, Math.PI * 2);
+            ctx2.fillStyle = C_POISON; ctx2.fill();
+            ctx2.restore();
+        });
+
         yrictBullets.forEach(b => {
             ctx2.save();
             ctx2.translate(b.x, b.y); ctx2.rotate(b.angle);
@@ -559,7 +569,6 @@
             ctx2.restore();
         });
 
-        // FX
         yrictFX.forEach(fx => {
             ctx2.save();
             const a = fx.life / fx.maxLife;
@@ -579,7 +588,6 @@
             ctx2.restore();
         });
 
-        // Aim göstergesi (dash hedef)
         if (yrictAks2Aim.active) {
             const a = yrictAks2Aim.angle;
             const dist = DASH_DIST;
@@ -595,8 +603,6 @@
         }
     });
 
-    // ===== DASH AIM — buton basılı tut =====
-    const _origTouchStart = function (e) { return e; };
     if (gadgetBtn2) {
         gadgetBtn2.addEventListener('touchstart', (e) => {
             if (player.charType !== CHAR_ID || !yrictAks2Ready || yrictDash) return;
@@ -653,5 +659,5 @@
         });
     }
 
-    console.log('[MOD YÜKLENDİ] yrict (v1)');
+    console.log('[MOD YÜKLENDİ] anachor (v1)');
 })();
