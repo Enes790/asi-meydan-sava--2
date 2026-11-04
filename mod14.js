@@ -98,7 +98,7 @@
         { e:[{t:'nest',c:10},{t:'boom',c:4}], d:10, special:'yuva' },
         { e:[{t:'slime',c:5},{t:'boom',c:1},{t:'growing',c:4}] },
         { e:[{t:'armored',c:4},{t:'fog',c:1},{t:'mor',c:3}] },
-        { e:[{t:'armored',c:1},{t:'tur',c:10},{t:'growing',c:1},{t:'growing',c:1},{t:'boom',c:7},{t:'slime',c:3}], boss:true, final:true }
+        { e:[{t:'armored',c:1},{t:'tur',c:2},{t:'growing',c:3},{t:'armored',c:3},{t:'boom',c:2},{t:'slime',c:2}], boss:true, final:true }
     ];
 
     const CARDS = {
