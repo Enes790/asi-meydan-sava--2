@@ -15,7 +15,7 @@
     const CHAR_HP = 2000;
     const CHAR_SPEED = 3.6;
     const YRICT_RANGE = 170;
-    const ALONE_RADIUS = 250;
+    const ALONE_RADIUS = 100;
 
     const BULLET_DMG = 200;
     const POISON_TICK_DMG = 200;
