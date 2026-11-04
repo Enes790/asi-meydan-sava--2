@@ -1,4 +1,4 @@
-// ========== mod32.js (ANACHOR) — Zehir + Yalnızlık ==========
+// ========== mod32.js (ANACHOR) — Zehir + Yalnızlık + Teleport Ulti ==========
 (function () {
     'use strict';
 
@@ -11,6 +11,7 @@
     const C_POISON = '#22c55e';
     const C_SHIELD = '#60a5fa';
     const C_HEAL = '#2ecc71';
+    const C_TELEPORT = '#a78bfa';
 
     const CHAR_HP = 2000;
     const CHAR_SPEED = 3.6;
@@ -26,11 +27,14 @@
     const TEMAS_DMG = 400;
     const TEMAS_CD = 240;
 
-    const ULTIS_RADIUS = 143;
-    const ULTIS_IT_COUNT = 5;
-    const ULTIS_DMG_COUNT = 2;
-    const ULTIS_DMG = 500;
-    const ULTIS_SILENCE = 120;
+    // ===== ULTI (TELEPORT) =====
+    const ULTI_ATTACKS = 3;
+    const ULTI_INTERVAL = 24;
+    const ULTI_APPEAR_TIME = 12;
+    const ULTI_MISSILE_COUNT = 3;
+    const ULTI_MISSILE_DMG = 200;
+    const ULTI_MISSILE_SPREAD = 0.15;
+    const ULTI_NEAR_RADIUS = 250;
 
     const AKS1_CD = 960;
     const AKS1_SHIELD_ALONE = 950;
@@ -65,6 +69,23 @@
     let yrictLastHp = 0;
     let yrictSpeedMult = 1;
     let yrictFX = [];
+    let ultiState = null;
+    let ultiReturnMarker = null;
+    let screenFlash = 0;
+
+    // ===== drawEntity SARMALAYICI (ulti sırasında karakteri gizle) =====
+    if (!window._anachorOrigDrawEntity) {
+        window._anachorOrigDrawEntity = window.drawEntity;
+        window.drawEntity = function (e, isP) {
+            if (!e) return;
+            if (isP && player && player.charType === CHAR_ID && ultiState) return;
+            if (isP && player && player.charType === CHAR_ID) {
+                // Karakteri base çizmesin, kendi onDraw'umuz çizecek
+                return;
+            }
+            return window._anachorOrigDrawEntity(e, isP);
+        };
+    }
 
     function chainHook(name, fn) {
         const prev = window.GAME_EXT.hooks[name];
@@ -109,7 +130,7 @@
         card.innerHTML =
             '<div class="char-color-preview" style="background:' + C_MAIN + ';"></div>' +
             '<span>Anachor</span>' +
-            '<small>Zehir + Yalnızlık<br>Güç: Kalkan + Dash<br>Ulti: Karanlık Patlama</small>';
+            '<small>Zehir + Yalnızlık<br>Güç: Kalkan + Dash<br>Ulti: Işınlanma</small>';
         container.appendChild(card);
         card.addEventListener('click', () => {
             selectedCharacter = CHAR_ID;
@@ -132,9 +153,13 @@
         yrictLastHp = 0;
         yrictSpeedMult = 1;
         yrictFX = [];
+        ultiState = null;
+        ultiReturnMarker = null;
+        screenFlash = 0;
         if (player) {
             player._yrictShield = 0;
             player._yrictDashing = false;
+            player.jumpInvulnerable = false;
         }
     }
 
@@ -170,14 +195,14 @@
     const origFire = Player.prototype.fire;
     Player.prototype.fire = function (a, pull) {
         if (this.charType !== CHAR_ID) return origFire.call(this, a, pull);
-        if (this.ammo < 1 || this.isDead || (yrictDash && yrictDash.active)) return;
+        if (this.ammo < 1 || this.isDead || (yrictDash && yrictDash.active) || ultiState) return;
         if (!Number.isFinite(a)) a = this.angle || 0;
         yrictBullets.push({
             x: this.x, y: this.y, sx: this.x, sy: this.y,
             vx: Math.cos(a) * PLAYER_BULLET_SPEED,
             vy: Math.sin(a) * PLAYER_BULLET_SPEED,
             angle: a, life: 0, maxLife: 60,
-            isDead: false
+            isDead: false, isUlti: false
         });
         this.consumeAmmo();
         this.lastShotTime = Date.now();
@@ -186,7 +211,7 @@
     const origGadget = Player.prototype.activateGadget;
     Player.prototype.activateGadget = function (a, pull) {
         if (this.charType !== CHAR_ID) return origGadget.call(this, a, pull);
-        if (!yrictAks1Ready || this.isDead) return;
+        if (!yrictAks1Ready || this.isDead || ultiState) return;
         const alone = isYrictAlone();
         const amount = alone ? AKS1_SHIELD_ALONE : AKS1_SHIELD_CROWD;
         yrictShield = amount;
@@ -203,7 +228,7 @@
     const origGadget2 = Player.prototype.activateGadget2;
     Player.prototype.activateGadget2 = function (a, pull) {
         if (this.charType !== CHAR_ID) return origGadget2.call(this, a, pull);
-        if (!yrictAks2Ready || this.isDead || yrictDash) return;
+        if (!yrictAks2Ready || this.isDead || yrictDash || ultiState) return;
         const ang = a !== undefined ? a : this.angle;
         const dist = DASH_DIST;
         const tx = clampPos(this.x + Math.cos(ang) * dist, WALL_THICKNESS + this.radius, canvas.width - WALL_THICKNESS - this.radius);
@@ -225,37 +250,76 @@
     const origUlti = Player.prototype.fireUlti;
     Player.prototype.fireUlti = function (a, pull) {
         if (this.charType !== CHAR_ID) return origUlti.call(this, a, pull);
-        if (!this.ultReady || this.isDead || (yrictDash && yrictDash.active)) return;
+        if (!this.ultReady || this.isDead || (yrictDash && yrictDash.active) || ultiState) return;
         if (!Number.isFinite(this.x) || !Number.isFinite(this.y)) return;
 
-        const inRange = [];
+        const enemies = [];
         getActiveEnemies().forEach(e => {
-            if (!e.isDead && getDist(player, e) < ULTIS_RADIUS + e.radius) {
-                inRange.push({ e, dist: getDist(player, e) });
+            if (!e.isDead && getDist(player, e) < ULTI_NEAR_RADIUS + e.radius) {
+                enemies.push({ e, dist: getDist(player, e) });
             }
         });
-        inRange.sort((a, b) => a.dist - b.dist);
-        const toPush = inRange.slice(0, ULTIS_IT_COUNT);
-        const toDamage = toPush.slice(0, ULTIS_DMG_COUNT);
+        enemies.sort((a, b) => a.dist - b.dist);
 
-        toPush.forEach(({ e }) => {
-            const ang = getAngle(player, e);
-            const pushDist = ULTIS_RADIUS + 30 - getDist(player, e);
-            e.x += Math.cos(ang) * pushDist;
-            e.y += Math.sin(ang) * pushDist;
-            e.x = clampPos(e.x, e.radius + WALL_THICKNESS, canvas.width - e.radius - WALL_THICKNESS);
-            e.y = clampPos(e.y, e.radius + WALL_THICKNESS, canvas.height - e.radius - WALL_THICKNESS);
-            yrictSilenced.set(e, ULTIS_SILENCE);
-        });
-        toDamage.forEach(({ e }) => {
-            e.hp -= ULTIS_DMG;
-            addFloatingNumber(e.x, e.y, ULTIS_DMG, '#c084fc');
-            yrictCharge(8);
-        });
+        const targets = [];
+        if (enemies.length === 0) {
+            for (let i = 0; i < ULTI_ATTACKS; i++) {
+                const ang = (i / ULTI_ATTACKS) * Math.PI * 2;
+                targets.push({
+                    x: clampPos(player.x + Math.cos(ang) * 120, WALL_THICKNESS + 40, canvas.width - WALL_THICKNESS - 40),
+                    y: clampPos(player.y + Math.sin(ang) * 120, WALL_THICKNESS + 40, canvas.height - WALL_THICKNESS - 40)
+                });
+            }
+        } else if (enemies.length === 1) {
+            const e = enemies[0].e;
+            for (let i = 0; i < ULTI_ATTACKS; i++) {
+                const ang = (i / ULTI_ATTACKS) * Math.PI * 2 + (Date.now() % 1000) * 0.001;
+                const r = e.radius + 60;
+                targets.push({
+                    x: clampPos(e.x + Math.cos(ang) * r, WALL_THICKNESS + 30, canvas.width - WALL_THICKNESS - 30),
+                    y: clampPos(e.y + Math.sin(ang) * r, WALL_THICKNESS + 30, canvas.height - WALL_THICKNESS - 30)
+                });
+            }
+        } else if (enemies.length === 2) {
+            const eA = enemies[0].e, eB = enemies[1].e;
+            const seq = [eA, eB, eA];
+            seq.forEach((e) => {
+                const ang = Math.random() * Math.PI * 2;
+                const r = e.radius + 60;
+                targets.push({
+                    x: clampPos(e.x + Math.cos(ang) * r, WALL_THICKNESS + 30, canvas.width - WALL_THICKNESS - 30),
+                    y: clampPos(e.y + Math.sin(ang) * r, WALL_THICKNESS + 30, canvas.height - WALL_THICKNESS - 30)
+                });
+            });
+        } else {
+            for (let i = 0; i < ULTI_ATTACKS; i++) {
+                const e = enemies[i].e;
+                const ang = Math.random() * Math.PI * 2;
+                const r = e.radius + 60;
+                targets.push({
+                    x: clampPos(e.x + Math.cos(ang) * r, WALL_THICKNESS + 30, canvas.width - WALL_THICKNESS - 30),
+                    y: clampPos(e.y + Math.sin(ang) * r, WALL_THICKNESS + 30, canvas.height - WALL_THICKNESS - 30)
+                });
+            }
+        }
 
-        yrictFX.push({ type: 'darkBurst', x: this.x, y: this.y, radius: 0, maxRadius: ULTIS_RADIUS, life: 30, maxLife: 30 });
-        screenShake = 12;
-        addFloatingNumber(this.x, this.y - 40, 'KARANLIK!', '#a78bfa');
+        ultiReturnMarker = { x: this.x, y: this.y, timer: ULTI_ATTACKS * ULTI_INTERVAL + 30 };
+        ultiState = {
+            attackIndex: 0,
+            timer: ULTI_INTERVAL,
+            startX: this.x,
+            startY: this.y,
+            targets: targets,
+            appearTimer: ULTI_APPEAR_TIME,
+            missilesFired: false,
+            currentX: this.x,
+            currentY: this.y,
+            fireAngle: this.angle
+        };
+
+        this.jumpInvulnerable = true;
+        screenFlash = 8;
+        addFloatingNumber(this.x, this.y - 40, 'IŞINLAN!', C_TELEPORT);
 
         this.ultReady = false;
         this.ultCharge = 0;
@@ -271,6 +335,63 @@
         if (ultiBtn && ultiBtn.style.display !== 'flex') ultiBtn.style.display = 'flex';
         if (gadgetBtn && gadgetBtn.style.display !== 'flex') gadgetBtn.style.display = 'flex';
         if (gadgetBtn2 && gadgetBtn2.style.display !== 'flex') gadgetBtn2.style.display = 'flex';
+
+        // ===== ULTI TELEPORT AKIŞI =====
+        if (ultiState) {
+            // Belirme animasyonu
+            if (ultiState.appearTimer > 0) {
+                ultiState.appearTimer -= ts;
+                if (ultiState.appearTimer <= 0 && !ultiState.missilesFired) {
+                    // Mermileri ateşle - hedefe doğru
+                    const t = ultiState.targets[ultiState.attackIndex];
+                    const ang = Math.atan2(t.y - ultiState.currentY, t.x - ultiState.currentX);
+                    for (let i = 0; i < ULTI_MISSILE_COUNT; i++) {
+                        const spread = (i - (ULTI_MISSILE_COUNT - 1) / 2) * ULTI_MISSILE_SPREAD;
+                        const fireAng = ang + spread;
+                        yrictBullets.push({
+                            x: ultiState.currentX, y: ultiState.currentY,
+                            sx: ultiState.currentX, sy: ultiState.currentY,
+                            vx: Math.cos(fireAng) * PLAYER_BULLET_SPEED * 1.2,
+                            vy: Math.sin(fireAng) * PLAYER_BULLET_SPEED * 1.2,
+                            angle: fireAng, life: 0, maxLife: 45,
+                            isDead: false, isUlti: true
+                        });
+                    }
+                    ultiState.missilesFired = true;
+                    yrictFX.push({ type: 'teleportBurst', x: ultiState.currentX, y: ultiState.currentY, life: 15, maxLife: 15 });
+                }
+            }
+
+            ultiState.timer -= ts;
+            if (ultiState.timer <= 0) {
+                ultiState.attackIndex++;
+                if (ultiState.attackIndex >= ultiState.targets.length) {
+                    // Ulti bitiş - başlangıca dön
+                    player.x = ultiState.startX;
+                    player.y = ultiState.startY;
+                    player.jumpInvulnerable = false;
+                    yrictFX.push({ type: 'teleportBurst', x: player.x, y: player.y, life: 20, maxLife: 20 });
+                    screenFlash = 8;
+                    addFloatingNumber(player.x, player.y - 40, 'GERİ DÖNDÜ!', C_TELEPORT);
+                    ultiState = null;
+                } else {
+                    const t = ultiState.targets[ultiState.attackIndex];
+                    ultiState.currentX = t.x;
+                    ultiState.currentY = t.y;
+                    ultiState.timer = ULTI_INTERVAL;
+                    ultiState.appearTimer = ULTI_APPEAR_TIME;
+                    ultiState.missilesFired = false;
+                    yrictFX.push({ type: 'teleportIn', x: t.x, y: t.y, life: ULTI_APPEAR_TIME, maxLife: ULTI_APPEAR_TIME });
+                }
+            }
+        }
+
+        if (ultiReturnMarker) {
+            ultiReturnMarker.timer -= ts;
+            if (ultiReturnMarker.timer <= 0) ultiReturnMarker = null;
+        }
+
+        if (screenFlash > 0) screenFlash -= ts;
 
         const alone = isYrictAlone();
         yrictIsAlone = alone;
@@ -392,16 +513,18 @@
             }
         }
 
-        getActiveEnemies().forEach(e => {
-            if (e.isDead) return;
-            if (e._yrictTemasCd > 0) { e._yrictTemasCd -= ts; return; }
-            if (getDist(player, e) < player.radius + e.radius + 3) {
-                e.hp -= TEMAS_DMG;
-                e._yrictTemasCd = TEMAS_CD;
-                addFloatingNumber(e.x, e.y, TEMAS_DMG, C_POISON);
-                yrictCharge(6);
-            }
-        });
+        if (!ultiState) {
+            getActiveEnemies().forEach(e => {
+                if (e.isDead) return;
+                if (e._yrictTemasCd > 0) { e._yrictTemasCd -= ts; return; }
+                if (getDist(player, e) < player.radius + e.radius + 3) {
+                    e.hp -= TEMAS_DMG;
+                    e._yrictTemasCd = TEMAS_CD;
+                    addFloatingNumber(e.x, e.y, TEMAS_DMG, C_POISON);
+                    yrictCharge(6);
+                }
+            });
+        }
 
         if (yrictDash && yrictDash.active) {
             yrictDash.timer -= ts;
@@ -459,9 +582,11 @@
                 let hitWall = false;
                 for (const o of obstacles.concat(cactusWalls || [])) {
                     if (getDist(b, o) < o.radius + 5) {
-                        const wallDmg = yrictIsAlone ? WALL_DMG_ALONE : WALL_DMG_CROWD;
-                        o.hp -= wallDmg;
-                        addFloatingNumber(o.x, o.y, wallDmg, C_LIGHT);
+                        if (!b.isUlti) {
+                            const wallDmg = yrictIsAlone ? WALL_DMG_ALONE : WALL_DMG_CROWD;
+                            o.hp -= wallDmg;
+                            addFloatingNumber(o.x, o.y, wallDmg, C_LIGHT);
+                        }
                         hitWall = true; break;
                     }
                 }
@@ -472,16 +597,19 @@
                     if (getDist(b, e) < e.radius + 8) { hitEnemy = e; break; }
                 }
                 if (hitEnemy) {
-                    hitEnemy.hp -= BULLET_DMG;
-                    addFloatingNumber(hitEnemy.x, hitEnemy.y, BULLET_DMG, C_LIGHT);
-                    const dur = yrictIsAlone ? POISON_ALONE_TIME : POISON_CROWD_TIME;
-                    const existing = yrictPoisonBots.get(hitEnemy);
-                    if (existing) {
-                        existing.timer = Math.max(existing.timer, dur);
-                    } else {
-                        yrictPoisonBots.set(hitEnemy, { timer: dur, tickTimer: 0 });
+                    const dmg = b.isUlti ? ULTI_MISSILE_DMG : BULLET_DMG;
+                    hitEnemy.hp -= dmg;
+                    addFloatingNumber(hitEnemy.x, hitEnemy.y, dmg, b.isUlti ? C_TELEPORT : C_LIGHT);
+                    if (!b.isUlti) {
+                        const dur = yrictIsAlone ? POISON_ALONE_TIME : POISON_CROWD_TIME;
+                        const existing = yrictPoisonBots.get(hitEnemy);
+                        if (existing) {
+                            existing.timer = Math.max(existing.timer, dur);
+                        } else {
+                            yrictPoisonBots.set(hitEnemy, { timer: dur, tickTimer: 0 });
+                        }
+                        yrictCharge(4);
                     }
-                    yrictCharge(4);
                     yrictBullets.splice(i, 1);
                     continue;
                 }
@@ -493,25 +621,83 @@
     chainHook('onDraw', function (ctx2) {
         if (player.charType !== CHAR_ID || !gameStarted) return;
 
-        const alone = yrictIsAlone;
-        const scale = alone ? 1.10 : 0.90;
-        const bodyColor = alone ? C_ALONE : C_CROWD;
-        const pulse = alone ? Math.sin(Date.now() / 600) * 1.5 : 0;
+        // ===== Karakter (ulti sırasında gizle) =====
+        if (!ultiState) {
+            const alone = yrictIsAlone;
+            const scale = alone ? 1.10 : 0.90;
+            const bodyColor = alone ? C_ALONE : C_CROWD;
+            const pulse = alone ? Math.sin(Date.now() / 600) * 1.5 : 0;
 
-        ctx2.save();
-        ctx2.translate(player.x, player.y);
-        ctx2.scale(scale, scale);
-        ctx2.rotate(player.angle);
-        ctx2.fillStyle = 'rgba(0,0,0,0.35)';
-        ctx2.beginPath(); ctx2.ellipse(0, player.radius * 0.4, player.radius * 0.9, player.radius * 0.35, 0, 0, Math.PI * 2); ctx2.fill();
-        ctx2.fillStyle = bodyColor;
-        ctx2.beginPath(); ctx2.arc(0, 0, player.radius + pulse, 0, Math.PI * 2); ctx2.fill();
-        ctx2.strokeStyle = C_DARK; ctx2.lineWidth = 2.5; ctx2.stroke();
-        ctx2.beginPath(); ctx2.arc(player.radius - 4, 0, 5, 0, Math.PI * 2);
-        ctx2.fillStyle = 'rgba(0,0,0,.4)'; ctx2.fill();
-        ctx2.restore();
+            ctx2.save();
+            ctx2.translate(player.x, player.y);
+            ctx2.scale(scale, scale);
+            ctx2.rotate(player.angle);
+            ctx2.fillStyle = 'rgba(0,0,0,0.35)';
+            ctx2.beginPath(); ctx2.ellipse(0, player.radius * 0.4, player.radius * 0.9, player.radius * 0.35, 0, 0, Math.PI * 2); ctx2.fill();
+            ctx2.fillStyle = bodyColor;
+            ctx2.beginPath(); ctx2.arc(0, 0, player.radius + pulse, 0, Math.PI * 2); ctx2.fill();
+            ctx2.strokeStyle = C_DARK; ctx2.lineWidth = 2.5; ctx2.stroke();
+            ctx2.beginPath(); ctx2.arc(player.radius - 4, 0, 5, 0, Math.PI * 2);
+            ctx2.fillStyle = 'rgba(0,0,0,.4)'; ctx2.fill();
+            ctx2.restore();
+        }
 
-        if (yrictShield > 0) {
+        // ===== Ulti geri dönüş işareti =====
+        if (ultiReturnMarker) {
+            ctx2.save();
+            ctx2.globalAlpha = 0.5 + Math.sin(Date.now() / 200) * 0.2;
+            ctx2.beginPath();
+            ctx2.arc(ultiReturnMarker.x, ultiReturnMarker.y, 22, 0, Math.PI * 2);
+            ctx2.strokeStyle = C_TELEPORT;
+            ctx2.lineWidth = 3;
+            ctx2.setLineDash([8, 5]);
+            ctx2.stroke();
+            ctx2.setLineDash([]);
+            ctx2.globalAlpha = 0.35;
+            ctx2.beginPath();
+            ctx2.arc(ultiReturnMarker.x, ultiReturnMarker.y, 10, 0, Math.PI * 2);
+            ctx2.fillStyle = C_TELEPORT;
+            ctx2.fill();
+            ctx2.restore();
+        }
+
+        // ===== Ulti belirme efekti =====
+        if (ultiState) {
+            if (ultiState.appearTimer > 0) {
+                const prog = 1 - (ultiState.appearTimer / ULTI_APPEAR_TIME);
+                ctx2.save();
+                // Dönen halka (heykel yapma benzeri)
+                for (let r = 0; r < 3; r++) {
+                    ctx2.globalAlpha = (1 - prog) * 0.6;
+                    ctx2.beginPath();
+                    ctx2.arc(ultiState.currentX, ultiState.currentY, 10 + prog * 25 + r * 5, 0, Math.PI * 2);
+                    ctx2.strokeStyle = C_TELEPORT;
+                    ctx2.lineWidth = 2;
+                    ctx2.stroke();
+                }
+                // Merkez dolgu
+                ctx2.globalAlpha = (1 - prog) * 0.5;
+                ctx2.beginPath();
+                ctx2.arc(ultiState.currentX, ultiState.currentY, 25 * prog, 0, Math.PI * 2);
+                ctx2.fillStyle = C_TELEPORT;
+                ctx2.fill();
+                ctx2.restore();
+            }
+            // Mermiler ateşlendiyse küçük patlama
+            if (ultiState.missilesFired && ultiState.timer > ULTI_INTERVAL - 8) {
+                const f = (ultiState.timer - (ULTI_INTERVAL - 8)) / 8;
+                ctx2.save();
+                ctx2.globalAlpha = f * 0.7;
+                ctx2.beginPath();
+                ctx2.arc(ultiState.currentX, ultiState.currentY, 15 + (1 - f) * 10, 0, Math.PI * 2);
+                ctx2.strokeStyle = C_TELEPORT;
+                ctx2.lineWidth = 3;
+                ctx2.stroke();
+                ctx2.restore();
+            }
+        }
+
+        if (yrictShield > 0 && !ultiState) {
             const alpha = yrictShield / yrictShieldMax;
             ctx2.save();
             ctx2.globalAlpha = 0.4 + 0.4 * alpha;
@@ -562,10 +748,17 @@
         yrictBullets.forEach(b => {
             ctx2.save();
             ctx2.translate(b.x, b.y); ctx2.rotate(b.angle);
-            ctx2.beginPath();
-            ctx2.moveTo(8, 0); ctx2.lineTo(-6, -4); ctx2.lineTo(-6, 4); ctx2.closePath();
-            ctx2.fillStyle = C_POISON; ctx2.fill();
-            ctx2.strokeStyle = C_LIGHT; ctx2.lineWidth = 1; ctx2.stroke();
+            if (b.isUlti) {
+                ctx2.beginPath();
+                ctx2.moveTo(10, 0); ctx2.lineTo(-5, -3); ctx2.lineTo(-5, 3); ctx2.closePath();
+                ctx2.fillStyle = C_TELEPORT; ctx2.fill();
+                ctx2.strokeStyle = '#fff'; ctx2.lineWidth = 1.5; ctx2.stroke();
+            } else {
+                ctx2.beginPath();
+                ctx2.moveTo(8, 0); ctx2.lineTo(-6, -4); ctx2.lineTo(-6, 4); ctx2.closePath();
+                ctx2.fillStyle = C_POISON; ctx2.fill();
+                ctx2.strokeStyle = C_LIGHT; ctx2.lineWidth = 1; ctx2.stroke();
+            }
             ctx2.restore();
         });
 
@@ -584,11 +777,23 @@
                 ctx2.globalAlpha = a * 0.6;
                 ctx2.beginPath(); ctx2.arc(fx.x, fx.y, 20 + (1-a)*15, 0, Math.PI * 2);
                 ctx2.strokeStyle = C_DARK; ctx2.lineWidth = 3; ctx2.stroke();
+            } else if (fx.type === 'teleportBurst') {
+                ctx2.globalAlpha = a * 0.8;
+                const r = 30 * (1 - a);
+                ctx2.beginPath(); ctx2.arc(fx.x, fx.y, r + 5, 0, Math.PI * 2);
+                ctx2.strokeStyle = C_TELEPORT; ctx2.lineWidth = 4; ctx2.stroke();
+                ctx2.beginPath(); ctx2.arc(fx.x, fx.y, r * 0.5, 0, Math.PI * 2);
+                ctx2.fillStyle = C_TELEPORT; ctx2.globalAlpha = a * 0.4; ctx2.fill();
+            } else if (fx.type === 'teleportIn') {
+                ctx2.globalAlpha = a * 0.6;
+                const r = 40 * (1 - a);
+                ctx2.beginPath(); ctx2.arc(fx.x, fx.y, r, 0, Math.PI * 2);
+                ctx2.strokeStyle = C_TELEPORT; ctx2.lineWidth = 2; ctx2.stroke();
             }
             ctx2.restore();
         });
 
-        if (yrictAks2Aim.active) {
+        if (yrictAks2Aim.active && !ultiState) {
             const a = yrictAks2Aim.angle;
             const dist = DASH_DIST;
             const tx = clampPos(player.x + Math.cos(a) * dist, WALL_THICKNESS + 20, canvas.width - WALL_THICKNESS - 20);
@@ -601,11 +806,20 @@
             ctx2.strokeStyle = '#fff'; ctx2.lineWidth = 2; ctx2.stroke();
             ctx2.restore();
         }
+
+        // Ekran flash
+        if (screenFlash > 0) {
+            ctx2.save();
+            ctx2.globalAlpha = screenFlash / 10 * 0.4;
+            ctx2.fillStyle = C_TELEPORT;
+            ctx2.fillRect(0, 0, canvas.width, canvas.height);
+            ctx2.restore();
+        }
     });
 
     if (gadgetBtn2) {
         gadgetBtn2.addEventListener('touchstart', (e) => {
-            if (player.charType !== CHAR_ID || !yrictAks2Ready || yrictDash) return;
+            if (player.charType !== CHAR_ID || !yrictAks2Ready || yrictDash || ultiState) return;
             e.preventDefault(); e.stopImmediatePropagation();
             const t = e.changedTouches[0];
             yrictAks2Aim.active = true;
@@ -636,7 +850,7 @@
         });
 
         gadgetBtn2.addEventListener('mousedown', (e) => {
-            if (player.charType !== CHAR_ID || !yrictAks2Ready || yrictDash) return;
+            if (player.charType !== CHAR_ID || !yrictAks2Ready || yrictDash || ultiState) return;
             e.preventDefault(); e.stopImmediatePropagation();
             yrictAks2Aim.active = true;
             yrictAks2Aim.isMouse = true;
@@ -659,5 +873,5 @@
         });
     }
 
-    console.log('[MOD YÜKLENDİ] anachor (v1)');
+    console.log('[MOD YÜKLENDİ] anachor (v2 - teleport ulti)');
 })();
