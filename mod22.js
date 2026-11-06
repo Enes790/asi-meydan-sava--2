@@ -1,10 +1,10 @@
-// ========== mod36.js — Bot Savaşı v5 (Yerleştirme + Yuva + Piyade) ==========
+// ========== mod36.js — Bot Savaşı v6 (Serbest Yerleştirme) ==========
 (function () {
     'use strict';
 
     const MOD_ID = 'botbattle';
     const TOTAL_VALUE = 15;
-    const MAX_SLOTS = 5;
+    const MAX_UNITS = 5;
 
     const STATS = {
         slime:   { name: 'Slime',   value: 5, hp: 1200, dmg: 150, speed: 1.6, radius: 16, color: '#2ecc71', isContact: true },
@@ -31,15 +31,12 @@
     let allyBullets = [], enemyBullets = [];
     let allyKills = 0, enemyKills = 0;
     let roundIndex = 0, battleActive = false, introTimer = 0;
-    let setupOverlay = null, readyPressed = false;
-    let slots = [null,null,null,null,null];
 
-    // Yerleştirme
-    let placementMode = false;
-    let placementQueue = [];
+    // Setup state
+    let setupOverlay = null;
+    let selectedType = null;
     let placedPositions = [];
-    let ghostX = 0, ghostY = 0;
-    let placementOverlay = null;
+    let setupMode = false;
 
     if (!window._bbOrigSpawnObs) {
         window._bbOrigSpawnObs = window.spawnObstacle;
@@ -79,132 +76,113 @@
     }
 
     function currentValue() {
-        return slots.reduce((s, t) => s + (t ? STATS[t].value : 0), 0);
+        return placedPositions.reduce((s, p) => s + STATS[p.type].value, 0);
     }
 
+    // ===== SETUP EKRANI =====
     function showSetup() {
         if (setupOverlay) setupOverlay.remove();
+        placedPositions = [];
+        selectedType = null;
+        setupMode = true;
+
         setupOverlay = document.createElement('div');
         setupOverlay.id = 'botbattle-setup';
-        setupOverlay.style.cssText = 'position:fixed;inset:0;background:rgba(10,15,20,0.97);z-index:150;display:flex;flex-direction:column;align-items:center;padding:16px;overflow-y:auto;gap:10px;';
+        setupOverlay.style.cssText = 'position:fixed;inset:0;background:linear-gradient(180deg, rgba(10,15,20,0.4) 0%, rgba(10,15,20,0.4) 40%, rgba(10,15,20,0.97) 55%, rgba(10,15,20,0.97) 100%);z-index:150;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;padding:0;pointer-events:none;';
 
-        const title = document.createElement('h1');
-        title.textContent = `TUR ${roundIndex + 1} — ORDUNU KUR`;
-        title.style.cssText = 'color:#f1c40f;font-size:22px;margin:0;text-align:center;';
-        setupOverlay.appendChild(title);
+        // Üst bilgi
+        const topInfo = document.createElement('div');
+        topInfo.id = 'bb-top-info';
+        topInfo.style.cssText = 'position:absolute;top:20px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,0.85);padding:10px 24px;border-radius:16px;color:#f1c40f;font-size:15px;font-weight:bold;text-align:center;pointer-events:none;border:2px solid rgba(241,196,15,0.3);';
+        topInfo.innerHTML = `TUR ${roundIndex + 1} — <span style="color:#2ecc71;">${placedPositions.length}/${MAX_UNITS} birlik</span> • <span style="color:#f39c12;">${currentValue()}/${TOTAL_VALUE} değer</span>`;
+        setupOverlay.appendChild(topInfo);
 
-        const info = document.createElement('p');
-        info.id = 'bb-info';
-        info.style.cssText = 'color:#aaa;font-size:13px;margin:0;text-align:center;';
-        setupOverlay.appendChild(info);
+        // Alt panel
+        const panel = document.createElement('div');
+        panel.style.cssText = 'width:100%;background:rgba(10,15,20,0.98);border-top:3px solid #f1c40f;padding:12px 10px 20px;pointer-events:auto;display:flex;flex-direction:column;gap:8px;';
 
-        const slotsRow = document.createElement('div');
-        slotsRow.style.cssText = 'display:flex;gap:6px;justify-content:center;flex-wrap:wrap;';
-        setupOverlay.appendChild(slotsRow);
+        // Seçili bilgi
+        const hint = document.createElement('div');
+        hint.id = 'bb-hint';
+        hint.style.cssText = 'text-align:center;color:#aaa;font-size:13px;padding:4px;';
+        hint.textContent = 'Alttan birlik seç, sonra sol tarafa dokun';
+        panel.appendChild(hint);
 
-        function renderSlots() {
-            slotsRow.innerHTML = '';
-            slots.forEach((type, i) => {
-                const s = type ? STATS[type] : null;
-                const slot = document.createElement('div');
-                slot.style.cssText = `width:58px;height:58px;border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer;
-                    background:${s ? s.color+'22' : 'rgba(255,255,255,0.05)'};
-                    border:2px ${s ? 'solid' : 'dashed'} ${s ? s.color : '#555'};`;
-                if (s) {
-                    slot.innerHTML = `<div style="font-size:10px;color:#fff;font-weight:bold;text-align:center;line-height:1.1;">${s.name}</div><div style="font-size:9px;color:#f39c12;">${s.value}p</div>`;
-                } else {
-                    slot.innerHTML = `<div style="color:#555;font-size:18px;">+</div>`;
-                }
-                slot.addEventListener('click', () => {
-                    if (slots[i]) { slots[i] = null; renderSlots(); updateInfo(); }
-                });
-                slotsRow.appendChild(slot);
-            });
-        }
-
+        // Kart grid
         const grid = document.createElement('div');
-        grid.style.cssText = 'display:grid;grid-template-columns:repeat(3,1fr);gap:6px;width:100%;max-width:520px;';
+        grid.style.cssText = 'display:grid;grid-template-columns:repeat(5,1fr);gap:5px;max-width:520px;width:100%;margin:0 auto;';
 
         TYPES.forEach(type => {
             const s = STATS[type];
             const card = document.createElement('div');
-            card.style.cssText = `background:linear-gradient(135deg,#1e293b,#0f172a);border:3px solid ${s.color};border-radius:10px;padding:6px 4px;cursor:pointer;text-align:center;`;
-            card.innerHTML = `<div style="color:#fff;font-weight:bold;font-size:12px;">${s.name}</div>
-                <div style="color:#f39c12;font-size:10px;font-weight:bold;">${s.value}p</div>
-                <div style="color:${s.color};font-size:9px;">${s.hp}hp / ${s.dmg}dmg</div>`;
+            card.dataset.type = type;
+            card.style.cssText = `background:linear-gradient(135deg,#1e293b,#0f172a);border:2px solid ${s.color};border-radius:8px;padding:5px 3px;cursor:pointer;text-align:center;transition:all 0.15s;`;
+            card.innerHTML = `<div style="color:#fff;font-weight:bold;font-size:10px;line-height:1.1;">${s.name}</div>
+                <div style="color:#f39c12;font-size:9px;font-weight:bold;">${s.value}p</div>`;
             card.addEventListener('click', () => {
-                const emptyIdx = slots.findIndex(x => x === null);
-                if (emptyIdx === -1) return;
                 if (currentValue() + s.value > TOTAL_VALUE) {
-                    info.textContent = '⚠ Değer limiti aşıldı!'; info.style.color = '#e74c3c';
-                    setTimeout(updateInfo, 900);
+                    hint.textContent = '⚠ Değer limiti aşıldı!'; hint.style.color = '#e74c3c';
+                    setTimeout(() => { hint.textContent = selectedType ? `${STATS[selectedType].name} seçili — sol tarafa dokun` : 'Alttan birlik seç, sonra sol tarafa dokun'; hint.style.color = '#aaa'; }, 900);
                     return;
                 }
-                slots[emptyIdx] = type;
-                renderSlots(); updateInfo();
+                if (placedPositions.length >= MAX_UNITS) {
+                    hint.textContent = '⚠ Maks 5 birlik!'; hint.style.color = '#e74c3c';
+                    setTimeout(() => { hint.textContent = 'Alttan birlik seç, sonra sol tarafa dokun'; hint.style.color = '#aaa'; }, 900);
+                    return;
+                }
+                selectedType = type;
+                document.querySelectorAll('#botbattle-setup [data-type]').forEach(c => {
+                    c.style.transform = 'scale(1)';
+                    c.style.boxShadow = 'none';
+                });
+                card.style.transform = 'scale(1.08)';
+                card.style.boxShadow = `0 0 15px ${s.color}`;
+                hint.textContent = `✓ ${s.name} seçili — sol tarafa dokun`;
+                hint.style.color = s.color;
             });
             grid.appendChild(card);
         });
-        setupOverlay.appendChild(grid);
+        panel.appendChild(grid);
 
+        // SAVAŞ butonu
         const readyBtn = document.createElement('button');
         readyBtn.id = 'bb-ready';
-        readyBtn.style.cssText = 'padding:14px 50px;font-size:18px;font-weight:bold;background:#2ecc71;color:#fff;border:none;border-radius:10px;cursor:pointer;margin-top:6px;';
+        readyBtn.style.cssText = 'padding:12px 50px;font-size:16px;font-weight:bold;background:#2ecc71;color:#fff;border:none;border-radius:10px;cursor:pointer;margin-top:6px;align-self:center;opacity:0.4;';
+        readyBtn.textContent = `SAVAŞ! (${placedPositions.length}/${MAX_UNITS})`;
+        readyBtn.disabled = true;
         readyBtn.addEventListener('click', () => {
-            if (slots.filter(s => s !== null).length > 0) {
+            if (placedPositions.length > 0) {
+                setupMode = false;
                 setupOverlay.remove(); setupOverlay = null;
-                startPlacement();
+                startRound();
             }
         });
-        setupOverlay.appendChild(readyBtn);
+        panel.appendChild(readyBtn);
+        setupOverlay.appendChild(panel);
 
-        function updateInfo() {
-            const v = currentValue(), n = slots.filter(s => s !== null).length;
-            info.textContent = `Değer: ${v}/${TOTAL_VALUE} • Slot: ${n}/${MAX_SLOTS}`;
-            info.style.color = '#aaa';
-            readyBtn.textContent = `YERLEŞTİR (${n} birlik)`;
-            readyBtn.disabled = n === 0;
-            readyBtn.style.opacity = n === 0 ? '0.4' : '1';
-        }
-        renderSlots(); updateInfo();
         document.body.appendChild(setupOverlay);
-    }
 
-    // ===== YERLEŞTİRME AŞAMASI =====
-    function startPlacement() {
-        placementMode = true;
-        placementQueue = slots.filter(s => s !== null);
-        placedPositions = [];
-        if (placementQueue.length === 0) { startRound(); return; }
-
-        if (placementOverlay) placementOverlay.remove();
-        placementOverlay = document.createElement('div');
-        placementOverlay.id = 'bb-placement';
-        placementOverlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;pointer-events:none;z-index:100;display:flex;flex-direction:column;justify-content:space-between;';
-        
-        // Üst bilgi
-        const info = document.createElement('div');
-        info.id = 'bb-place-info';
-        info.style.cssText = 'background:rgba(0,0,0,0.85);padding:12px;text-align:center;color:#f1c40f;font-size:16px;font-weight:bold;pointer-events:none;';
-        info.textContent = `BOT 1/${placementQueue.length}: ${STATS[placementQueue[0]].name} — Sol tarafa dokun`;
-        placementOverlay.appendChild(info);
-
-        // Alt bilgi
-        const bottom = document.createElement('div');
-        bottom.style.cssText = 'background:rgba(0,0,0,0.85);padding:10px;text-align:center;color:#aaa;font-size:13px;pointer-events:none;';
-        bottom.textContent = 'Birliklerini sol tarafa yerleştir. Dokununca yerleşir.';
-        placementOverlay.appendChild(bottom);
-
-        document.body.appendChild(placementOverlay);
-
-        // Canvas tıklama
+        // Canvas tıklama — bu sefer setup sırasında da aktif
         canvas.style.pointerEvents = 'auto';
+        canvas.removeEventListener('touchstart', handlePlacementTouch);
+        canvas.removeEventListener('click', handlePlacementClick);
         canvas.addEventListener('touchstart', handlePlacementTouch, { passive: false });
         canvas.addEventListener('click', handlePlacementClick);
+
+        window._bbUpdateSetupUI = function() {
+            const top = document.getElementById('bb-top-info');
+            if (top) top.innerHTML = `TUR ${roundIndex + 1} — <span style="color:#2ecc71;">${placedPositions.length}/${MAX_UNITS} birlik</span> • <span style="color:#f39c12;">${currentValue()}/${TOTAL_VALUE} değer</span>`;
+            const rb = document.getElementById('bb-ready');
+            if (rb) {
+                rb.textContent = `SAVAŞ! (${placedPositions.length}/${MAX_UNITS})`;
+                rb.disabled = placedPositions.length === 0;
+                rb.style.opacity = placedPositions.length === 0 ? '0.4' : '1';
+            }
+        };
     }
 
     function handlePlacementTouch(e) {
-        if (!placementMode) return;
+        if (!setupMode || !selectedType) return;
         e.preventDefault();
         const t = e.changedTouches[0];
         const rect = canvas.getBoundingClientRect();
@@ -214,7 +192,7 @@
     }
 
     function handlePlacementClick(e) {
-        if (!placementMode) return;
+        if (!setupMode || !selectedType) return;
         const rect = canvas.getBoundingClientRect();
         const x = (e.clientX - rect.left) * (canvas.width / rect.width);
         const y = (e.clientY - rect.top) * (canvas.height / rect.height);
@@ -222,43 +200,30 @@
     }
 
     function placeAt(x, y) {
-        if (!placementMode || placementQueue.length === 0) return;
-        // Sol taraf sınırı (oyuncu bölgesi)
-        const maxX = canvas.width * 0.5;
+        const hint = document.getElementById('bb-hint');
+        const maxX = canvas.width * 0.48;
         if (x > maxX) {
-            const info = document.getElementById('bb-place-info');
-            if (info) { info.textContent = '⚠ Sadece SOL tarafa yerleştir!'; setTimeout(() => updatePlacementInfo(), 900); }
+            if (hint) { hint.textContent = '⚠ Sadece SOL tarafa yerleştir!'; hint.style.color = '#e74c3c'; setTimeout(() => { hint.textContent = `✓ ${STATS[selectedType].name} seçili — sol tarafa dokun`; hint.style.color = STATS[selectedType].color; }, 900); }
             return;
         }
-        if (x < WALL_THICKNESS + 30) x = WALL_THICKNESS + 30;
-        if (y < WALL_THICKNESS + 30) y = WALL_THICKNESS + 30;
-        if (y > canvas.height - WALL_THICKNESS - 30) y = canvas.height - WALL_THICKNESS - 30;
-
-        placedPositions.push({ type: placementQueue[0], x, y });
-        placementQueue.shift();
-
-        if (placementQueue.length === 0) {
-            endPlacement();
-        } else {
-            updatePlacementInfo();
+        if (placedPositions.length >= MAX_UNITS) {
+            if (hint) { hint.textContent = '⚠ Maks 5 birlik!'; hint.style.color = '#e74c3c'; }
+            return;
         }
-    }
-
-    function updatePlacementInfo() {
-        const info = document.getElementById('bb-place-info');
-        if (info && placementQueue.length > 0) {
-            const current = placementQueue[0];
-            info.textContent = `BOT ${placedPositions.length + 1}/${placedPositions.length + placementQueue.length}: ${STATS[current].name} — Sol tarafa dokun`;
-            info.style.color = '#f1c40f';
+        if (currentValue() + STATS[selectedType].value > TOTAL_VALUE) {
+            if (hint) { hint.textContent = '⚠ Değer limiti aşıldı!'; hint.style.color = '#e74c3c'; }
+            return;
         }
-    }
+        if (x < WALL_THICKNESS + 25) x = WALL_THICKNESS + 25;
+        if (y < WALL_THICKNESS + 25) y = WALL_THICKNESS + 25;
+        if (y > canvas.height - WALL_THICKNESS - 25) y = canvas.height - WALL_THICKNESS - 25;
 
-    function endPlacement() {
-        placementMode = false;
-        canvas.removeEventListener('touchstart', handlePlacementTouch);
-        canvas.removeEventListener('click', handlePlacementClick);
-        if (placementOverlay) { placementOverlay.remove(); placementOverlay = null; }
-        startRound();
+        placedPositions.push({ type: selectedType, x, y });
+        window._bbUpdateSetupUI();
+        if (hint) {
+            hint.textContent = `✓ ${STATS[selectedType].name} yerleşti (${placedPositions.length}/${MAX_UNITS})`;
+            hint.style.color = '#2ecc71';
+        }
     }
 
     function startRound() {
@@ -267,12 +232,10 @@
         allyTeam = []; enemyTeam = []; allyBullets = []; enemyBullets = [];
         allyKills = 0; enemyKills = 0;
 
-        // Ally: yerleştirilen pozisyonlar
         placedPositions.forEach(p => {
             allyTeam.push(spawnBot(p.type, p.x, p.y, 'ally', 1.0));
         });
 
-        // Enemy: sağ tarafa dağıt
         const enemyX = canvas.width * 0.75;
         r.types.forEach((type, i) => {
             const y = canvas.height * (i + 1) / (r.types.length + 1);
@@ -285,6 +248,9 @@
         battleActive = true;
         introTimer = 60;
         updateHUD();
+
+        canvas.removeEventListener('touchstart', handlePlacementTouch);
+        canvas.removeEventListener('click', handlePlacementClick);
     }
 
     function killBot(bot, team) {
@@ -293,7 +259,6 @@
             if (team === 'ally') enemyKills++;
             else allyKills++;
         }
-        // Slime bölünme
         if (bot.type === 'slime' && bot._stage < 2) {
             for (let k = 0; k < 2; k++) {
                 const ang = Math.random() * Math.PI * 2;
@@ -322,7 +287,6 @@
             if (!target) return;
 
             bot.angle = Math.atan2(target.y - bot.y, target.x - bot.x);
-
             const attackRange = bot.type === 'slime' ? bot.radius + target.radius + 3 : bot.range;
 
             if (bot.speed > 0 && minD > attackRange) {
@@ -330,7 +294,6 @@
                 bot.y += Math.sin(bot.angle) * bot.speed * ts;
             }
 
-            // Slime temas
             if (bot.type === 'slime') {
                 if (minD < bot.radius + target.radius + 3 && bot._atkCD <= 0) {
                     target.hp -= bot.damage;
@@ -339,10 +302,9 @@
                 }
                 if (bot._atkCD > 0) bot._atkCD -= ts;
             }
-            // Yuva: slime üret
             else if (bot.type === 'yuva') {
                 bot._spawnTimer += ts;
-                if (bot._spawnTimer >= 420 && bot._spawned < 4) {  // 7sn
+                if (bot._spawnTimer >= 420 && bot._spawned < 4) {
                     bot._spawnTimer = 0;
                     bot._spawned++;
                     const ang = Math.random() * Math.PI * 2;
@@ -354,7 +316,6 @@
                     else enemyTeam.push(child);
                 }
             }
-            // Normal mermi
             else if (minD < bot.range && Date.now() - bot.lastShot > bot.interval) {
                 bot.lastShot = Date.now();
                 if (bot.type === 'boom') {
@@ -376,14 +337,12 @@
                 }
             }
 
-            // Zırhlı
             if (bot.type === 'armored') {
                 if (bot._shield < bot._maxShield) bot._shield = Math.min(bot._maxShield, bot._shield + 30 * ts);
                 bot._healTimer = (bot._healTimer || 0) + ts;
                 if (bot._healTimer >= 60) { bot._healTimer = 0; bot.hp = Math.min(bot.maxHp, bot.hp + 200); }
             }
 
-            // Büyüyen: 2 kill = orta, 6 kill = büyük
             if (bot.type === 'growing') {
                 const kills = bot.team === 'ally' ? allyKills : enemyKills;
                 const lvl = kills >= 6 ? 2 : kills >= 2 ? 1 : 0;
@@ -405,23 +364,16 @@
     function updateBullets(bullets, targetTeam, ts) {
         for (let i = bullets.length - 1; i >= 0; i--) {
             const b = bullets[i];
-            b.x += b.vx * ts;
-            b.y += b.vy * ts;
+            b.x += b.vx * ts; b.y += b.vy * ts;
 
             if (b._boom) {
                 b._traveled = (b._traveled || 0) + Math.hypot(b.vx, b.vy) * ts;
-                if (!b._returning && b._traveled > 250) {
-                    b._returning = true;
-                    b._hit = new Set();
-                }
+                if (!b._returning && b._traveled > 250) { b._returning = true; b._hit = new Set(); }
                 if (b._returning && b._owner && !b._owner.isDead) {
                     const ang = Math.atan2(b._owner.y - b.y, b._owner.x - b.x);
-                    b.vx = Math.cos(ang) * BOT_BULLET_SPEED;
-                    b.vy = Math.sin(ang) * BOT_BULLET_SPEED;
+                    b.vx = Math.cos(ang) * BOT_BULLET_SPEED; b.vy = Math.sin(ang) * BOT_BULLET_SPEED;
                     if (getDist(b, b._owner) < 20) { bullets.splice(i, 1); continue; }
-                } else if (b._returning && (!b._owner || b._owner.isDead)) {
-                    bullets.splice(i, 1); continue;
-                }
+                } else if (b._returning && (!b._owner || b._owner.isDead)) { bullets.splice(i, 1); continue; }
             }
 
             if (b.x < WALL_THICKNESS || b.x > canvas.width - WALL_THICKNESS ||
@@ -439,8 +391,7 @@
                     let dmg = b.damage;
                     if (t._shield > 0) {
                         const absorbed = Math.min(t._shield, dmg);
-                        t._shield -= absorbed;
-                        dmg -= absorbed;
+                        t._shield -= absorbed; dmg -= absorbed;
                     }
                     if (dmg > 0) {
                         t.hp -= dmg;
@@ -487,10 +438,9 @@
     window.GAME_EXT.registerMode(MOD_ID, {
         label: 'Bot Savaşı',
         onStart: function () {
-            roundIndex = 0; battleActive = false; introTimer = 0; readyPressed = false;
+            roundIndex = 0; battleActive = false; introTimer = 0;
             allyTeam = []; enemyTeam = []; allyBullets = []; enemyBullets = [];
-            slots = [null,null,null,null,null];
-            placementMode = false; placementQueue = []; placedPositions = [];
+            placedPositions = []; selectedType = null; setupMode = false;
             hideAllButtons();
             player.x = canvas.width/2; player.y = canvas.height/2;
             player.hp = player.maxHp = 999999;
@@ -512,7 +462,7 @@
             bot.isActive = false; bot.isDead = true;
             bot2.isActive = false; bot2.isDead = true;
             obstacles.length = 0;
-            if (placementMode) return;
+            if (setupMode) return;
             if (window.GAME_PAUSED) return;
             if (introTimer > 0) { introTimer -= ts; return; }
             if (!battleActive) return;
@@ -528,7 +478,7 @@
             if (eA === 0) {
                 battleActive = false; roundIndex++;
                 if (roundIndex >= ENEMY_ROUNDS.length) setTimeout(victory, 500);
-                else { readyPressed = false; placementQueue = []; placedPositions = []; setTimeout(showSetup, 800); }
+                else { setTimeout(showSetup, 800); }
                 updateHUD();
             } else if (aA === 0) {
                 battleActive = false; setTimeout(defeat, 500);
@@ -536,14 +486,12 @@
         },
         onReset: function () {
             allyTeam = []; enemyTeam = []; allyBullets = []; enemyBullets = [];
-            roundIndex = 0; battleActive = false; introTimer = 0; readyPressed = false;
-            slots = [null,null,null,null,null];
-            placementMode = false; placementQueue = []; placedPositions = [];
+            roundIndex = 0; battleActive = false; introTimer = 0;
+            placedPositions = []; selectedType = null; setupMode = false;
             canvas.removeEventListener('touchstart', handlePlacementTouch);
             canvas.removeEventListener('click', handlePlacementClick);
             const h = document.getElementById('bb-hud'); if (h) h.style.display = 'none';
             if (setupOverlay) { setupOverlay.remove(); setupOverlay = null; }
-            if (placementOverlay) { placementOverlay.remove(); placementOverlay = null; }
         }
     });
 
@@ -568,48 +516,35 @@
     window.GAME_EXT.chainHook('onDraw', function (ctx) {
         if (window.GAME_MODE !== MOD_ID || !gameStarted) return;
 
-        // Yerleştirme önizlemesi
-        if (placementMode && placementQueue.length > 0) {
-            const s = STATS[placementQueue[0]];
+        // Setup modunda sol yarı çizgisi + yerleşen birimler
+        if (setupMode) {
             ctx.save();
-            ctx.globalAlpha = 0.6;
-            ctx.fillStyle = s.color;
-            ctx.beginPath();
-            ctx.arc(canvas.width * 0.25, canvas.height * 0.15, s.radius * 1.5, 0, Math.PI * 2);
-            ctx.fill();
-            ctx.strokeStyle = '#fff';
-            ctx.lineWidth = 2;
-            ctx.stroke();
-            ctx.globalAlpha = 1;
-            // Sol yarı çizgisi
             ctx.setLineDash([10, 10]);
-            ctx.strokeStyle = 'rgba(241,196,15,0.4)';
+            ctx.strokeStyle = 'rgba(241,196,15,0.5)';
             ctx.lineWidth = 2;
             ctx.beginPath();
-            ctx.moveTo(canvas.width * 0.5, 0);
-            ctx.lineTo(canvas.width * 0.5, canvas.height);
+            ctx.moveTo(canvas.width * 0.48, 0);
+            ctx.lineTo(canvas.width * 0.48, canvas.height);
             ctx.stroke();
             ctx.setLineDash([]);
             ctx.restore();
-        }
 
-        // Yerleştirilen birlikler (savaş öncesi de görünsün)
-        placedPositions.forEach(p => {
-            const s = STATS[p.type];
-            ctx.save();
-            ctx.translate(p.x, p.y);
-            ctx.globalAlpha = placementMode ? 0.7 : 1;
-            ctx.fillStyle = 'rgba(0,0,0,0.3)';
-            ctx.beginPath(); ctx.ellipse(0, s.radius * 0.4, s.radius * 0.9, s.radius * 0.35, 0, 0, Math.PI * 2); ctx.fill();
-            ctx.fillStyle = s.color;
-            ctx.beginPath(); ctx.arc(0, 0, s.radius, 0, Math.PI * 2); ctx.fill();
-            ctx.strokeStyle = '#2ecc71';
-            ctx.lineWidth = 2.5;
-            ctx.stroke();
-            ctx.beginPath(); ctx.arc(s.radius - 4, 0, 5, 0, Math.PI * 2);
-            ctx.fillStyle = 'rgba(0,0,0,.4)'; ctx.fill();
-            ctx.restore();
-        });
+            placedPositions.forEach(p => {
+                const s = STATS[p.type];
+                ctx.save();
+                ctx.translate(p.x, p.y);
+                ctx.fillStyle = 'rgba(0,0,0,0.3)';
+                ctx.beginPath(); ctx.ellipse(0, s.radius * 0.4, s.radius * 0.9, s.radius * 0.35, 0, 0, Math.PI * 2); ctx.fill();
+                ctx.fillStyle = s.color;
+                ctx.beginPath(); ctx.arc(0, 0, s.radius, 0, Math.PI * 2); ctx.fill();
+                ctx.strokeStyle = '#2ecc71';
+                ctx.lineWidth = 3;
+                ctx.stroke();
+                ctx.beginPath(); ctx.arc(s.radius - 4, 0, 5, 0, Math.PI * 2);
+                ctx.fillStyle = 'rgba(0,0,0,.4)'; ctx.fill();
+                ctx.restore();
+            });
+        }
 
         [...allyTeam, ...enemyTeam].forEach(bot => {
             if (bot.isDead) return;
@@ -659,6 +594,6 @@
         }
     });
 
-    window.GAME_EXT.modKartiEkle('botbattle', 'Bot Savaşı', 'Değer + yerleştirme + gerçek davranışlar');
-    console.log('[MOD YÜKLENDİ] botbattle v5');
+    window.GAME_EXT.modKartiEkle('botbattle', 'Bot Savaşı', 'Serbest yerleştirme + gerçek davranışlar');
+    console.log('[MOD YÜKLENDİ] botbattle v6');
 })();
