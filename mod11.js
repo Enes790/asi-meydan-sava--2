@@ -1,4 +1,4 @@
-// ========== mod32.js (ANACHOR) — Zehir + Yalnızlık + Teleport Ulti ==========
+// ========== mod32.js (ANACHOR) — Zehir + Yalnızlık + Teleport + İntikam ==========
 (function () {
     'use strict';
 
@@ -12,6 +12,7 @@
     const C_SHIELD = '#60a5fa';
     const C_HEAL = '#2ecc71';
     const C_TELEPORT = '#a78bfa';
+    const C_REVENGE = '#a855f7';
 
     const CHAR_HP = 2000;
     const CHAR_SPEED = 3.6;
@@ -27,7 +28,6 @@
     const TEMAS_DMG = 400;
     const TEMAS_CD = 240;
 
-    // ===== ULTI (TELEPORT) =====
     const ULTI_ATTACKS = 3;
     const ULTI_INTERVAL = 24;
     const ULTI_APPEAR_TIME = 12;
@@ -37,9 +37,10 @@
     const ULTI_NEAR_RADIUS = 250;
 
     const AKS1_CD = 960;
-    const AKS1_SHIELD_ALONE = 950;
-    const AKS1_SHIELD_CROWD = 600;
-    const AKS1_SHIELD_DURATION = 960;
+    const AKS1_DMG_ALONE = 500;
+    const AKS1_DMG_CROWD = 300;
+    const AKS1_WINDOW_ALONE = 2500;
+    const AKS1_WINDOW_CROWD = 2000;
 
     const AKS2_CD = 1260;
     const DASH_DIST = 150;
@@ -64,8 +65,6 @@
     let yrictAks1Cd = 0, yrictAks1Ready = true;
     let yrictAks2Cd = 0, yrictAks2Ready = true;
     let yrictIsAlone = true;
-    let yrictShield = 0;
-    let yrictShieldMax = 0;
     let yrictLastHp = 0;
     let yrictSpeedMult = 1;
     let yrictFX = [];
@@ -73,16 +72,12 @@
     let ultiReturnMarker = null;
     let screenFlash = 0;
 
-    // ===== drawEntity SARMALAYICI (ulti sırasında karakteri gizle) =====
+    // Base drawEntity — Yrict için base çizimi engelle (kendi çizimimiz + HP bar)
     if (!window._anachorOrigDrawEntity) {
         window._anachorOrigDrawEntity = window.drawEntity;
         window.drawEntity = function (e, isP) {
             if (!e) return;
-            if (isP && player && player.charType === CHAR_ID && ultiState) return;
-            if (isP && player && player.charType === CHAR_ID) {
-                // Karakteri base çizmesin, kendi onDraw'umuz çizecek
-                return;
-            }
+            if (isP && player && player.charType === CHAR_ID) return;
             return window._anachorOrigDrawEntity(e, isP);
         };
     }
@@ -130,7 +125,7 @@
         card.innerHTML =
             '<div class="char-color-preview" style="background:' + C_MAIN + ';"></div>' +
             '<span>Anachor</span>' +
-            '<small>Zehir + Yalnızlık<br>Güç: Kalkan + Dash<br>Ulti: Işınlanma</small>';
+            '<small>Zehir + Yalnızlık<br>Güç: İntikam + Dash<br>Ulti: Işınlanma</small>';
         container.appendChild(card);
         card.addEventListener('click', () => {
             selectedCharacter = CHAR_ID;
@@ -149,7 +144,6 @@
         yrictAks1Cd = 0; yrictAks1Ready = true;
         yrictAks2Cd = 0; yrictAks2Ready = true;
         yrictIsAlone = true;
-        yrictShield = 0; yrictShieldMax = 0;
         yrictLastHp = 0;
         yrictSpeedMult = 1;
         yrictFX = [];
@@ -157,7 +151,6 @@
         ultiReturnMarker = null;
         screenFlash = 0;
         if (player) {
-            player._yrictShield = 0;
             player._yrictDashing = false;
             player.jumpInvulnerable = false;
         }
@@ -172,7 +165,7 @@
             this.speed = this.originalSpeed = CHAR_SPEED;
             if (gadgetBtn) {
                 gadgetBtn.style.display = 'flex';
-                gadgetBtn.innerHTML = 'KALKAN<br><span id="gadget-timer"></span>';
+                gadgetBtn.innerHTML = 'İNTİKAM<br><span id="gadget-timer"></span>';
                 gadgetBtn.classList.remove('cooldown');
             }
             if (gadgetBtn2) {
@@ -202,7 +195,7 @@
             vx: Math.cos(a) * PLAYER_BULLET_SPEED,
             vy: Math.sin(a) * PLAYER_BULLET_SPEED,
             angle: a, life: 0, maxLife: 60,
-            isDead: false, isUlti: false
+            isDead: false, isUlti: false, isRevenge: false
         });
         this.consumeAmmo();
         this.lastShotTime = Date.now();
@@ -212,16 +205,39 @@
     Player.prototype.activateGadget = function (a, pull) {
         if (this.charType !== CHAR_ID) return origGadget.call(this, a, pull);
         if (!yrictAks1Ready || this.isDead || ultiState) return;
+        const now = Date.now();
         const alone = isYrictAlone();
-        const amount = alone ? AKS1_SHIELD_ALONE : AKS1_SHIELD_CROWD;
-        yrictShield = amount;
-        yrictShieldMax = amount;
-        this._yrictShield = amount;
+        const dmg = alone ? AKS1_DMG_ALONE : AKS1_DMG_CROWD;
+        const windowMs = alone ? AKS1_WINDOW_ALONE : AKS1_WINDOW_CROWD;
+
+        const targets = new Set();
+        getActiveEnemies().forEach(e => {
+            if (e.isDead) return;
+            if (e._yrictHitPlayerAt && now - e._yrictHitPlayerAt < windowMs) {
+                targets.add(e);
+            }
+        });
+        const sorted = getActiveEnemies().filter(e => !e.isDead).sort((a, b) => getDist(player, a) - getDist(player, b));
+        for (let i = 0; i < Math.min(2, sorted.length); i++) targets.add(sorted[i]);
+
+        targets.forEach(target => {
+            const ang = Math.atan2(target.y - player.y, target.x - player.x);
+            yrictBullets.push({
+                x: player.x, y: player.y, sx: player.x, sy: player.y,
+                vx: Math.cos(ang) * PLAYER_BULLET_SPEED * 1.5,
+                vy: Math.sin(ang) * PLAYER_BULLET_SPEED * 1.5,
+                angle: ang, life: 0, maxLife: 120,
+                isDead: false, isUlti: false, isRevenge: true,
+                revengeDmg: dmg, target: target,
+                hitEnemies: new Set()
+            });
+        });
+
         yrictAks1Ready = false;
         yrictAks1Cd = AKS1_CD;
         if (gadgetBtn) gadgetBtn.classList.add('cooldown');
         if (gadgetTimerText) gadgetTimerText.innerText = Math.ceil(AKS1_CD / 60) + "s";
-        addFloatingNumber(this.x, this.y - 40, alone ? 'YALNIZ KALKAN!' : 'KALKAN!', C_SHIELD);
+        addFloatingNumber(this.x, this.y - 40, targets.size > 0 ? 'İNTİKAM!' : 'BOŞ!', C_TELEPORT);
         yrictFX.push({ type: 'shieldBurst', x: this.x, y: this.y, life: 20, maxLife: 20 });
     };
 
@@ -273,7 +289,7 @@
         } else if (enemies.length === 1) {
             const e = enemies[0].e;
             for (let i = 0; i < ULTI_ATTACKS; i++) {
-                const ang = (i / ULTI_ATTACKS) * Math.PI * 2 + (Date.now() % 1000) * 0.001;
+                const ang = (i / ULTI_ATTACKS) * Math.PI * 2;
                 const r = e.radius + 60;
                 targets.push({
                     x: clampPos(e.x + Math.cos(ang) * r, WALL_THICKNESS + 30, canvas.width - WALL_THICKNESS - 30),
@@ -282,8 +298,7 @@
             }
         } else if (enemies.length === 2) {
             const eA = enemies[0].e, eB = enemies[1].e;
-            const seq = [eA, eB, eA];
-            seq.forEach((e) => {
+            [eA, eB, eA].forEach(e => {
                 const ang = Math.random() * Math.PI * 2;
                 const r = e.radius + 60;
                 targets.push({
@@ -313,8 +328,7 @@
             appearTimer: ULTI_APPEAR_TIME,
             missilesFired: false,
             currentX: this.x,
-            currentY: this.y,
-            fireAngle: this.angle
+            currentY: this.y
         };
 
         this.jumpInvulnerable = true;
@@ -336,15 +350,23 @@
         if (gadgetBtn && gadgetBtn.style.display !== 'flex') gadgetBtn.style.display = 'flex';
         if (gadgetBtn2 && gadgetBtn2.style.display !== 'flex') gadgetBtn2.style.display = 'flex';
 
-        // ===== ULTI TELEPORT AKIŞI =====
+        // ULTI TELEPORT
         if (ultiState) {
-            // Belirme animasyonu
             if (ultiState.appearTimer > 0) {
                 ultiState.appearTimer -= ts;
                 if (ultiState.appearTimer <= 0 && !ultiState.missilesFired) {
-                    // Mermileri ateşle - hedefe doğru
-                    const t = ultiState.targets[ultiState.attackIndex];
-                    const ang = Math.atan2(t.y - ultiState.currentY, t.x - ultiState.currentX);
+                    let nearestE = null, nearestD = Infinity;
+                    getActiveEnemies().forEach(e => {
+                        if (e.isDead) return;
+                        const d = getDist({x: ultiState.currentX, y: ultiState.currentY}, e);
+                        if (d < nearestD) { nearestD = d; nearestE = e; }
+                    });
+                    let ang;
+                    if (nearestE) {
+                        ang = Math.atan2(nearestE.y - ultiState.currentY, nearestE.x - ultiState.currentX);
+                    } else {
+                        ang = Math.random() * Math.PI * 2;
+                    }
                     for (let i = 0; i < ULTI_MISSILE_COUNT; i++) {
                         const spread = (i - (ULTI_MISSILE_COUNT - 1) / 2) * ULTI_MISSILE_SPREAD;
                         const fireAng = ang + spread;
@@ -354,7 +376,7 @@
                             vx: Math.cos(fireAng) * PLAYER_BULLET_SPEED * 1.2,
                             vy: Math.sin(fireAng) * PLAYER_BULLET_SPEED * 1.2,
                             angle: fireAng, life: 0, maxLife: 45,
-                            isDead: false, isUlti: true
+                            isDead: false, isUlti: true, isRevenge: false
                         });
                     }
                     ultiState.missilesFired = true;
@@ -366,7 +388,6 @@
             if (ultiState.timer <= 0) {
                 ultiState.attackIndex++;
                 if (ultiState.attackIndex >= ultiState.targets.length) {
-                    // Ulti bitiş - başlangıca dön
                     player.x = ultiState.startX;
                     player.y = ultiState.startY;
                     player.jumpInvulnerable = false;
@@ -419,28 +440,11 @@
             }
         }
 
-        if (yrictShield > 0) {
-            yrictShield -= (yrictShieldMax / AKS1_SHIELD_DURATION) * ts;
-            if (yrictShield < 0) yrictShield = 0;
-            player._yrictShield = yrictShield;
-        }
-
         if (yrictLastHp > 0 && player.hp < yrictLastHp) {
             let taken = yrictLastHp - player.hp;
             if (alone && taken > 0) {
                 const heal = taken * HEAL_PCT;
                 player.hp = Math.min(player.maxHp, player.hp + heal);
-                taken -= heal;
-            }
-            if (yrictShield > 0 && taken > 0) {
-                const absorbed = Math.min(yrictShield, taken);
-                yrictShield -= absorbed;
-                player._yrictShield = yrictShield;
-                player.hp += absorbed;
-                floatingNumbers.push({
-                    x: player.x + (Math.random()-0.5)*30, y: player.y - 30,
-                    val: '+' + Math.floor(absorbed), color: C_SHIELD, life: 45, opacity: 1
-                });
             }
         }
         yrictLastHp = player.hp;
@@ -569,16 +573,45 @@
 
     const _origUBL = window.updateBulletLogic;
     window.updateBulletLogic = function (list, isBot, ts) {
+        // Bot tracking (intikam için)
+        if (isBot && player.charType === CHAR_ID && !player.isDead) {
+            for (const b of list) {
+                if (b.owner && !b.owner.isDead && getDist(b, player) < player.radius + 15) {
+                    b.owner._yrictHitPlayerAt = Date.now();
+                }
+            }
+        }
+
         if (!isBot && player.charType === CHAR_ID) {
             for (let i = yrictBullets.length - 1; i >= 0; i--) {
                 const b = yrictBullets[i];
                 b.x += b.vx * ts; b.y += b.vy * ts;
                 b.life += ts;
                 if (b.life > b.maxLife) { yrictBullets.splice(i, 1); continue; }
+
                 if (b.x < WALL_THICKNESS || b.x > canvas.width - WALL_THICKNESS ||
                     b.y < WALL_THICKNESS || b.y > canvas.height - WALL_THICKNESS) {
                     yrictBullets.splice(i, 1); continue;
                 }
+
+                // İNTİKAM MERMİSİ — piercing, siperden geçer
+                if (b.isRevenge) {
+                    if (b.target && b.target.isDead) { yrictBullets.splice(i, 1); continue; }
+                    let stopped = false;
+                    for (const e of getActiveEnemies()) {
+                        if (e.isDead || b.hitEnemies.has(e)) continue;
+                        if (getDist(b, e) < e.radius + 8) {
+                            e.hp -= b.revengeDmg;
+                            addFloatingNumber(e.x, e.y, b.revengeDmg, C_REVENGE);
+                            b.hitEnemies.add(e);
+                            if (e === b.target) { stopped = true; break; }
+                        }
+                    }
+                    if (stopped) yrictBullets.splice(i, 1);
+                    continue;
+                }
+
+                // Normal / ulti mermisi
                 let hitWall = false;
                 for (const o of obstacles.concat(cactusWalls || [])) {
                     if (getDist(b, o) < o.radius + 5) {
@@ -621,7 +654,7 @@
     chainHook('onDraw', function (ctx2) {
         if (player.charType !== CHAR_ID || !gameStarted) return;
 
-        // ===== Karakter (ulti sırasında gizle) =====
+        // Karakter çizimi (ulti sırasında gizle)
         if (!ultiState) {
             const alone = yrictIsAlone;
             const scale = alone ? 1.10 : 0.90;
@@ -640,9 +673,17 @@
             ctx2.beginPath(); ctx2.arc(player.radius - 4, 0, 5, 0, Math.PI * 2);
             ctx2.fillStyle = 'rgba(0,0,0,.4)'; ctx2.fill();
             ctx2.restore();
+
+            // HP bar
+            ctx2.save();
+            ctx2.fillStyle = '#444';
+            ctx2.fillRect(player.x - 20, player.y - player.radius - 15, 40, 5);
+            ctx2.fillStyle = '#2ecc71';
+            ctx2.fillRect(player.x - 20, player.y - player.radius - 15, Math.max(0, player.hp) / player.maxHp * 40, 5);
+            ctx2.restore();
         }
 
-        // ===== Ulti geri dönüş işareti =====
+        // Ulti geri dönüş işareti
         if (ultiReturnMarker) {
             ctx2.save();
             ctx2.globalAlpha = 0.5 + Math.sin(Date.now() / 200) * 0.2;
@@ -661,12 +702,11 @@
             ctx2.restore();
         }
 
-        // ===== Ulti belirme efekti =====
+        // Ulti belirme efekti
         if (ultiState) {
             if (ultiState.appearTimer > 0) {
                 const prog = 1 - (ultiState.appearTimer / ULTI_APPEAR_TIME);
                 ctx2.save();
-                // Dönen halka (heykel yapma benzeri)
                 for (let r = 0; r < 3; r++) {
                     ctx2.globalAlpha = (1 - prog) * 0.6;
                     ctx2.beginPath();
@@ -675,7 +715,6 @@
                     ctx2.lineWidth = 2;
                     ctx2.stroke();
                 }
-                // Merkez dolgu
                 ctx2.globalAlpha = (1 - prog) * 0.5;
                 ctx2.beginPath();
                 ctx2.arc(ultiState.currentX, ultiState.currentY, 25 * prog, 0, Math.PI * 2);
@@ -683,7 +722,6 @@
                 ctx2.fill();
                 ctx2.restore();
             }
-            // Mermiler ateşlendiyse küçük patlama
             if (ultiState.missilesFired && ultiState.timer > ULTI_INTERVAL - 8) {
                 const f = (ultiState.timer - (ULTI_INTERVAL - 8)) / 8;
                 ctx2.save();
@@ -697,18 +735,7 @@
             }
         }
 
-        if (yrictShield > 0 && !ultiState) {
-            const alpha = yrictShield / yrictShieldMax;
-            ctx2.save();
-            ctx2.globalAlpha = 0.4 + 0.4 * alpha;
-            ctx2.beginPath(); ctx2.arc(player.x, player.y, player.radius + 10, 0, Math.PI * 2);
-            ctx2.strokeStyle = C_SHIELD; ctx2.lineWidth = 4; ctx2.stroke();
-            ctx2.globalAlpha = 0.15 + 0.1 * alpha;
-            ctx2.beginPath(); ctx2.arc(player.x, player.y, player.radius + 10, 0, Math.PI * 2);
-            ctx2.fillStyle = C_SHIELD; ctx2.fill();
-            ctx2.restore();
-        }
-
+        // Dash sisi
         if (yrictDash && yrictDash.active) {
             ctx2.save();
             ctx2.globalAlpha = 0.75;
@@ -720,6 +747,7 @@
             ctx2.restore();
         }
 
+        // Zehirli düşmanlar
         yrictPoisonBots.forEach((v, e) => {
             if (!e || e.isDead) return;
             ctx2.save();
@@ -729,6 +757,7 @@
             ctx2.restore();
         });
 
+        // Zehir havuzları
         poisonPools.forEach(p => {
             ctx2.save();
             const pl = 1 + Math.sin(Date.now() / 200) * 0.1;
@@ -745,6 +774,7 @@
             ctx2.restore();
         });
 
+        // Mermiler
         yrictBullets.forEach(b => {
             ctx2.save();
             ctx2.translate(b.x, b.y); ctx2.rotate(b.angle);
@@ -753,6 +783,15 @@
                 ctx2.moveTo(10, 0); ctx2.lineTo(-5, -3); ctx2.lineTo(-5, 3); ctx2.closePath();
                 ctx2.fillStyle = C_TELEPORT; ctx2.fill();
                 ctx2.strokeStyle = '#fff'; ctx2.lineWidth = 1.5; ctx2.stroke();
+            } else if (b.isRevenge) {
+                ctx2.globalAlpha = 0.4;
+                ctx2.beginPath(); ctx2.moveTo(-8, 0); ctx2.lineTo(-24, 0);
+                ctx2.strokeStyle = C_REVENGE; ctx2.lineWidth = 4; ctx2.stroke();
+                ctx2.globalAlpha = 1;
+                ctx2.beginPath();
+                ctx2.moveTo(12, 0); ctx2.lineTo(-8, -5); ctx2.lineTo(-8, 5); ctx2.closePath();
+                ctx2.fillStyle = C_REVENGE; ctx2.fill();
+                ctx2.strokeStyle = '#fff'; ctx2.lineWidth = 2; ctx2.stroke();
             } else {
                 ctx2.beginPath();
                 ctx2.moveTo(8, 0); ctx2.lineTo(-6, -4); ctx2.lineTo(-6, 4); ctx2.closePath();
@@ -762,6 +801,7 @@
             ctx2.restore();
         });
 
+        // FX
         yrictFX.forEach(fx => {
             ctx2.save();
             const a = fx.life / fx.maxLife;
@@ -772,7 +812,7 @@
             } else if (fx.type === 'shieldBurst') {
                 ctx2.globalAlpha = a * 0.7;
                 ctx2.beginPath(); ctx2.arc(fx.x, fx.y, player.radius + 10 + (1-a)*15, 0, Math.PI * 2);
-                ctx2.strokeStyle = C_SHIELD; ctx2.lineWidth = 3; ctx2.stroke();
+                ctx2.strokeStyle = C_TELEPORT; ctx2.lineWidth = 3; ctx2.stroke();
             } else if (fx.type === 'dashStart' || fx.type === 'dashEnd') {
                 ctx2.globalAlpha = a * 0.6;
                 ctx2.beginPath(); ctx2.arc(fx.x, fx.y, 20 + (1-a)*15, 0, Math.PI * 2);
@@ -793,6 +833,7 @@
             ctx2.restore();
         });
 
+        // Dash aim
         if (yrictAks2Aim.active && !ultiState) {
             const a = yrictAks2Aim.angle;
             const dist = DASH_DIST;
@@ -817,6 +858,7 @@
         }
     });
 
+    // Dash aim kontrolleri
     if (gadgetBtn2) {
         gadgetBtn2.addEventListener('touchstart', (e) => {
             if (player.charType !== CHAR_ID || !yrictAks2Ready || yrictDash || ultiState) return;
@@ -873,5 +915,5 @@
         });
     }
 
-    console.log('[MOD YÜKLENDİ] anachor (v2 - teleport ulti)');
+    console.log('[MOD YÜKLENDİ] anachor (v3 - intikam)');
 })();
