@@ -1,26 +1,26 @@
-// ========== mod36.js — Bot Savaşı (Auto-Battler) ==========
-// Oyuncu yok, sadece 5v5 botlar otomatik savaşıyor. 5 tur.
+// ========== mod36.js — Bot Savaşı v2 (Setup + HAZIR) ==========
 (function () {
     'use strict';
 
     const MOD_ID = 'botbattle';
 
     const STATS = {
-        slime:   { hp: 1200, dmg: 200, speed: 1.6, radius: 14, color: '#2ecc71', range: 200, interval: 1200 },
-        mor:     { hp: 1400, dmg: 300, speed: 1.5, radius: 16, color: '#9b59b6', range: 280, interval: 1400 },
-        tur:     { hp: 1200, dmg: 350, speed: 0,   radius: 18, color: '#e67e22', range: 300, interval: 1200 },
-        boom:    { hp: 1300, dmg: 250, speed: 1.2, radius: 15, color: '#00ced1', range: 350, interval: 1600 },
-        fog:     { hp: 2000, dmg: 200, speed: 0.8, radius: 20, color: '#7f8c8d', range: 260, interval: 1600 },
-        armored: { hp: 2200, dmg: 280, speed: 0.8, radius: 18, color: '#7c5c9a', range: 320, interval: 1800 },
-        growing: { hp: 1400, dmg: 260, speed: 1.0, radius: 15, color: '#7a1f2b', range: 280, interval: 1400 }
+        slime:   { name: 'Slime',   hp: 1200, dmg: 200, speed: 1.6, radius: 14, color: '#2ecc71', range: 200, interval: 1200 },
+        mor:     { name: 'Mor',     hp: 1400, dmg: 300, speed: 1.5, radius: 16, color: '#9b59b6', range: 280, interval: 1400 },
+        tur:     { name: 'Turuncu', hp: 1200, dmg: 350, speed: 0,   radius: 18, color: '#e67e22', range: 300, interval: 1200 },
+        boom:    { name: 'Bumerang',hp: 1300, dmg: 250, speed: 1.2, radius: 15, color: '#00ced1', range: 350, interval: 1600 },
+        fog:     { name: 'Sis',     hp: 2000, dmg: 200, speed: 0.8, radius: 20, color: '#7f8c8d', range: 260, interval: 1600 },
+        armored: { name: 'Zırhlı',  hp: 2200, dmg: 280, speed: 0.8, radius: 18, color: '#7c5c9a', range: 320, interval: 1800 },
+        growing: { name: 'Büyüyen', hp: 1400, dmg: 260, speed: 1.0, radius: 15, color: '#7a1f2b', range: 280, interval: 1400 }
     };
 
-    const ROUNDS = [
-        { ally: ['slime', 'slime', 'mor', 'tur', 'boom'],    enemy: ['slime', 'mor', 'mor', 'tur', 'boom'],    hpMult: 1.0 },
-        { ally: ['mor', 'tur', 'boom', 'fog', 'slime'],      enemy: ['mor', 'tur', 'boom', 'fog', 'mor'],      hpMult: 1.15 },
-        { ally: ['tur', 'armored', 'growing', 'boom', 'mor'],enemy: ['tur', 'armored', 'growing', 'boom', 'mor'],hpMult: 1.3 },
-        { ally: ['armored', 'growing', 'fog', 'tur', 'boom'],enemy: ['armored', 'growing', 'fog', 'tur', 'boom'],hpMult: 1.5 },
-        { ally: ['armored', 'armored', 'growing', 'growing', 'fog'], enemy: ['armored', 'armored', 'growing', 'growing', 'fog'], hpMult: 1.75 }
+    const TYPES = Object.keys(STATS);
+    const ENEMY_ROUNDS = [
+        { types: ['slime', 'slime', 'mor', 'tur', 'boom'],           hpMult: 1.0 },
+        { types: ['mor', 'tur', 'boom', 'fog', 'slime'],             hpMult: 1.15 },
+        { types: ['tur', 'armored', 'growing', 'boom', 'mor'],       hpMult: 1.3 },
+        { types: ['armored', 'growing', 'fog', 'tur', 'boom'],       hpMult: 1.5 },
+        { types: ['armored', 'armored', 'growing', 'growing', 'fog'],hpMult: 1.75 }
     ];
 
     let allyTeam = [];
@@ -30,6 +30,9 @@
     let roundIndex = 0;
     let battleActive = false;
     let introTimer = 0;
+    let selectedTypes = [];
+    let setupOverlay = null;
+    let readyPressed = false;
 
     function spawnBot(type, x, y, team, hpMult) {
         const s = STATS[type];
@@ -42,9 +45,90 @@
         };
     }
 
+    function hideAllButtons() {
+        const ids = ['ulti-btn', 'gadget-btn', 'gadget-btn-2', 'left-joystick', 'right-joystick'];
+        ids.forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.style.display = 'none';
+        });
+    }
+
+    function showSetup() {
+        if (setupOverlay) setupOverlay.remove();
+        selectedTypes = [];
+        setupOverlay = document.createElement('div');
+        setupOverlay.id = 'botbattle-setup';
+        setupOverlay.style.cssText = 'position:fixed;inset:0;background:rgba(10,15,20,0.97);z-index:150;display:flex;flex-direction:column;justify-content:center;align-items:center;padding:20px;overflow-y:auto;';
+
+        const title = document.createElement('h1');
+        title.textContent = 'ORDUNU SEÇ';
+        title.style.cssText = 'color:#f1c40f;font-size:28px;margin:0 0 10px;';
+        setupOverlay.appendChild(title);
+
+        const sub = document.createElement('p');
+        sub.textContent = '5 bot seç (5/5)';
+        sub.style.cssText = 'color:#aaa;font-size:14px;margin:0 0 20px;';
+        sub.id = 'botbattle-count';
+        setupOverlay.appendChild(sub);
+
+        const grid = document.createElement('div');
+        grid.style.cssText = 'display:grid;grid-template-columns:repeat(auto-fit,minmax(100px,1fr));gap:10px;max-width:500px;width:100%;margin-bottom:20px;';
+
+        TYPES.forEach(type => {
+            const s = STATS[type];
+            const card = document.createElement('div');
+            card.dataset.type = type;
+            card.style.cssText = `background:linear-gradient(135deg,#1e293b,#0f172a);border:3px solid ${s.color};border-radius:12px;padding:12px 8px;cursor:pointer;text-align:center;transition:transform 0.15s;`;
+            card.innerHTML = `<div style="color:#fff;font-weight:bold;font-size:14px;margin-bottom:4px;">${s.name}</div>
+                <div style="color:${s.color};font-size:11px;">${s.hp} HP</div>
+                <div style="color:#aaa;font-size:11px;">${s.dmg} hasar</div>`;
+            card.addEventListener('click', () => toggleSelect(type, card));
+            grid.appendChild(card);
+        });
+        setupOverlay.appendChild(grid);
+
+        const readyBtn = document.createElement('button');
+        readyBtn.id = 'botbattle-ready';
+        readyBtn.textContent = 'HAZIR (0/5)';
+        readyBtn.disabled = true;
+        readyBtn.style.cssText = 'padding:14px 50px;font-size:18px;font-weight:bold;background:#2ecc71;color:#fff;border:none;border-radius:10px;cursor:pointer;opacity:0.5;';
+        readyBtn.addEventListener('click', () => {
+            if (selectedTypes.length === 5) {
+                readyPressed = true;
+                setupOverlay.remove();
+                setupOverlay = null;
+                startRound();
+            }
+        });
+        setupOverlay.appendChild(readyBtn);
+
+        document.body.appendChild(setupOverlay);
+    }
+
+    function toggleSelect(type, card) {
+        if (selectedTypes.includes(type)) {
+            selectedTypes = selectedTypes.filter(t => t !== type);
+            card.style.transform = 'scale(1)';
+            card.style.borderWidth = '3px';
+        } else {
+            if (selectedTypes.length >= 5) return;
+            selectedTypes.push(type);
+            card.style.transform = 'scale(1.05)';
+            card.style.borderWidth = '5px';
+        }
+        const countEl = document.getElementById('botbattle-count');
+        const readyBtn = document.getElementById('botbattle-ready');
+        if (countEl) countEl.textContent = `${selectedTypes.length}/5 seçildi`;
+        if (readyBtn) {
+            readyBtn.textContent = `HAZIR (${selectedTypes.length}/5)`;
+            readyBtn.disabled = selectedTypes.length !== 5;
+            readyBtn.style.opacity = selectedTypes.length === 5 ? '1' : '0.5';
+        }
+    }
+
     function startRound() {
-        if (roundIndex >= ROUNDS.length) { victory(); return; }
-        const r = ROUNDS[roundIndex];
+        if (roundIndex >= ENEMY_ROUNDS.length) { victory(); return; }
+        const r = ENEMY_ROUNDS[roundIndex];
         allyTeam = [];
         enemyTeam = [];
         allyBullets = [];
@@ -53,12 +137,12 @@
         const allyX = canvas.width * 0.22;
         const enemyX = canvas.width * 0.78;
 
-        r.ally.forEach((type, i) => {
-            const y = canvas.height * (i + 1) / (r.ally.length + 1);
+        selectedTypes.forEach((type, i) => {
+            const y = canvas.height * (i + 1) / (selectedTypes.length + 1);
             allyTeam.push(spawnBot(type, allyX + (Math.random() - 0.5) * 60, y, 'ally', 1.0));
         });
-        r.enemy.forEach((type, i) => {
-            const y = canvas.height * (i + 1) / (r.enemy.length + 1);
+        r.types.forEach((type, i) => {
+            const y = canvas.height * (i + 1) / (r.types.length + 1);
             enemyTeam.push(spawnBot(type, enemyX + (Math.random() - 0.5) * 60, y, 'enemy', r.hpMult));
         });
 
@@ -158,7 +242,7 @@
         h.style.display = 'block';
         const allyAlive = allyTeam.filter(b => !b.isDead).length;
         const enemyAlive = enemyTeam.filter(b => !b.isDead).length;
-        h.innerHTML = `TUR ${roundIndex + 1} / ${ROUNDS.length}<br><span style="font-size:12px;color:#2ecc71;">Sen: ${allyAlive}</span> <span style="font-size:12px;color:#aaa;">vs</span> <span style="font-size:12px;color:#e74c3c;">Düşman: ${enemyAlive}</span>`;
+        h.innerHTML = `TUR ${roundIndex + 1} / ${ENEMY_ROUNDS.length}<br><span style="font-size:12px;color:#2ecc71;">Sen: ${allyAlive}</span> <span style="font-size:12px;color:#aaa;">vs</span> <span style="font-size:12px;color:#e74c3c;">Düşman: ${enemyAlive}</span>`;
     }
 
     window.GAME_EXT.registerMode(MOD_ID, {
@@ -167,18 +251,14 @@
             roundIndex = 0;
             battleActive = false;
             introTimer = 0;
+            readyPressed = false;
             allyTeam = [];
             enemyTeam = [];
             allyBullets = [];
             enemyBullets = [];
+            selectedTypes = [];
 
-            const lj = document.getElementById('left-joystick');
-            const rj = document.getElementById('right-joystick');
-            if (lj) lj.style.display = 'none';
-            if (rj) rj.style.display = 'none';
-            if (gadgetBtn) gadgetBtn.style.display = 'none';
-            if (gadgetBtn2) gadgetBtn2.style.display = 'none';
-            if (ultiBtn) ultiBtn.style.display = 'none';
+            hideAllButtons();
 
             player.x = canvas.width / 2;
             player.y = canvas.height / 2;
@@ -191,17 +271,27 @@
             slimeBots = []; stationaryBots = []; boomerangBots = []; fogBots = [];
             nests = []; spawnIndicators = [];
 
-            startRound();
+            const hud = document.getElementById('botbattle-hud');
+            if (hud) hud.style.display = 'none';
+
+            showSetup();
         },
         onUpdate: function (ts) {
-            if (window.GAME_MODE !== MOD_ID || window.GAME_PAUSED) return;
+            if (window.GAME_MODE !== MOD_ID) return;
 
             player.hp = player.maxHp;
             player.isInvisible = true;
             player.jumpInvulnerable = true;
 
+            hideAllButtons();
+
             slimeTimer = 0; stationaryTimer = 0; boomerangTimer = 0; fogBotTimer = 0;
             spawnIndicators = [];
+            bot.isActive = false; bot.isDead = true;
+            bot2.isActive = false; bot2.isDead = true;
+
+            if (!readyPressed) return;
+            if (window.GAME_PAUSED) return;
 
             if (introTimer > 0) {
                 introTimer -= ts;
@@ -220,7 +310,7 @@
             if (enemyAlive === 0) {
                 battleActive = false;
                 roundIndex++;
-                if (roundIndex >= ROUNDS.length) setTimeout(victory, 500);
+                if (roundIndex >= ENEMY_ROUNDS.length) setTimeout(victory, 500);
                 else setTimeout(startRound, 1000);
                 updateHUD();
             } else if (allyAlive === 0) {
@@ -234,12 +324,14 @@
             allyTeam = []; enemyTeam = [];
             allyBullets = []; enemyBullets = [];
             roundIndex = 0; battleActive = false; introTimer = 0;
+            readyPressed = false;
+            selectedTypes = [];
             const h = document.getElementById('botbattle-hud');
             if (h) h.style.display = 'none';
+            if (setupOverlay) { setupOverlay.remove(); setupOverlay = null; }
         }
     });
 
-    // Player metot override'ları
     const origFire = Player.prototype.fire;
     Player.prototype.fire = function (a, pull) {
         if (window.GAME_MODE === MOD_ID) return;
@@ -264,7 +356,6 @@
         return origGadget2.call(this, a, pull);
     };
 
-    // Player gizle
     if (!window._botbattleOrigDraw) {
         window._botbattleOrigDraw = window.drawEntity;
         window.drawEntity = function (e, isP) {
@@ -330,6 +421,6 @@
         }
     });
 
-    window.GAME_EXT.modKartiEkle('botbattle', 'Bot Savaşı', 'Otomatik savaş — sadece izle');
-    console.log('[MOD YÜKLENDİ] botbattle');
+    window.GAME_EXT.modKartiEkle('botbattle', 'Bot Savaşı', 'Kendi ordunu kur ve savaş');
+    console.log('[MOD YÜKLENDİ] botbattle (v2)');
 })();
