@@ -1,483 +1,314 @@
-// ========== mod35.js (FİLİZ) — Büyüyen Mermi ==========
+// ============================================================================
+// mod29.js - "Çığ" karakteri
+// Ana dosyaya dokunmaz. index.html'de TÜM mod script'lerinden SONRA eklenmeli:
+//   <script src="mod29.js"></script>
+//
+// Çığ:
+//  - Mermi (Çığ Topu): gittikçe büyür. Büyüdükçe hasarı artar (350 -> 1500).
+//    Yol boyunca çevresindeki düşmanları hafifçe iter ve küçük alan hasarı verir
+//    (menzil 12 -> 30, tik hasarı 6 -> 30).
+//  - Yetenek 1 (HAZIRLIK): Sonraki mermi yarı büyük başlar ve daha hızlı gider.
+//  - Yetenek 2 (BÜYÜTME HALKASI): Hedefe halka koyar. İçinden geçen mermiler
+//    büyür, içindeki oyuncu iyileşir.
+//  - Güç (DEV ÇIĞ): Dev, yavaş çığ. Delip geçer, düşmanları ezip iter, engelleri
+//    parçalar, sonunda patlar. Duvara çarpan düşman "DUVAR STUN" yer.
+// ============================================================================
 (function () {
     'use strict';
+    const ID = 'cig';
+    const lerp = (a, b, t) => a + (b - a) * t;
+    const clamp01 = v => Math.max(0, Math.min(1, v));
 
-    const CHAR_ID = 'filiz';
-    const C_MAIN = '#27ae60';
-    const C_LIGHT = '#58d68d';
-    const C_DARK = '#145a32';
-    const C_GROW = '#a9dfbf';
-    const C_WHITE = '#ffffff';
-    const C_HEAL = '#2ecc71';
+    window.GAME_EXT = window.GAME_EXT || { characters: {}, modes: {}, obstacleTypes: {}, botTypes: {}, hooks: {} };
+    window.GAME_EXT.characters[ID] = { color: '#74b9ff', hp: 3400, speed: 3.3 };
 
-    const CHAR_HP = 2600;
-    const CHAR_SPEED = 3.4;
-    const RANGE = 300;
-
-    const BULLET_SPEED = 6;
-    const BULLET_GROW_INTERVAL = 30;
-    const BULLET_GROW_RATE = 0.25;
-    const BULLET_MAX_MULT = 3;
-    const BULLET_BASE_RADIUS = 6;
-    const BULLET_BASE_DMG = 100;
-
-    const AOE_RADIUS = 60;
-    const AOE_PUSH = 40;
-
-    const AKS1_CD = 960;
-    const AKS1_HEAL = 400;
-
-    const AKS2_CD = 720;
-    const AKS2_JUMP = 50;
-
-    const ULTI_BASE_MULT = 5;
-    const ULTI_GROW_RATE = 0.5;
-    const ULTI_MAX_MULT = 10;
-    const ULTI_DMG = 1500;
-    const ULTI_PUSH = 100;
-    const ULTI_AOE = 200;
-
-    window.GAME_EXT.characters[CHAR_ID] = { color: C_MAIN, hp: CHAR_HP, speed: CHAR_SPEED };
-
-    let filizBullets = [];
-    let filizFX = [];
-    let screenFlash = 0;
-    let aks1CD = 0, aks1Ready = true;
-    let aks2CD = 0, aks2Ready = true;
-    let recoilDir = null;
-
-    if (!window._filizOrigDrawEntity) {
-        window._filizOrigDrawEntity = window.drawEntity;
-        window.drawEntity = function (e, isP) {
-            if (!e) return;
-            if (isP && player && player.charType === CHAR_ID) return;
-            return window._filizOrigDrawEntity.call(this, e, isP);
-        };
-    }
-
-    function chainHook(name, fn) {
-        const prev = window.GAME_EXT.hooks[name];
-        window.GAME_EXT.hooks[name] = function (...args) {
-            let pr; if (typeof prev === 'function') pr = prev.apply(this, args);
-            const or = fn.apply(this, args);
-            if (typeof pr === 'boolean' || typeof or === 'boolean') return !!pr || !!or;
-            return or !== undefined ? or : pr;
-        };
-    }
-
-    function burst(x, y, n, c, speed) {
-        if (!Number.isFinite(x) || !Number.isFinite(y)) return;
-        const sp = speed || 4;
-        for (let i = 0; i < n; i++) {
-            const a = Math.random() * Math.PI * 2;
-            const v = 1 + Math.random() * sp;
-            filizFX.push({
-                x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v,
-                size: 1.5 + Math.random() * 2,
-                life: 20 + Math.random() * 20, maxLife: 40,
-                color: c, gravity: 0.05
-            });
-        }
-    }
-
-    const container = document.querySelector('.char-select-container');
-    if (container && !document.getElementById('char-' + CHAR_ID)) {
-        const card = document.createElement('div');
-        card.className = 'char-card';
-        card.id = 'char-' + CHAR_ID;
-        card.innerHTML =
-            '<div class="char-color-preview" style="background:' + C_MAIN + ';"></div>' +
-            '<span>Filiz</span>' +
-            '<small>Büyüyen Mermi<br>Mesafe = Güç<br>Ulti: Dev Mermi</small>';
-        container.appendChild(card);
-        card.addEventListener('click', () => {
-            selectedCharacter = CHAR_ID;
-            document.querySelectorAll('.char-card').forEach(el => el.classList.remove('selected'));
-            card.classList.add('selected');
-        });
-    }
-
-    function clearAll() {
-        filizBullets = [];
-        filizFX = [];
-        screenFlash = 0;
-        aks1CD = 0; aks1Ready = true;
-        aks2CD = 0; aks2Ready = true;
-        recoilDir = null;
-    }
-
-    const origSet = Player.prototype.setCharacter;
-    Player.prototype.setCharacter = function (type) {
-        origSet.call(this, type);
-        if (type === CHAR_ID) {
-            clearAll();
-            this.hp = this.maxHp = CHAR_HP;
-            this.speed = this.originalSpeed = CHAR_SPEED;
-            if (gadgetBtn) {
-                gadgetBtn.style.display = 'flex';
-                gadgetBtn.innerHTML = 'CAN<br><span id="gadget-timer"></span>';
-                gadgetBtn.classList.remove('cooldown');
-            }
-            if (gadgetBtn2) {
-                gadgetBtn2.style.display = 'flex';
-                gadgetBtn2.innerHTML = 'GERİ<br>TEPME<br><span id="gadget-timer-2"></span>';
-                gadgetBtn2.classList.remove('cooldown');
-            }
-            if (ultiBtn) {
-                ultiBtn.style.display = 'flex';
-                ultiBtn.style.background = 'radial-gradient(circle, #58d68d, #145a32)';
-            }
-            if (typeof gadgetTimerText !== 'undefined') gadgetTimerText = document.getElementById('gadget-timer');
-            if (typeof gadgetTimerText2 !== 'undefined') gadgetTimerText2 = document.getElementById('gadget-timer-2');
-        } else {
-            clearAll();
-            if (ultiBtn) ultiBtn.style.background = '';
-        }
+    // ---- Denge ayarları (buradan oynayabilirsin) ----
+    const CFG = {
+        normal: { range: RANGE, speed: PLAYER_BULLET_SPEED * 0.85, rMin: 8, rMax: 34, dmgMin: 350, dmgMax: 1500 },
+        ult:    { range: RANGE * 1.7, speed: PLAYER_BULLET_SPEED * 0.55, rMin: 24, rMax: 90, dmgMin: 700, dmgMax: 2200, endDmg: 800, endRadius: 150 },
+        auraMin: 12, auraMax: 30,      // yol boyu itme menzili (maks 30)
+        tickMin: 6, tickMax: 30,       // yol boyu alan hasarı (maks 30)
+        tickEvery: 15,                 // kare
+        splashFrac: 0.35,              // isabette çevreye giden hasar oranı
+        endFrac: 0.4,                  // menzil sonunda / duvarda patlama hasar oranı
+        g1: { cd: 600, bonus: 0.45, speedMul: 1.2 },
+        g2: { cd: 900, radius: 95, life: 420, bonus: 0.3, heal: 2 }
     };
 
-    // ===== ANA SALDIRI =====
+    let shots = [], ring = null, lastT = 0, wasStarted = false;
+    const growth = s => clamp01(s.dist / s.range + s.bonus);
+
+    // ---- Güç şarjı: ana oyunun şarj sistemi bu karakter için kapatılır ----
+    const origCharge = window.chargeUlti;
+    window.chargeUlti = function () {
+        if (player.charType === ID) return;
+        return origCharge.apply(this, arguments);
+    };
+    function cigCharge(n) {
+        if (!gameStarted || player.charType !== ID || player.ultReady) return;
+        player.ultCharge = Math.min(100, player.ultCharge + n);
+        ultFill.style.width = player.ultCharge + '%';
+        if (player.ultCharge >= 100) {
+            player.ultReady = true; ultiBtn.classList.add('ready');
+            addFloatingNumber(player.x, player.y - 40, 'DEV ÇIĞ HAZIR!', '#74b9ff');
+        }
+    }
+
+    function mkShot(x, y, a, speed, range, bonus, ult) {
+        return { x, y, vx: Math.cos(a) * speed, vy: Math.sin(a) * speed, ang: a, speed, range, bonus,
+                 ult, hit: new Set(), rings: new Set(), dist: 0, tick: 0, g: 0, r: 8, aura: 12 };
+    }
+
+    // ---- Ateş / yetenekler ----
     const origFire = Player.prototype.fire;
     Player.prototype.fire = function (a, pull) {
-        if (this.charType !== CHAR_ID) return origFire.call(this, a, pull);
-        if (this.ammo < 1 || this.isDead) return;
-        if (!Number.isFinite(a)) a = this.angle || 0;
-
-        filizBullets.push({
-            x: this.x, y: this.y, sx: this.x, sy: this.y,
-            vx: Math.cos(a) * BULLET_SPEED,
-            vy: Math.sin(a) * BULLET_SPEED,
-            angle: a, life: 0, maxLife: 200,
-            mult: 1, growTimer: 0, isDead: false,
-            isUlti: false, hitTargets: new Set()
-        });
+        if (this.charType !== ID) return origFire.call(this, a, pull);
+        const primed = this.cigPrimed; this.cigPrimed = false;
+        const C = CFG.normal;
+        shots.push(mkShot(this.x, this.y, a, C.speed * (primed ? CFG.g1.speedMul : 1), C.range, primed ? CFG.g1.bonus : 0, false));
         this.consumeAmmo();
-        this.lastShotTime = Date.now();
     };
 
-    // ===== AKSESUAR 1 — CAN =====
-    const origGadget = Player.prototype.activateGadget;
+    const origG1 = Player.prototype.activateGadget;
     Player.prototype.activateGadget = function (a, pull) {
-        if (this.charType !== CHAR_ID) return origGadget.call(this, a, pull);
-        if (!aks1Ready || this.isDead) return;
-        this.hp = Math.min(this.maxHp, this.hp + AKS1_HEAL);
-        aks1Ready = false;
-        aks1CD = AKS1_CD;
-        if (gadgetBtn) gadgetBtn.classList.add('cooldown');
-        if (gadgetTimerText) gadgetTimerText.innerText = Math.ceil(AKS1_CD / 60) + "s";
-        addFloatingNumber(this.x, this.y - 30, '+' + AKS1_HEAL, C_HEAL);
-        burst(this.x, this.y, 10, C_HEAL);
+        if (this.charType !== ID) return origG1.call(this, a, pull);
+        if (!this.gadgetReady || this.isDead) return;
+        this.cigPrimed = true;
+        addFloatingNumber(this.x, this.y - 30, 'ÇIĞ HAZIR!', '#74b9ff');
+        this.setCooldown(); this.gadgetCooldown = CFG.g1.cd;
     };
 
-    // ===== AKSESUAR 2 — GERİ TEPME =====
-    const origGadget2 = Player.prototype.activateGadget2;
+    const origG2 = Player.prototype.activateGadget2;
     Player.prototype.activateGadget2 = function (a, pull) {
-        if (this.charType !== CHAR_ID) return origGadget2.call(this, a, pull);
-        if (!aks2Ready || this.isDead) return;
-        const ang = (a !== undefined && Number.isFinite(a)) ? a : this.angle;
-        recoilDir = { angle: ang + Math.PI, speed: 15, frames: 10 };
-        aks2Ready = false;
-        aks2CD = AKS2_CD;
-        if (gadgetBtn2) gadgetBtn2.classList.add('cooldown');
-        if (gadgetTimerText2) gadgetTimerText2.innerText = Math.ceil(AKS2_CD / 60) + "s";
-        addFloatingNumber(this.x, this.y - 30, 'GERİ TEPME!', C_LIGHT);
-        burst(this.x, this.y, 8, C_LIGHT);
+        if (this.charType !== ID) return origG2.call(this, a, pull);
+        if (!this.gadget2Ready || this.isDead) return;
+        const ang = a !== undefined ? a : this.angle;
+        const p = pull !== undefined ? clamp01(pull) : 1;
+        const dist = Math.max(60, RANGE * 0.7 * p), pad = WALL_THICKNESS + 40;
+        const tx = Math.max(pad, Math.min(canvas.width - pad, this.x + Math.cos(ang) * dist));
+        const ty = Math.max(pad, Math.min(canvas.height - pad, this.y + Math.sin(ang) * dist));
+        ring = { x: tx, y: ty, radius: CFG.g2.radius, life: CFG.g2.life, healAcc: 0 };
+        spawnParticles(tx, ty, '#74b9ff', 'normal');
+        addFloatingNumber(tx, ty, 'BÜYÜTME HALKASI!', '#74b9ff');
+        this.gadget2Ready = false; this.gadget2Cooldown = CFG.g2.cd; gadgetBtn2.classList.add('cooldown');
     };
 
-    // ===== ULTI — DEV MERMİ =====
-    const origUlti = Player.prototype.fireUlti;
+    const origUlt = Player.prototype.fireUlti;
     Player.prototype.fireUlti = function (a, pull) {
-        if (this.charType !== CHAR_ID) return origUlti.call(this, a, pull);
+        if (this.charType !== ID) return origUlt.call(this, a, pull);
         if (!this.ultReady || this.isDead) return;
-        if (!Number.isFinite(a)) a = this.angle || 0;
-
-        filizBullets.push({
-            x: this.x, y: this.y, sx: this.x, sy: this.y,
-            vx: Math.cos(a) * BULLET_SPEED * 0.8,
-            vy: Math.sin(a) * BULLET_SPEED * 0.8,
-            angle: a, life: 0, maxLife: 200,
-            mult: ULTI_BASE_MULT, growTimer: 0, isDead: false,
-            isUlti: true, hitTargets: new Set()
-        });
-
-        this.ultReady = false;
-        this.ultCharge = 0;
-        if (ultFill) ultFill.style.width = '0%';
-        if (ultiBtn) ultiBtn.classList.remove('ready');
-        addFloatingNumber(this.x, this.y - 40, 'DEV MERMİ!', C_MAIN);
-        screenFlash = 8;
+        const U = CFG.ult;
+        shots.push(mkShot(this.x, this.y, a, U.speed, U.range, 0, true));
+        addFloatingNumber(this.x, this.y - 40, 'DEV ÇIĞ!', '#74b9ff');
+        this.ultReady = false; this.ultCharge = 0; ultFill.style.width = '0%'; ultiBtn.classList.remove('ready');
     };
 
-    chainHook('onReset', function () { clearAll(); });
-
-    // ===== UPDATE =====
-    chainHook('onUpdate', function (ts) {
-        if (player.charType !== CHAR_ID) return;
-        if (!gameStarted) return;
-
-        if (ultiBtn && ultiBtn.style.display !== 'flex') ultiBtn.style.display = 'flex';
-        if (gadgetBtn && gadgetBtn.style.display !== 'flex') gadgetBtn.style.display = 'flex';
-        if (gadgetBtn2 && gadgetBtn2.style.display !== 'flex') gadgetBtn2.style.display = 'flex';
-
-        // CD
-        if (aks1CD > 0) {
-            aks1CD -= ts;
-            if (aks1CD <= 0) {
-                aks1CD = 0; aks1Ready = true;
-                if (gadgetBtn) gadgetBtn.classList.remove('cooldown');
-                if (gadgetTimerText) gadgetTimerText.innerText = '';
-            }
-        }
-        if (aks2CD > 0) {
-            aks2CD -= ts;
-            if (aks2CD <= 0) {
-                aks2CD = 0; aks2Ready = true;
-                if (gadgetBtn2) gadgetBtn2.classList.remove('cooldown');
-                if (gadgetTimerText2) gadgetTimerText2.innerText = '';
-            }
-        }
-
-        // Geri tepme hareket
-        if (recoilDir && recoilDir.frames > 0) {
-            player.x += Math.cos(recoilDir.angle) * recoilDir.speed * ts;
-            player.y += Math.sin(recoilDir.angle) * recoilDir.speed * ts;
-            player.x = clampPos(player.x, player.radius + WALL_THICKNESS, canvas.width - player.radius - WALL_THICKNESS);
-            player.y = clampPos(player.y, player.radius + WALL_THICKNESS, canvas.height - player.radius - WALL_THICKNESS);
-            recoilDir.frames -= ts;
-            if (recoilDir.frames <= 0) recoilDir = null;
-        }
-
-        // FX
-        for (let i = filizFX.length - 1; i >= 0; i--) {
-            const p = filizFX[i];
-            p.x += p.vx * ts; p.y += p.vy * ts;
-            p.vy += p.gravity * ts;
-            p.vx *= 0.95; p.vy *= 0.95;
-            p.life -= ts;
-            if (p.life <= 0) filizFX.splice(i, 1);
-        }
-        if (screenFlash > 0) screenFlash -= ts;
-    });
-
-    // ===== MERMİ ÇARPIŞMA =====
-    const _origUBL = window.updateBulletLogic;
-    window.updateBulletLogic = function (list, isBot, ts) {
-        if (!isBot && player.charType === CHAR_ID) {
-            for (let i = filizBullets.length - 1; i >= 0; i--) {
-                const b = filizBullets[i];
-                if (b.isDead) { filizBullets.splice(i, 1); continue; }
-
-                b.x += b.vx * ts; b.y += b.vy * ts;
-                b.life += ts;
-
-                // Büyüme
-                b.growTimer += ts;
-                const growInterval = b.isUlti ? 20 : BULLET_GROW_INTERVAL;
-                const growRate = b.isUlti ? ULTI_GROW_RATE : BULLET_GROW_RATE;
-                const maxMult = b.isUlti ? ULTI_MAX_MULT : BULLET_MAX_MULT;
-                while (b.growTimer >= growInterval && b.mult < maxMult) {
-                    b.growTimer -= growInterval;
-                    b.mult = Math.min(maxMult, b.mult + growRate);
-                }
-
-                // Menzil / duvar kontrolü
-                const distFromOrigin = getDist(b, { x: b.sx, y: b.sy });
-                if (distFromOrigin > RANGE) {
-                    filizBullets.splice(i, 1); continue;
-                }
-                if (b.x < WALL_THICKNESS || b.x > canvas.width - WALL_THICKNESS ||
-                    b.y < WALL_THICKNESS || b.y > canvas.height - WALL_THICKNESS) {
-                    filizBullets.splice(i, 1); continue;
-                }
-
-                // Siper
-                let hitWall = false;
-                for (const o of obstacles.concat(cactusWalls || [])) {
-                    if (getDist(b, o) < o.radius + BULLET_BASE_RADIUS * b.mult) {
-                        const dmg = Math.floor(BULLET_BASE_DMG * b.mult);
-                        o.hp -= dmg;
-                        addFloatingNumber(o.x, o.y, dmg, C_GROW);
-                        hitWall = true; break;
-                    }
-                }
-                if (hitWall) { filizBullets.splice(i, 1); continue; }
-
-                // Düşman çarpışma
-                let hitEnemy = null;
-                for (const e of getActiveEnemies()) {
-                    if (e.isDead) continue;
-                    if (b.hitTargets.has(e)) continue;
-                    if (getDist(b, e) < e.radius + BULLET_BASE_RADIUS * b.mult) {
-                        hitEnemy = e; break;
-                    }
-                }
-
-                if (hitEnemy) {
-                    if (b.isUlti) {
-                        // Ulti mermisi — patla
-                        hitEnemy.hp -= ULTI_DMG;
-                        addFloatingNumber(hitEnemy.x, hitEnemy.y, ULTI_DMG, C_MAIN);
-
-                        // AOE
-                        getActiveEnemies().forEach(e => {
-                            if (e === hitEnemy || e.isDead) return;
-                            if (getDist(b, e) < ULTI_AOE + e.radius) {
-                                e.hp -= ULTI_DMG * 0.5;
-                                addFloatingNumber(e.x, e.y, Math.floor(ULTI_DMG * 0.5), C_LIGHT);
-                                const ang = Math.atan2(e.y - b.y, e.x - b.x);
-                                e.kbX = Math.cos(ang) * ULTI_PUSH;
-                                e.kbY = Math.sin(ang) * ULTI_PUSH;
-                            }
-                        });
-
-                        // İtme
-                        const ang = Math.atan2(hitEnemy.y - b.y, hitEnemy.x - b.x);
-                        hitEnemy.kbX = Math.cos(ang) * ULTI_PUSH;
-                        hitEnemy.kbY = Math.sin(ang) * ULTI_PUSH;
-
-                        filizFX.push({ type: 'supernova', x: b.x, y: b.y, radius: 0, maxRadius: ULTI_AOE, life: 25, maxLife: 25 });
-                        screenShake = 15;
-                        screenFlash = 10;
-                        burst(b.x, b.y, 30, C_MAIN, 10);
-                        filizBullets.splice(i, 1);
-                    } else {
-                        const dmg = Math.floor(BULLET_BASE_DMG * b.mult);
-                        hitEnemy.hp -= dmg;
-                        addFloatingNumber(hitEnemy.x, hitEnemy.y, dmg, C_GROW);
-                        b.hitTargets.add(hitEnemy);
-
-                        // Max boyutta ise → patla
-                        if (b.mult >= BULLET_MAX_MULT) {
-                            getActiveEnemies().forEach(e => {
-                                if (e === hitEnemy || e.isDead) return;
-                                if (getDist(b, e) < AOE_RADIUS + e.radius) {
-                                    e.hp -= Math.floor(dmg * 0.5);
-                                    addFloatingNumber(e.x, e.y, Math.floor(dmg * 0.5), C_LIGHT);
-                                    const ang = Math.atan2(e.y - b.y, e.x - b.x);
-                                    e.kbX = Math.cos(ang) * AOE_PUSH;
-                                    e.kbY = Math.sin(ang) * AOE_PUSH;
-                                }
-                            });
-                            // İtme
-                            const ang = Math.atan2(hitEnemy.y - b.y, hitEnemy.x - b.x);
-                            hitEnemy.kbX = Math.cos(ang) * AOE_PUSH;
-                            hitEnemy.kbY = Math.sin(ang) * AOE_PUSH;
-
-                            filizFX.push({ type: 'growPop', x: b.x, y: b.y, radius: 0, maxRadius: AOE_RADIUS, life: 15, maxLife: 15 });
-                            burst(b.x, b.y, 15, C_MAIN, 6);
-                            filizBullets.splice(i, 1);
-                        }
-                    }
-                }
-            }
-        }
-        return _origUBL(list, isBot, ts);
-    };
-
-    // ===== ÇİZİM =====
-    chainHook('onDraw', function (ctx2) {
-        if (player.charType !== CHAR_ID || !gameStarted) return;
-
-        // Karakter
-        if (!player.isDead) {
-            ctx2.save();
-            ctx2.translate(player.x, player.y);
-            ctx2.fillStyle = 'rgba(0,0,0,0.35)';
-            ctx2.beginPath(); ctx2.ellipse(0, player.radius * 0.4, player.radius * 0.9, player.radius * 0.35, 0, 0, Math.PI * 2); ctx2.fill();
-            ctx2.rotate(player.angle);
-            ctx2.fillStyle = C_MAIN;
-            ctx2.beginPath(); ctx2.arc(0, 0, player.radius, 0, Math.PI * 2); ctx2.fill();
-            ctx2.strokeStyle = C_DARK; ctx2.lineWidth = 2.5; ctx2.stroke();
-            ctx2.beginPath(); ctx2.arc(player.radius - 4, 0, 5, 0, Math.PI * 2);
-            ctx2.fillStyle = 'rgba(0,0,0,.4)'; ctx2.fill();
-            ctx2.restore();
-
-            // HP bar
-            ctx2.save();
-            ctx2.fillStyle = '#444';
-            ctx2.fillRect(player.x - 20, player.y - player.radius - 15, 40, 5);
-            ctx2.fillStyle = '#2ecc71';
-            ctx2.fillRect(player.x - 20, player.y - player.radius - 15, Math.max(0, player.hp) / player.maxHp * 40, 5);
-            ctx2.restore();
-        }
-
-        // Mermiler (büyüyen)
-        filizBullets.forEach(b => {
-            const r = BULLET_BASE_RADIUS * b.mult;
-            ctx2.save();
-            ctx2.translate(b.x, b.y);
-            // Dış halka (gelişim)
-            ctx2.globalAlpha = 0.3;
-            ctx2.beginPath(); ctx2.arc(0, 0, r + 3, 0, Math.PI * 2);
-            ctx2.fillStyle = b.isUlti ? C_MAIN : C_GROW; ctx2.fill();
-            ctx2.globalAlpha = 1;
-            // Ana gövde
-            const grad = ctx2.createRadialGradient(0, 0, 0, 0, 0, r);
-            grad.addColorStop(0, C_LIGHT);
-            grad.addColorStop(1, b.isUlti ? C_DARK : C_MAIN);
-            ctx2.beginPath(); ctx2.arc(0, 0, r, 0, Math.PI * 2);
-            ctx2.fillStyle = grad; ctx2.fill();
-            ctx2.strokeStyle = C_WHITE; ctx2.lineWidth = 1.5; ctx2.stroke();
-            // Boyut göstergesi (küçük iç nokta)
-            if (b.mult > 1.5) {
-                ctx2.beginPath(); ctx2.arc(0, 0, r * 0.4, 0, Math.PI * 2);
-                ctx2.fillStyle = 'rgba(255,255,255,0.5)'; ctx2.fill();
-            }
-            ctx2.restore();
+    // ---- Patlama ----
+    function burst(x, y, radius, dmg, skip) {
+        getActiveEnemies().forEach(e => {
+            if (e === skip || e.hp <= 0) return;
+            if (getDist({ x, y }, e) < radius + e.radius) { e.hp -= dmg; addFloatingNumber(e.x, e.y, dmg, '#74b9ff'); }
         });
+        explosions.push({ x, y, radius: 0, maxRadius: radius, life: 14, maxLife: 14 });
+        spawnParticles(x, y, '#74b9ff', 'normal');
+    }
 
-        // FX
-        filizFX.forEach(fx => {
-            ctx2.save();
-            const a = fx.life / fx.maxLife;
-            if (fx.type === 'supernova') {
-                ctx2.globalAlpha = a * 0.7;
-                ctx2.beginPath(); ctx2.arc(fx.x, fx.y, fx.radius, 0, Math.PI * 2);
-                ctx2.strokeStyle = C_MAIN; ctx2.lineWidth = 5; ctx2.stroke();
-                ctx2.globalAlpha = a * 0.3;
-                ctx2.beginPath(); ctx2.arc(fx.x, fx.y, fx.radius * 0.7, 0, Math.PI * 2);
-                ctx2.fillStyle = C_LIGHT; ctx2.fill();
-            } else if (fx.type === 'growPop') {
-                ctx2.globalAlpha = a * 0.5;
-                ctx2.beginPath(); ctx2.arc(fx.x, fx.y, fx.radius, 0, Math.PI * 2);
-                ctx2.strokeStyle = C_LIGHT; ctx2.lineWidth = 3; ctx2.stroke();
-            } else {
-                ctx2.globalAlpha = Math.min(1, fx.life / 15);
-                ctx2.beginPath(); ctx2.arc(fx.x, fx.y, fx.size, 0, Math.PI * 2);
-                ctx2.fillStyle = fx.color; ctx2.fill();
+    // ---- Güncelleme ----
+    function updateShots(ts) {
+        const enemies = getActiveEnemies();
+        for (let i = shots.length - 1; i >= 0; i--) {
+            const s = shots[i], C = s.ult ? CFG.ult : CFG.normal;
+            s.x += s.vx * ts; s.y += s.vy * ts; s.dist += s.speed * ts;
+
+            if (ring && !s.rings.has(ring) && getDist(s, ring) < ring.radius) {
+                s.rings.add(ring); s.bonus += CFG.g2.bonus;
+                spawnParticles(s.x, s.y, '#74b9ff', 'normal');
+                addFloatingNumber(s.x, s.y - 15, 'BÜYÜDÜ!', '#74b9ff');
             }
-            ctx2.restore();
+            const g = growth(s); s.g = g; s.r = lerp(C.rMin, C.rMax, g);
+            s.aura = lerp(CFG.auraMin, CFG.auraMax, g);
+
+            if (Math.random() < 0.6 * Math.min(1, ts)) {
+                particles.push({ x: s.x + (Math.random() - .5) * s.r, y: s.y + (Math.random() - .5) * s.r,
+                    vx: (Math.random() - .5) * 1.5, vy: (Math.random() - .5) * 1.5, life: 20, maxLife: 30,
+                    color: '#dff6ff', size: 2 + s.r * 0.12, type: 'normal' });
+            }
+
+            const pad = WALL_THICKNESS + (s.ult ? s.r * 0.4 : 3);
+            const hitWall = s.x < pad || s.x > canvas.width - pad || s.y < pad || s.y > canvas.height - pad;
+            const ended = s.dist >= s.range;
+
+            if (s.ult) {
+                for (const o of obstacles) if (getDist(s, o) < o.radius + s.r) o.hp -= 30 * ts;
+                for (const e of enemies) {
+                    if (e.hp <= 0 || getDist(s, e) >= e.radius + s.r) continue;
+                    if (!s.hit.has(e)) {
+                        s.hit.add(e);
+                        const dmg = Math.round(lerp(C.dmgMin, C.dmgMax, g));
+                        e.hp -= dmg; addFloatingNumber(e.x, e.y, dmg, '#74b9ff');
+                        if (!e.isNest) { const kb = 16 + 8 * g; e.kbX = (e.kbX || 0) + Math.cos(s.ang) * kb; e.kbY = (e.kbY || 0) + Math.sin(s.ang) * kb; }
+                        screenShake = Math.max(screenShake, 6);
+                    } else if (!e.isNest) {
+                        e.x += Math.cos(s.ang) * (2 + 2 * g) * ts; e.y += Math.sin(s.ang) * (2 + 2 * g) * ts;
+                    }
+                }
+                if (hitWall || ended) { burst(s.x, s.y, C.endRadius, C.endDmg); screenShake = 14; shots.splice(i, 1); }
+                continue;
+            }
+
+            // normal Çığ Topu
+            let direct = null, obs = null;
+            for (const e of enemies) if (e.hp > 0 && getDist(s, e) < e.radius + s.r) { direct = e; break; }
+            for (const o of obstacles) if (getDist(s, o) < o.radius + s.r * 0.8) { obs = o; break; }
+
+            s.tick += ts;
+            const doTick = s.tick >= CFG.tickEvery; if (doTick) s.tick = 0;
+            for (const e of enemies) {
+                if (e.hp <= 0) continue;
+                const d = getDist(s, e);
+                if (d < e.radius + s.r + s.aura) {
+                    if (!e.isNest) {
+                        const ax = (e.x - s.x) / (d || 1), ay = (e.y - s.y) / (d || 1);
+                        const fx = ax * 0.6 + Math.cos(s.ang) * 0.4, fy = ay * 0.6 + Math.sin(s.ang) * 0.4;
+                        const p = (0.8 + 1.4 * g) * ts; e.x += fx * p; e.y += fy * p;
+                    }
+                    if (doTick) {
+                        const td = Math.round(lerp(CFG.tickMin, CFG.tickMax, g));
+                        e.hp -= td; addFloatingNumber(e.x, e.y, td, '#a5d8ff'); cigCharge(0.6);
+                    }
+                }
+            }
+
+            const dmg = Math.round(lerp(C.dmgMin, C.dmgMax, g));
+            if (direct) {
+                direct.hp -= dmg; addFloatingNumber(direct.x, direct.y, dmg, '#74b9ff');
+                if (!direct.isNest) { const kb = 4 + 10 * g; direct.kbX = (direct.kbX || 0) + Math.cos(s.ang) * kb; direct.kbY = (direct.kbY || 0) + Math.sin(s.ang) * kb; }
+                burst(s.x, s.y, s.r + 40, Math.round(dmg * CFG.splashFrac), direct);
+                cigCharge(6 + 14 * g); screenShake = Math.max(screenShake, 3 + 5 * g);
+                shots.splice(i, 1); continue;
+            }
+            if (obs) {
+                obs.hp -= Math.round(120 + 300 * g);
+                burst(s.x, s.y, s.r + 30, Math.round(dmg * CFG.endFrac));
+                shots.splice(i, 1); continue;
+            }
+            if (hitWall || ended) {
+                burst(s.x, s.y, s.r + 30, Math.round(dmg * CFG.endFrac));
+                shots.splice(i, 1);
+            }
+        }
+
+        if (ring) {
+            ring.life -= ts;
+            if (ring.life <= 0) ring = null;
+            else if (!player.isDead && getDist(player, ring) < ring.radius) {
+                const h = CFG.g2.heal * ts;
+                if (player.hp < player.maxHp) { player.hp = Math.min(player.maxHp, player.hp + h); ring.healAcc += h; }
+                if (ring.healAcc >= 120) { addFloatingNumber(player.x, player.y, '+' + Math.floor(ring.healAcc), '#2ecc71'); ring.healAcc = 0; }
+            }
+        }
+    }
+
+    // ---- Çizim ----
+    function draw() {
+        ctx.save();
+        if (ring) {
+            const a = Math.min(1, ring.life / 60);
+            ctx.save(); ctx.translate(ring.x, ring.y); ctx.globalAlpha = 0.5 * a;
+            ctx.beginPath(); ctx.arc(0, 0, ring.radius, 0, Math.PI * 2);
+            ctx.fillStyle = 'rgba(116,185,255,0.18)'; ctx.fill();
+            ctx.strokeStyle = '#74b9ff'; ctx.lineWidth = 3; ctx.stroke();
+            ctx.rotate(Date.now() / 500); ctx.setLineDash([12, 14]);
+            ctx.beginPath(); ctx.arc(0, 0, ring.radius - 10, 0, Math.PI * 2);
+            ctx.strokeStyle = '#dff6ff'; ctx.lineWidth = 2; ctx.stroke(); ctx.restore();
+        }
+        if (player.cigPrimed && !player.isDead) {
+            ctx.beginPath(); ctx.arc(player.x, player.y, player.radius + 6 + Math.sin(Date.now() / 120) * 2, 0, Math.PI * 2);
+            ctx.strokeStyle = '#74b9ff'; ctx.lineWidth = 3; ctx.stroke();
+        }
+        // nişan önizlemeleri
+        if (aimData.active && player.ammo >= 1 && !player.isDead) {
+            const C = CFG.normal, ex = player.x + Math.cos(aimData.angle) * C.range, ey = player.y + Math.sin(aimData.angle) * C.range;
+            ctx.save(); ctx.setLineDash([6, 6]); ctx.strokeStyle = 'rgba(116,185,255,0.6)'; ctx.lineWidth = 2;
+            ctx.beginPath(); ctx.arc(ex, ey, C.rMax, 0, Math.PI * 2); ctx.stroke(); ctx.restore();
+        }
+        if (ultAim.active && player.ultReady && !player.isDead) {
+            const U = CFG.ult, a = ultAim.angle, nx = -Math.sin(a), ny = Math.cos(a);
+            const ex = player.x + Math.cos(a) * U.range, ey = player.y + Math.sin(a) * U.range;
+            ctx.beginPath();
+            ctx.moveTo(player.x + nx * U.rMin, player.y + ny * U.rMin); ctx.lineTo(ex + nx * U.rMax, ey + ny * U.rMax);
+            ctx.lineTo(ex - nx * U.rMax, ey - ny * U.rMax); ctx.lineTo(player.x - nx * U.rMin, player.y - ny * U.rMin);
+            ctx.closePath(); ctx.fillStyle = 'rgba(116,185,255,0.18)'; ctx.fill();
+            ctx.strokeStyle = 'rgba(116,185,255,0.6)'; ctx.lineWidth = 2; ctx.stroke();
+        }
+        if (gadAim2.active && player.gadget2Ready && !player.isDead) {
+            const p = (gadAim2.pull === undefined || gadAim2.pull < 0.05) ? 1 : gadAim2.pull;
+            const dist = Math.max(60, RANGE * 0.7 * p);
+            const tx = player.x + Math.cos(gadAim2.angle) * dist, ty = player.y + Math.sin(gadAim2.angle) * dist;
+            ctx.save(); ctx.setLineDash([5, 5]); ctx.strokeStyle = 'rgba(116,185,255,0.6)'; ctx.lineWidth = 2;
+            ctx.beginPath(); ctx.moveTo(player.x, player.y); ctx.lineTo(tx, ty); ctx.stroke();
+            ctx.setLineDash([]); ctx.beginPath(); ctx.arc(tx, ty, CFG.g2.radius, 0, Math.PI * 2);
+            ctx.fillStyle = 'rgba(116,185,255,0.15)'; ctx.fill(); ctx.stroke(); ctx.restore();
+        }
+        // mermiler
+        shots.forEach(s => {
+            ctx.save(); ctx.translate(s.x, s.y);
+            if (!s.ult) {
+                ctx.beginPath(); ctx.arc(0, 0, s.r + s.aura, 0, Math.PI * 2);
+                ctx.strokeStyle = 'rgba(165,216,255,0.25)'; ctx.lineWidth = 2; ctx.stroke();
+            } else { ctx.shadowColor = '#74b9ff'; ctx.shadowBlur = 25; }
+            const grad = ctx.createRadialGradient(-s.r * 0.3, -s.r * 0.3, s.r * 0.1, 0, 0, s.r);
+            grad.addColorStop(0, '#ffffff'); grad.addColorStop(1, '#74b9ff');
+            ctx.beginPath(); ctx.arc(0, 0, s.r, 0, Math.PI * 2); ctx.fillStyle = grad; ctx.fill();
+            ctx.strokeStyle = '#0984e3'; ctx.lineWidth = 3; ctx.stroke();
+            ctx.shadowBlur = 0; ctx.rotate(Date.now() / 120); ctx.strokeStyle = 'rgba(255,255,255,0.7)'; ctx.lineWidth = 2;
+            for (let k = 0; k < 3; k++) {
+                ctx.rotate(Math.PI * 2 / 3); ctx.beginPath();
+                ctx.arc(0, 0, s.r * 0.6, 0, Math.PI / 3); ctx.stroke();
+            }
+            ctx.restore();
         });
+        ctx.restore();
+    }
 
-        // Aim
-        if (aimData.active && !player.isDead && player.ammo >= 1) {
-            const ang = aimData.angle;
-            ctx2.save();
-            ctx2.translate(player.x, player.y);
-            ctx2.rotate(ang);
-            ctx2.fillStyle = 'rgba(255,255,255,0.08)';
-            ctx2.fillRect(0, -8, RANGE, 16);
-            ctx2.strokeStyle = C_LIGHT;
-            ctx2.globalAlpha = 0.5;
-            ctx2.lineWidth = 1.5;
-            ctx2.strokeRect(0, -8, RANGE, 16);
-            // Büyüme işareti (uzakta büyük daire)
-            ctx2.beginPath(); ctx2.arc(RANGE * 0.7, 0, 12, 0, Math.PI * 2);
-            ctx2.strokeStyle = C_MAIN; ctx2.lineWidth = 2; ctx2.stroke();
-            ctx2.beginPath(); ctx2.arc(RANGE, 0, 18, 0, Math.PI * 2);
-            ctx2.strokeStyle = C_LIGHT; ctx2.lineWidth = 2; ctx2.stroke();
-            ctx2.globalAlpha = 1;
-            ctx2.restore();
-        }
+    // ---- Arayüz kurulumu (oyun başlayınca) ----
+    function setupUI() {
+        if (player.charType !== ID) return;
+        ultiBtn.style.display = 'flex'; gadgetBtn.style.display = 'flex'; gadgetBtn2.style.display = 'flex';
+        gadgetBtn.innerHTML = 'HAZIRLIK<br><span id="gadget-timer"></span>';
+        gadgetBtn2.innerHTML = 'BÜYÜTME<br>HALKASI<br><span id="gadget-timer-2"></span>';
+        gadgetTimerText = document.getElementById('gadget-timer');
+        gadgetTimerText2 = document.getElementById('gadget-timer-2');
+        player.cigPrimed = false; shots = []; ring = null;
+        ultFill.style.width = '0%'; ultiBtn.classList.remove('ready');
+    }
 
-        // Ekran flash
-        if (screenFlash > 0) {
-            ctx2.save();
-            ctx2.globalAlpha = screenFlash / 10 * 0.4;
-            ctx2.fillStyle = C_MAIN;
-            ctx2.fillRect(0, 0, canvas.width, canvas.height);
-            ctx2.restore();
-        }
-    });
+    // Kendi döngüm: ana döngüden sonra çalışır, başka mod dosyalarının hook'larını ezmez
+    function loop(t) {
+        requestAnimationFrame(loop);
+        const ts = Math.min(3, (t - lastT) / 16.666); lastT = t;
+        if (!gameStarted) { wasStarted = false; shots = []; ring = null; return; }
+        if (!wasStarted) { wasStarted = true; setupUI(); }
+        if (player.charType !== ID) { shots = []; ring = null; return; }
+        updateShots(ts); draw();
+    }
+    requestAnimationFrame(loop);
 
-    console.log('[MOD YÜKLENDİ] filiz (büyüyen mermi)');
+    // ---- Karakter kartı ----
+    (function addCard() {
+        const box = document.querySelector('.char-select-container');
+        if (!box || document.getElementById('char-' + ID)) return;
+        const card = document.createElement('div');
+        card.className = 'char-card'; card.id = 'char-' + ID;
+        card.innerHTML = '<div class="char-color-preview" style="background:#74b9ff;"></div><span>Çığ</span><small>Hasar: 350-1500<br>Güç: Dev Çığ</small>';
+        card.addEventListener('click', () => {
+            selectedCharacter = ID;
+            document.querySelectorAll('.char-card').forEach(e => e.classList.remove('selected'));
+            card.classList.add('selected');
+        });
+        box.appendChild(card);
+        const st = document.createElement('style');
+        st.textContent = '.char-card{width:calc(20% - 8px)!important;min-width:60px!important}';
+        document.head.appendChild(st);
+    })();
 })();
