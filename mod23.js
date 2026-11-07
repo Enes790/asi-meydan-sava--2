@@ -1,5 +1,5 @@
 // ============================================================================
-// mod32.js - "Sarsıcı" karakteri (fizik / çarpışma ustası)
+// mod32.js - "Sarsıcı" karakteri (fizik / çarpışma ustası)  [v2: tek hedef]
 // Ana dosyaya dokunmaz. index.html'de TÜM mod script'lerinden SONRA eklenmeli:
 //   <script src="mod32.js"></script>
 //
@@ -7,36 +7,36 @@
 // çağırma yok, temas hasarı yok. Düşmanları FIRLATIR; hasarı düşmanın duvara,
 // siperlere ve diğer düşmanlara ÇARPMA HIZI verir (hız x 45). Çarpan düşman
 // ayrıca yaklaşık 1 saniye sersemler (ateş edemez).
-//  - Ana saldırı (Kuvvet Dalgası): Etrafındaki düşmanları senden uzağa fırlatır.
-//    Sağ joystick'i hangi yöne çekersen fırlatma o yöne doğru kayar, yani
-//    düşmanları istediğin duvara yönlendirirsin.
-//  - Yetenek 1 (ÇEKİM): Etraftaki düşmanları sana doğru çeker; birbirlerine
-//    çarpıp hasar alırlar, hemen ardından dalga ile fırlatılırlar.
-//  - Yetenek 2 (SEKME DUVARI): 6 saniye boyunca duvarlar ve siperler zıplatır;
-//    fırlatılan düşman sürekli sekip her çarpışmada tekrar hasar alır.
-//  - Güç (ÇÖKÜŞ): Haritadaki TÜM düşmanları dışa doğru çok hızlı fırlatır,
-//    6 saniye sekme duvarı + %20 fazla çarpma hasarı verir.
+//  - Ana saldırı (Kuvvet Dalgası): TEK düşmanı fırlatır. Sağ joystick'i bir
+//    düşmana doğru çek-bırak: o yöndeki (±40°, 300 birim) en uygun TEK düşman
+//    fırlar. Fırlayan düşman başka bir düşmana çarparsa ikisi de hasar alır ve
+//    çarpışıp seker. Kimse yoksa cephane harcanmaz.
+//  - Yetenek 1 (ÇEKİM): Etraftaki düşmanları sana doğru çeker.
+//  - Yetenek 2 (SEKME DUVARI): 5 saniye boyunca duvarlar ve siperler zıplatır.
+//  - Güç (ÇÖKÜŞ): Yakındaki (280 birim) düşmanları dışa fırlatır, 4 saniye sekme
+//    duvarı açar. Her düşman ultiden en fazla 3 kez hasar alır.
 //  - Bar: çarpışma hasarıyla ve zamanla dolar.
 // ============================================================================
 (function () {
     'use strict';
     const ID = 'sarsici';
     const cl = (v, a, b) => Math.max(a, Math.min(b, v));
+    const angDiff = (a, b) => { let d = a - b; while (d > Math.PI) d -= Math.PI * 2; while (d < -Math.PI) d += Math.PI * 2; return d; };
 
     window.GAME_EXT = window.GAME_EXT || { characters: {}, modes: {}, obstacleTypes: {}, botTypes: {}, hooks: {} };
     window.GAME_EXT.characters[ID] = { color: '#fd79a8', hp: 4000, speed: 3.3 };
 
     // ---- Denge ayarları (buradan oynayabilirsin) ----
     const CFG = {
-        pulse: { radius: 250, speed: 22, aimBias: 0.7 },
+        pulse: { range: RANGE, cone: 40 * Math.PI / 180, speed: 22, aimBias: 0.7 },   // cone sadece HEDEF SEÇİMİ içindir, hasar vermez
         pull: { radius: 330, speed: 15, cd: 540 },
-        bounce: { time: 360, cd: 780, rest: 0.92, friction: 0.93 },
+        bounce: { time: 300, cd: 780, rest: 0.9, friction: 0.93 },
         rest: 0.35, friction: 0.9,           // normal duvar sekmesi / sürtünme
-        k: 45, impactMin: 4, dmgCap: 1800, maxSpeed: 45, obsFrac: 0.25,
+        k: 45, impactMin: 4, dmgCap: 1500, maxSpeed: 45, obsFrac: 0.25,
         ee: { k: 40, rest: 0.5 },            // düşman-düşman çarpışması
         stunMs: 1000, hitCd: 6,
-        ult: { speed: 32, time: 360, mul: 1.2 },
-        passive: 0.02, chargeDiv: 12
+        ult: { radius: 280, speed: 26, time: 240, maxImpacts: 3, dmgCap: 1000, rest: 0.8 },
+        passive: 0.015, chargeDiv: 20
     };
 
     let movers = new Set(), rings = [], bounceT = 0, boostT = 0, lastT = 0, wasStarted = false;
@@ -69,19 +69,29 @@
     }
     function impact(e, vn, ix, iy, k) {
         if (vn < CFG.impactMin || (e.cHit || 0) > 0) return 0;
-        const dmg = Math.round(Math.min(CFG.dmgCap, vn * (k || CFG.k) * (boostT > 0 ? CFG.ult.mul : 1)));
-        e.hp -= dmg; addFloatingNumber(e.x, e.y, dmg, '#fd79a8'); charge(dmg / CFG.chargeDiv);
+        const ultOn = boostT > 0;
+        if (ultOn && e.cUlt !== undefined) {              // ulti hasarı sınırı (kasmayı da önler)
+            if (e.cUlt <= 0) { e.cvx *= 0.4; e.cvy *= 0.4; return 0; }
+            e.cUlt--;
+        }
+        const cap = ultOn ? CFG.ult.dmgCap : CFG.dmgCap;
+        const dmg = Math.round(Math.min(cap, vn * (k || CFG.k)));
+        e.hp -= dmg; charge(dmg / CFG.chargeDiv);
         e.cHit = CFG.hitCd;
-        if (e.shootInterval !== undefined) e.lastShot = Math.max(e.lastShot || 0, Date.now() - e.shootInterval + CFG.stunMs);
-        spawnParticles(ix, iy, '#fd79a8', 'normal');
-        rings.push({ x: ix, y: iy, r: 6, max: 20 + vn * 1.2, life: 10, maxLife: 10, col: '255,234,167', inward: false });
-        screenShake = Math.max(screenShake, Math.min(10, vn / 3));
+        const now = Date.now();
+        if (now - (e.cNum || 0) > 250) { addFloatingNumber(e.x, e.y, dmg, '#fd79a8'); e.cNum = now; }
+        if (e.shootInterval !== undefined) e.lastShot = Math.max(e.lastShot || 0, now - e.shootInterval + CFG.stunMs);
+        for (let i = 0; i < 5; i++) particles.push({ x: ix, y: iy, vx: (Math.random() - .5) * 6, vy: (Math.random() - .5) * 6, life: 20, maxLife: 40, color: '#fd79a8', size: 3, type: 'normal' });
+        if (rings.length < 12) rings.push({ x: ix, y: iy, r: 6, max: 20 + vn * 1.2, life: 10, maxLife: 10, col: '255,234,167', inward: false });
+        screenShake = Math.max(screenShake, Math.min(6, vn / 4));
         return dmg;
     }
 
     function physics(ts, enemies) {
-        const bounce = bounceT > 0, rest = bounce ? CFG.bounce.rest : CFG.rest;
+        const bounce = bounceT > 0, ultOn = boostT > 0;
+        const rest = bounce ? (ultOn ? CFG.ult.rest : CFG.bounce.rest) : CFG.rest;
         const fr = Math.pow(bounce ? CFG.bounce.friction : CFG.friction, ts);
+        const blk = blockers();
         const alive = new Set(enemies);
         movers.forEach(m => { if (!alive.has(m)) { m.cvx = m.cvy = 0; movers.delete(m); } });
         enemies.forEach(e => { if (e.cHit > 0) e.cHit -= ts; });
@@ -93,7 +103,7 @@
             else if (e.x > maxX) { e.x = maxX; if (e.cvx > 0) { impact(e, e.cvx, e.x + e.radius, e.y); e.cvx = -e.cvx * rest; } }
             if (e.y < minY) { e.y = minY; if (e.cvy < 0) { impact(e, -e.cvy, e.x, e.y - e.radius); e.cvy = -e.cvy * rest; } }
             else if (e.y > maxY) { e.y = maxY; if (e.cvy > 0) { impact(e, e.cvy, e.x, e.y + e.radius); e.cvy = -e.cvy * rest; } }
-            for (const o of blockers()) {
+            for (const o of blk) {
                 const d = getDist(e, o) || 0.001, min = e.radius + o.radius;
                 if (d >= min) continue;
                 const nx = (e.x - o.x) / d, ny = (e.y - o.y) / d;
@@ -109,7 +119,7 @@
             if (Math.hypot(e.cvx, e.cvy) < 0.6) { e.cvx = e.cvy = 0; movers.delete(e); }
         });
 
-        // düşman - düşman çarpışması
+        // düşman - düşman çarpışması: ikisi de hasar alır ve seker
         for (let i = 0; i < enemies.length; i++) for (let j = i + 1; j < enemies.length; j++) {
             const a = enemies[i], b = enemies[j];
             if (!(a.cvx || a.cvy || b.cvx || b.cvy)) continue;
@@ -130,20 +140,31 @@
         }
     }
 
-    // ---- Ana saldırı: Kuvvet Dalgası ----
+    // ---- Ana saldırı: Kuvvet Dalgası (TEK hedef) ----
+    function pickTarget(a) {
+        const P = CFG.pulse;
+        let best = null, bs = 1e9;
+        getActiveEnemies().forEach(e => {
+            if (e.hp <= 0 || e.isNest) return;
+            const d = getDist(player, e);
+            if (d > P.range + e.radius) return;
+            const diff = Math.abs(angDiff(getAngle(player, e), a));
+            if (diff > P.cone) return;
+            const score = diff * 250 + d;
+            if (score < bs) { bs = score; best = e; }
+        });
+        return best;
+    }
     const origFire = Player.prototype.fire;
     Player.prototype.fire = function (a, pull) {
         if (this.charType !== ID) return origFire.call(this, a, pull);
-        const P = CFG.pulse;
-        getActiveEnemies().forEach(e => {
-            if (e.hp <= 0 || e.isNest) return;
-            const d = getDist(this, e);
-            if (d > P.radius + e.radius) return;
-            const rx = (e.x - this.x) / (d || 1), ry = (e.y - this.y) / (d || 1);
-            launch(e, rx + Math.cos(a) * P.aimBias, ry + Math.sin(a) * P.aimBias, P.speed * (1.2 - 0.4 * Math.min(1, d / P.radius)));
-        });
-        rings.push({ x: this.x, y: this.y, r: 20, max: P.radius, life: 14, maxLife: 14, col: '253,121,168', inward: false });
-        screenShake = Math.max(screenShake, 4);
+        const t = pickTarget(a);
+        if (!t) { addFloatingNumber(this.x, this.y - 30, 'KAÇIRDI!', '#e74c3c'); return; }   // cephane harcanmaz
+        const P = CFG.pulse, d = getDist(this, t);
+        const rx = (t.x - this.x) / (d || 1), ry = (t.y - this.y) / (d || 1);
+        launch(t, rx + Math.cos(a) * P.aimBias, ry + Math.sin(a) * P.aimBias, P.speed * (1.2 - 0.4 * Math.min(1, d / P.range)));
+        rings.push({ x: t.x, y: t.y, r: 10, max: 45, life: 12, maxLife: 12, col: '253,121,168', inward: false });
+        screenShake = Math.max(screenShake, 3);
         this.consumeAmmo();
     };
 
@@ -177,15 +198,17 @@
     Player.prototype.fireUlti = function (a, pull) {
         if (this.charType !== ID) return origUlt.call(this, a, pull);
         if (!this.ultReady || this.isDead) return;
+        const U = CFG.ult;
         getActiveEnemies().forEach(e => {
-            if (e.hp <= 0 || e.isNest) return;
+            if (e.hp <= 0 || e.isNest || getDist(this, e) > U.radius + e.radius) return;
             let dx = e.x - this.x, dy = e.y - this.y;
             if (Math.hypot(dx, dy) < 1) { const r = Math.random() * Math.PI * 2; dx = Math.cos(r); dy = Math.sin(r); }
-            launch(e, dx, dy, CFG.ult.speed);
+            e.cUlt = U.maxImpacts;
+            launch(e, dx, dy, U.speed);
         });
-        bounceT = Math.max(bounceT, CFG.ult.time); boostT = CFG.ult.time;
-        rings.push({ x: this.x, y: this.y, r: 20, max: 420, life: 24, maxLife: 24, col: '253,121,168', inward: false });
-        screenShake = 16; addFloatingNumber(this.x, this.y - 40, 'ÇÖKÜŞ!', '#fd79a8');
+        bounceT = Math.max(bounceT, U.time); boostT = U.time;
+        rings.push({ x: this.x, y: this.y, r: 20, max: U.radius, life: 20, maxLife: 20, col: '253,121,168', inward: false });
+        screenShake = 10; addFloatingNumber(this.x, this.y - 40, 'ÇÖKÜŞ!', '#fd79a8');
         this.ultReady = false; this.ultCharge = 0; ultFill.style.width = '0%'; ultiBtn.classList.remove('ready');
     };
 
@@ -201,13 +224,11 @@
     // ---- Çizim ----
     function draw() {
         ctx.save();
-        // sekme duvarı çerçevesi
+        // sekme duvarı çerçevesi (gölgesiz, hafif)
         if (bounceT > 0) {
-            const a = Math.min(1, bounceT / 40) * (0.55 + 0.25 * Math.sin(Date.now() / 120));
-            ctx.save(); ctx.globalAlpha = a; ctx.strokeStyle = '#ffeaa7'; ctx.lineWidth = 6;
-            ctx.shadowColor = '#fd79a8'; ctx.shadowBlur = 18;
+            ctx.save(); ctx.globalAlpha = Math.min(1, bounceT / 40) * (0.55 + 0.25 * Math.sin(Date.now() / 120));
+            ctx.strokeStyle = '#ffeaa7'; ctx.lineWidth = 5;
             ctx.strokeRect(WALL_THICKNESS, WALL_THICKNESS, canvas.width - WALL_THICKNESS * 2, canvas.height - WALL_THICKNESS * 2);
-            blockers().forEach(o => { ctx.beginPath(); ctx.arc(o.x, o.y, o.radius + 3, 0, Math.PI * 2); ctx.stroke(); });
             ctx.restore();
         }
         // fırlatılan düşmanların hız izi
@@ -225,13 +246,20 @@
             ctx.save(); ctx.strokeStyle = 'rgba(' + r.col + ',' + (1 - t) + ')'; ctx.lineWidth = 4;
             ctx.beginPath(); ctx.arc(r.x, r.y, Math.max(1, rad), 0, Math.PI * 2); ctx.stroke(); ctx.restore();
         });
-        // nişan önizlemeleri
+        // nişan önizlemesi: hangi düşman fırlayacak?
         if (aimData.active && player.ammo >= 1 && !player.isDead) {
-            ctx.save(); ctx.setLineDash([8, 8]); ctx.strokeStyle = 'rgba(253,121,168,0.55)'; ctx.lineWidth = 2;
-            ctx.beginPath(); ctx.arc(player.x, player.y, CFG.pulse.radius, 0, Math.PI * 2); ctx.stroke();
-            ctx.setLineDash([]); ctx.lineWidth = 4;
-            ctx.beginPath(); ctx.moveTo(player.x, player.y);
-            ctx.lineTo(player.x + Math.cos(aimData.angle) * 90, player.y + Math.sin(aimData.angle) * 90); ctx.stroke(); ctx.restore();
+            const t = pickTarget(aimData.angle);
+            ctx.save(); ctx.lineWidth = 3;
+            if (t) {
+                ctx.setLineDash([6, 6]); ctx.strokeStyle = 'rgba(253,121,168,0.7)';
+                ctx.beginPath(); ctx.moveTo(player.x, player.y); ctx.lineTo(t.x, t.y); ctx.stroke();
+                ctx.setLineDash([]); ctx.beginPath(); ctx.arc(t.x, t.y, t.radius + 8, 0, Math.PI * 2); ctx.stroke();
+            } else {
+                ctx.strokeStyle = 'rgba(255,255,255,0.3)'; ctx.setLineDash([4, 8]);
+                ctx.beginPath(); ctx.moveTo(player.x, player.y);
+                ctx.lineTo(player.x + Math.cos(aimData.angle) * 90, player.y + Math.sin(aimData.angle) * 90); ctx.stroke();
+            }
+            ctx.restore();
         }
         if (gadAim.active && player.gadgetReady && !player.isDead) {
             ctx.save(); ctx.setLineDash([8, 8]); ctx.strokeStyle = 'rgba(162,155,254,0.6)'; ctx.lineWidth = 2;
@@ -239,7 +267,7 @@
         }
         if (ultAim.active && player.ultReady && !player.isDead) {
             ctx.save(); ctx.setLineDash([12, 10]); ctx.strokeStyle = 'rgba(253,121,168,0.6)'; ctx.lineWidth = 3;
-            ctx.beginPath(); ctx.arc(player.x, player.y, 300, 0, Math.PI * 2); ctx.stroke(); ctx.restore();
+            ctx.beginPath(); ctx.arc(player.x, player.y, CFG.ult.radius, 0, Math.PI * 2); ctx.stroke(); ctx.restore();
         }
         ctx.restore();
     }
