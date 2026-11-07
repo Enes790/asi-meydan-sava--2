@@ -1,636 +1,425 @@
-// ========== mod34.js (SÜRÜ) — Çağırıcı (v2 düzeltilmiş) ==========
+// ============================================================================
+// mod30.js - "Çağrı" karakteri (çağırıcı)
+// Ana dosyaya dokunmaz. index.html'de TÜM mod script'lerinden SONRA eklenmeli:
+//   <script src="mod30.js"></script>
+//
+// Çağrı kendisi HİÇ hasar vermez (mermi yok, alan yok, temas yok). Tüm hasarı
+// çağırdığı yaratıklar verir.
+//  - Ana saldırı: Sağ joystick'i çek-bırak -> nişan yönünde, çektiğin mesafede
+//    bir ÇIRAK doğar (1 cephane harcar). Aynı anda en fazla 3 çırak; 4.'yü
+//    çağırırsan en eskisi kaybolur. Çıraklar en yakın düşmana koşar ve vurur.
+//    Siperlerin, kaktüs duvarlarının ve arena duvarlarının üstünden geçemezler.
+//  - Özgün mekanik - BAĞ HATTI: birbirine 340 birimden yakın iki yardımcı
+//    arasında enerji hattı oluşur. Hattan geçen düşman hasar alır, hattı
+//    kesen düşman mermileri yok olur. Konumlandırma oyunu!
+//  - Yetenek 1 (YER DEĞİŞ): Nişan yönündeki yardımcıyla yer değiştirirsin
+//    (kısa süre dokunulmaz).
+//  - Yetenek 2 (FEDA ET): Nişan yönündeki çırağı patlatır; düşmanlara hasar
+//    verir ve seni iyileştirir.
+//  - Güç (TİTAN): Bar zamanla ve yardımcıların vuruşlarıyla dolar. Dolunca dev
+//    bir Titan çağırır (aynı anda 1 tane). Yer sarsıp alan hasarı verir.
+//  - Düşman mermileri yardımcılara da isabet eder (siper görevi görürler).
+// ============================================================================
 (function () {
     'use strict';
+    const ID = 'cagri';
+    const cl = (v, a, b) => Math.max(a, Math.min(b, v));
+    const clamp01 = v => Math.max(0, Math.min(1, v));
 
-    const CHAR_ID = 'suru';
-    const C_MAIN = '#8e44ad';
-    const C_LIGHT = '#a569bd';
-    const C_DARK = '#4a235a';
-    const C_SHADOW = '#2c1a3d';
-    const C_TOWER = '#5d6d7e';
-    const C_BOMB = '#c0392b';
-    const C_ELITE = '#f1c40f';
-    const C_BOND = '#9b59b6';
-    const C_WHITE = '#ffffff';
+    window.GAME_EXT = window.GAME_EXT || { characters: {}, modes: {}, obstacleTypes: {}, botTypes: {}, hooks: {} };
+    window.GAME_EXT.characters[ID] = { color: '#55efc4', hp: 3400, speed: 3.4 };
 
-    const CHAR_HP = 3000;
-    const CHAR_SPEED = 3.4;
-    const MAIN_DMG = 250;
+    // ---- Denge ayarları (buradan oynayabilirsin) ----
+    const CFG = {
+        maxMinions: 3,
+        m: { radius: 14, hp: 700, speed: 3.1, life: 900, dmg: 150, atkEvery: 40, chargeHit: 0.6 },
+        t: { radius: 36, hp: 4000, speed: 1.7, life: 720, slamR: 130, slamDmg: 450, slamEvery: 75, kb: 9 },
+        link: { max: 340, dmg: 45, every: 20, chargeTick: 0.3 },
+        passive: 0.03,                       // kare başına bar dolumu
+        g1: { cd: 600, inv: 24 },
+        g2: { cd: 720, r: 130, dmg: 600, heal: 350, kb: 8 }
+    };
 
-    const BAR_MAX = 1000;
-    const BOND_PCT = 0.4;
-    const ELITE_KILLS = 3;
-    const MAX_MINIONS = 9;
+    let minions = [], titan = null, lastT = 0, wasStarted = false, linkT = 0, swapInv = 0;
 
-    const AKS1_CD = 900;
-    const AKS1_HEAL = 300;
-    const AKS2_CD = 1080;
-    const AKS2_DURATION = 300;
-    const AKS2_BAR_MULT = 3;
+    const blockers = () => obstacles.concat(cactusWalls || []);
+    const angDiff = (a, b) => { let d = a - b; while (d > Math.PI) d -= Math.PI * 2; while (d < -Math.PI) d += Math.PI * 2; return d; };
 
-    const ULTI_DURATION = 480;
-    const ULTI_SPEED_BUFF = 1.5;
-
-    const M1_HP = 600, M1_SPD = 2.0, M1_DMG = 200, M1_RAD = 12;
-    const M2_HP = 400, M2_SPD = 0, M2_DMG = 250, M2_RAD = 14, M2_RANGE = 180, M2_INT = 60;
-    const M3_HP = 300, M3_SPD = 1.5, M3_DMG = 400, M3_RAD = 10, M3_AOE = 60;
-
-    window.GAME_EXT.characters[CHAR_ID] = { color: C_MAIN, hp: CHAR_HP, speed: CHAR_SPEED };
-
-    let suruBullets = [];
-    let minions = [];
-    let suruBar = 0;
-    let suruFX = [];
-    let screenFlash = 0;
-    let aks1CD = 0, aks1Ready = true;
-    let aks2CD = 0, aks2Ready = true;
-    let aks2Active = 0;
-    let ultiBuffActive = 0;
-
-    if (!window._suruOrigDrawEntity) {
-        window._suruOrigDrawEntity = window.drawEntity;
-        window.drawEntity = function (e, isP) {
-            if (!e) return;
-            if (isP && player && player.charType === CHAR_ID) return;
-            if (e._isMinion) return;
-            return window._suruOrigDrawEntity.call(this, e, isP);
-        };
+    // ---- Güç şarjı: ana oyunun şarjı bu karakter için kapalı, kendi barımız var ----
+    const prevCharge = window.chargeUlti;
+    window.chargeUlti = function () {
+        if (player.charType === ID) return;
+        return prevCharge.apply(this, arguments);
+    };
+    function charge(n) {
+        if (!gameStarted || player.charType !== ID || player.ultReady || titan) return;
+        player.ultCharge = Math.min(100, player.ultCharge + n);
+        ultFill.style.width = player.ultCharge + '%';
+        if (player.ultCharge >= 100) {
+            player.ultReady = true; ultiBtn.classList.add('ready');
+            addFloatingNumber(player.x, player.y - 40, 'TİTAN HAZIR!', '#55efc4');
+        }
     }
 
-    function chainHook(name, fn) {
-        const prev = window.GAME_EXT.hooks[name];
-        window.GAME_EXT.hooks[name] = function (...args) {
-            let pr; if (typeof prev === 'function') pr = prev.apply(this, args);
-            const or = fn.apply(this, args);
-            if (typeof pr === 'boolean' || typeof or === 'boolean') return !!pr || !!or;
-            return or !== undefined ? or : pr;
-        };
+    function freeSpot(x, y, r) {
+        const pad = WALL_THICKNESS + r + 4;
+        x = cl(x, pad, canvas.width - pad); y = cl(y, pad, canvas.height - pad);
+        for (let it = 0; it < 6; it++) {
+            let moved = false;
+            for (const o of blockers()) {
+                const d = getDist({ x, y }, o) || 0.001, min = o.radius + r + 2;
+                if (d < min) { x += (x - o.x) / d * (min - d); y += (y - o.y) / d * (min - d); moved = true; }
+            }
+            x = cl(x, pad, canvas.width - pad); y = cl(y, pad, canvas.height - pad);
+            if (!moved) break;
+        }
+        return { x, y };
     }
 
-    function burst(x, y, n, c, speed) {
-        if (!Number.isFinite(x) || !Number.isFinite(y)) return;
-        const sp = speed || 4;
-        for (let i = 0; i < n; i++) {
-            const a = Math.random() * Math.PI * 2;
-            const v = 1 + Math.random() * sp;
-            suruFX.push({
-                x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v,
-                size: 1.5 + Math.random() * 2,
-                life: 20 + Math.random() * 20, maxLife: 40,
-                color: c, gravity: 0.05
+    function summonPull() {
+        let pull = Math.hypot(aimData.x, aimData.y);
+        if (!(aimData.active && pull >= 0.1)) pull = Math.hypot(lastMouseX - player.x, lastMouseY - player.y) / (RANGE * 0.8);
+        return cl(pull, 0.1, 1);
+    }
+    function spawnPoint(a, pull, r) {
+        const dist = Math.max(60, pull * RANGE * 0.8);
+        return freeSpot(player.x + Math.cos(a) * dist, player.y + Math.sin(a) * dist, r);
+    }
+
+    // ---- Ateş = çırak çağır ----
+    const origFire = Player.prototype.fire;
+    Player.prototype.fire = function (a, pullOverride) {
+        if (this.charType !== ID) return origFire.call(this, a, pullOverride);
+        const p = spawnPoint(a, pullOverride !== undefined ? clamp01(pullOverride) : summonPull(), CFG.m.radius);
+        if (minions.length >= CFG.maxMinions) {
+            const old = minions.shift();
+            spawnParticles(old.x, old.y, '#55efc4', 'smoke');
+        }
+        minions.push({ x: p.x, y: p.y, radius: CFG.m.radius, hp: CFG.m.hp, maxHp: CFG.m.hp, life: CFG.m.life,
+                       age: 0, spawnT: 0, atk: 15, lunge: 0, face: a });
+        spawnParticles(p.x, p.y, '#55efc4', 'normal');
+        this.consumeAmmo();
+    };
+
+    // ---- Yetenekler ----
+    function pickAlly(angle, includeTitan) {
+        const list = includeTitan && titan ? minions.concat([titan]) : minions;
+        let best = null, bd = 1e9;
+        const ang = angle !== undefined ? angle : player.angle;
+        for (const a of list) {
+            if (getDist(player, a) < 1) continue;
+            const diff = Math.abs(angDiff(getAngle(player, a), ang));
+            if (diff < bd) { bd = diff; best = a; }
+        }
+        return best;
+    }
+
+    const origG1 = Player.prototype.activateGadget;
+    Player.prototype.activateGadget = function (a, pull) {
+        if (this.charType !== ID) return origG1.call(this, a, pull);
+        if (!this.gadgetReady || this.isDead) return;
+        const ally = pickAlly(a, true);
+        if (!ally) { addFloatingNumber(this.x, this.y - 30, 'YARDIMCI YOK!', '#e74c3c'); return; }
+        const px = this.x, py = this.y;
+        spawnParticles(px, py, '#55efc4', 'smoke'); spawnParticles(ally.x, ally.y, '#55efc4', 'smoke');
+        this.x = ally.x; this.y = ally.y; ally.x = px; ally.y = py;
+        this.jumpInvulnerable = true; swapInv = CFG.g1.inv;
+        addFloatingNumber(this.x, this.y - 30, 'YER DEĞİŞTİ!', '#55efc4');
+        this.setCooldown(); this.gadgetCooldown = CFG.g1.cd;
+    };
+
+    const origG2 = Player.prototype.activateGadget2;
+    Player.prototype.activateGadget2 = function (a, pull) {
+        if (this.charType !== ID) return origG2.call(this, a, pull);
+        if (!this.gadget2Ready || this.isDead) return;
+        const ally = pickAlly(a, false);
+        if (!ally) { addFloatingNumber(this.x, this.y - 30, 'ÇIRAK YOK!', '#e74c3c'); return; }
+        const G = CFG.g2;
+        getActiveEnemies().forEach(e => {
+            if (e.hp <= 0 || getDist(ally, e) >= G.r + e.radius) return;
+            e.hp -= G.dmg; addFloatingNumber(e.x, e.y, G.dmg, '#55efc4');
+            if (!e.isNest) { const ang = getAngle(ally, e); e.kbX = (e.kbX || 0) + Math.cos(ang) * G.kb; e.kbY = (e.kbY || 0) + Math.sin(ang) * G.kb; }
+        });
+        explosions.push({ x: ally.x, y: ally.y, radius: 0, maxRadius: G.r, life: 14, maxLife: 14 });
+        spawnParticles(ally.x, ally.y, '#55efc4', 'normal'); screenShake = Math.max(screenShake, 8);
+        minions.splice(minions.indexOf(ally), 1);
+        this.hp = Math.min(this.maxHp, this.hp + G.heal);
+        addFloatingNumber(this.x, this.y, '+' + G.heal, '#2ecc71');
+        this.gadget2Ready = false; this.gadget2Cooldown = G.cd; gadgetBtn2.classList.add('cooldown');
+    };
+
+    const origUlt = Player.prototype.fireUlti;
+    Player.prototype.fireUlti = function (a, pull) {
+        if (this.charType !== ID) return origUlt.call(this, a, pull);
+        if (!this.ultReady || this.isDead) return;
+        if (titan) { addFloatingNumber(this.x, this.y - 40, 'TİTAN ZATEN VAR!', '#e74c3c'); return; }
+        const p = freeSpot(this.x + Math.cos(a) * 110, this.y + Math.sin(a) * 110, CFG.t.radius);
+        titan = { x: p.x, y: p.y, radius: CFG.t.radius, hp: CFG.t.hp, maxHp: CFG.t.hp, life: CFG.t.life,
+                  age: 0, spawnT: 0, slam: 20, slamAnim: 0, face: a, isTitan: true };
+        spawnParticles(p.x, p.y, '#55efc4', 'smoke'); screenShake = Math.max(screenShake, 10);
+        addFloatingNumber(this.x, this.y - 40, 'TİTAN!', '#55efc4');
+        this.ultReady = false; this.ultCharge = 0; ultFill.style.width = '0%'; ultiBtn.classList.remove('ready');
+    };
+
+    // ---- Yardımcı hareketi (siperlerden dolanır) ----
+    function nearestEnemy(from, enemies) {
+        let best = null, bd = 1e9;
+        for (const e of enemies) { if (e.hp <= 0) continue; const d = getDist(from, e); if (d < bd) { bd = d; best = e; } }
+        return best;
+    }
+    function moveAlly(m, tx, ty, speed, ts) {
+        const dx = tx - m.x, dy = ty - m.y, d = Math.hypot(dx, dy) || 1;
+        let dirx = dx / d, diry = dy / d;
+        for (const o of blockers()) {
+            const od = getDist(m, o) || 0.001, reach = o.radius + m.radius + 38;
+            if (od < reach) {
+                const nx = (m.x - o.x) / od, ny = (m.y - o.y) / od;
+                let tx2 = -ny, ty2 = nx;
+                if (tx2 * dirx + ty2 * diry < 0) { tx2 = -tx2; ty2 = -ty2; }
+                const w = (reach - od) / 38 * 1.6;
+                dirx += (nx * 0.5 + tx2) * w; diry += (ny * 0.5 + ty2) * w;
+            }
+        }
+        const l = Math.hypot(dirx, diry) || 1;
+        m.x += dirx / l * speed * ts; m.y += diry / l * speed * ts;
+    }
+    function resolveAlly(m) {
+        for (const o of blockers()) {
+            const d = getDist(m, o) || 0.001, min = m.radius + o.radius;
+            if (d < min) { m.x += (m.x - o.x) / d * (min - d); m.y += (m.y - o.y) / d * (min - d); }
+        }
+        const pad = WALL_THICKNESS + m.radius;
+        m.x = cl(m.x, pad, canvas.width - pad); m.y = cl(m.y, pad, canvas.height - pad);
+    }
+
+    function segDist(px, py, ax, ay, bx, by) {
+        const vx = bx - ax, vy = by - ay, l2 = vx * vx + vy * vy;
+        let t = l2 ? ((px - ax) * vx + (py - ay) * vy) / l2 : 0; t = cl(t, 0, 1);
+        return Math.hypot(px - (ax + vx * t), py - (ay + vy * t));
+    }
+    const bulletDmg = b => {
+        const easy = window.GAME_DIFFICULTY === 'easy';
+        if (b.type === 'stationary_bot_bullet') return easy ? 300 : 350;
+        if (b.type === 'boomerang') return easy ? 200 : 250;
+        return easy ? 480 : 500;
+    };
+
+    // ---- Güncelleme ----
+    function update(ts) {
+        if (swapInv > 0) { swapInv -= ts; if (swapInv <= 0 && !player.isJumping) player.jumpInvulnerable = false; }
+        charge(CFG.passive * ts);
+
+        const enemies = getActiveEnemies();
+
+        for (const m of minions) {
+            m.age += ts; m.life -= ts; m.spawnT = Math.min(1, m.age / 12);
+            const t = nearestEnemy(m, enemies);
+            if (t) {
+                const d = getDist(m, t);
+                m.face = getAngle(m, t);
+                if (d > m.radius + t.radius + 6) moveAlly(m, t.x, t.y, CFG.m.speed, ts);
+                else {
+                    m.atk -= ts;
+                    if (m.atk <= 0) {
+                        m.atk = CFG.m.atkEvery; m.lunge = 8;
+                        t.hp -= CFG.m.dmg; addFloatingNumber(t.x, t.y, CFG.m.dmg, '#55efc4');
+                        charge(CFG.m.chargeHit);
+                    }
+                }
+            } else if (getDist(m, player) > 110) moveAlly(m, player.x, player.y, CFG.m.speed * 0.8, ts);
+            if (m.lunge > 0) m.lunge -= ts;
+        }
+
+        if (titan) {
+            const T = titan, C = CFG.t;
+            T.age += ts; T.life -= ts; T.spawnT = Math.min(1, T.age / 20);
+            const t = nearestEnemy(T, enemies);
+            if (t) {
+                const d = getDist(T, t);
+                T.face = getAngle(T, t);
+                if (d > T.radius + t.radius + 40) moveAlly(T, t.x, t.y, C.speed, ts);
+                else {
+                    T.slam -= ts;
+                    if (T.slam <= 0) {
+                        T.slam = C.slamEvery; T.slamAnim = 12;
+                        enemies.forEach(e => {
+                            if (e.hp <= 0 || getDist(T, e) >= C.slamR + e.radius) return;
+                            e.hp -= C.slamDmg; addFloatingNumber(e.x, e.y, C.slamDmg, '#00b894');
+                            if (!e.isNest) { const ang = getAngle(T, e); e.kbX = (e.kbX || 0) + Math.cos(ang) * C.kb; e.kbY = (e.kbY || 0) + Math.sin(ang) * C.kb; }
+                        });
+                        obstacles.forEach(o => { if (getDist(T, o) < C.slamR + o.radius) o.hp -= 250; });
+                        explosions.push({ x: T.x, y: T.y, radius: 0, maxRadius: C.slamR, life: 14, maxLife: 14 });
+                        spawnParticles(T.x, T.y, '#00b894', 'smoke'); screenShake = Math.max(screenShake, 8);
+                    }
+                }
+            } else if (getDist(T, player) > 130) moveAlly(T, player.x, player.y, C.speed * 0.8, ts);
+            if (T.slamAnim > 0) T.slamAnim -= ts;
+        }
+
+        // yardımcılar birbirinin içine girmesin
+        const all = titan ? minions.concat([titan]) : minions;
+        for (let i = 0; i < all.length; i++) for (let j = i + 1; j < all.length; j++) {
+            const a = all[i], b = all[j], d = getDist(a, b) || 0.001, ov = a.radius + b.radius - d;
+            if (ov <= 0) continue;
+            const nx = (b.x - a.x) / d, ny = (b.y - a.y) / d;
+            if (a.isTitan) { b.x += nx * ov; b.y += ny * ov; }
+            else if (b.isTitan) { a.x -= nx * ov; a.y -= ny * ov; }
+            else { a.x -= nx * ov / 2; a.y -= ny * ov / 2; b.x += nx * ov / 2; b.y += ny * ov / 2; }
+        }
+        all.forEach(resolveAlly);
+
+        // düşman mermileri yardımcılara isabet eder
+        for (let bi = botBullets.length - 1; bi >= 0; bi--) {
+            const b = botBullets[bi];
+            for (const a of all) {
+                if (getDist(b, a) >= a.radius + 10) continue;
+                if (b.type === 'boomerang') {
+                    b.hitTargets = b.hitTargets || [];
+                    if (b.hitTargets.includes(a)) continue;
+                    b.hitTargets.push(a);
+                }
+                const dmg = bulletDmg(b);
+                a.hp -= dmg; addFloatingNumber(a.x, a.y, dmg, '#e74c3c');
+                if (b.type !== 'boomerang') { botBullets.splice(bi, 1); break; }
+            }
+        }
+
+        // BAĞ HATTI: yakın yardımcılar arasında enerji hattı
+        linkT += ts;
+        const doTick = linkT >= CFG.link.every; if (doTick) linkT = 0;
+        for (let i = 0; i < all.length; i++) for (let j = i + 1; j < all.length; j++) {
+            const a = all[i], b = all[j];
+            if (getDist(a, b) > CFG.link.max) continue;
+            for (let bi = botBullets.length - 1; bi >= 0; bi--) {
+                const bl = botBullets[bi];
+                if (segDist(bl.x, bl.y, a.x, a.y, b.x, b.y) < 9) { spawnParticles(bl.x, bl.y, '#55efc4', 'normal'); botBullets.splice(bi, 1); }
+            }
+            if (doTick) enemies.forEach(e => {
+                if (e.hp <= 0 || segDist(e.x, e.y, a.x, a.y, b.x, b.y) >= e.radius + 4) return;
+                e.hp -= CFG.link.dmg; addFloatingNumber(e.x, e.y, CFG.link.dmg, '#55efc4'); charge(CFG.link.chargeTick);
             });
         }
-    }
 
-    const container = document.querySelector('.char-select-container');
-    if (container && !document.getElementById('char-' + CHAR_ID)) {
-        const card = document.createElement('div');
-        card.className = 'char-card';
-        card.id = 'char-' + CHAR_ID;
-        card.innerHTML =
-            '<div class="char-color-preview" style="background:' + C_MAIN + ';"></div>' +
-            '<span>Sürü</span>' +
-            '<small>Minyon Çağırıcı<br>Bağ + Büyüme<br>Ulti: Sürü Öfkesi</small>';
-        container.appendChild(card);
-        card.addEventListener('click', () => {
-            selectedCharacter = CHAR_ID;
-            document.querySelectorAll('.char-card').forEach(el => el.classList.remove('selected'));
-            card.classList.add('selected');
-        });
-    }
-
-    function clearAll() {
-        suruBullets = [];
-        minions = [];
-        suruBar = 0;
-        suruFX = [];
-        screenFlash = 0;
-        aks1CD = 0; aks1Ready = true;
-        aks2CD = 0; aks2Ready = true;
-        aks2Active = 0;
-        ultiBuffActive = 0;
-    }
-
-    const origSet = Player.prototype.setCharacter;
-    Player.prototype.setCharacter = function (type) {
-        origSet.call(this, type);
-        if (type === CHAR_ID) {
-            clearAll();
-            this.hp = this.maxHp = CHAR_HP;
-            this.speed = this.originalSpeed = CHAR_SPEED;
-            if (gadgetBtn) {
-                gadgetBtn.style.display = 'flex';
-                gadgetBtn.innerHTML = 'BAĞ<br>KOPMASI<br><span id="gadget-timer"></span>';
-                gadgetBtn.classList.remove('cooldown');
-            }
-            if (gadgetBtn2) {
-                gadgetBtn2.style.display = 'flex';
-                gadgetBtn2.innerHTML = 'SÜRÜ<br>ÇAĞRISI<br><span id="gadget-timer-2"></span>';
-                gadgetBtn2.classList.remove('cooldown');
-            }
-            if (ultiBtn) {
-                ultiBtn.style.display = 'flex';
-                ultiBtn.style.background = 'radial-gradient(circle, #a569bd, #4a235a)';
-            }
-            if (typeof gadgetTimerText !== 'undefined') gadgetTimerText = document.getElementById('gadget-timer');
-            if (typeof gadgetTimerText2 !== 'undefined') gadgetTimerText2 = document.getElementById('gadget-timer-2');
-        } else {
-            clearAll();
-            if (ultiBtn) ultiBtn.style.background = '';
-        }
-    };
-
-    function spawnMinion(type, x, y) {
-        if (minions.length >= MAX_MINIONS) return null;
-        const base = {
-            x, y, _isMinion: true, isDead: false,
-            type: type, kills: 0, isElite: false,
-            lastShot: 0, angle: 0, _atkCD: 0
-        };
-        if (type === 'shadow') {
-            Object.assign(base, { hp: M1_HP, maxHp: M1_HP, speed: M1_SPD, radius: M1_RAD, damage: M1_DMG });
-        } else if (type === 'tower') {
-            Object.assign(base, { hp: M2_HP, maxHp: M2_HP, speed: 0, radius: M2_RAD, damage: M2_DMG });
-        } else {
-            Object.assign(base, { hp: M3_HP, maxHp: M3_HP, speed: M3_SPD, radius: M3_RAD, damage: M3_DMG });
-        }
-        minions.push(base);
-        burst(x, y, 8, C_MAIN);
-        return base;
-    }
-
-    function getMinionType() {
-        const pct = suruBar / BAR_MAX;
-        if (pct >= 1) return 'bomb';
-        if (pct >= 0.66) return 'tower';
-        return 'shadow';
-    }
-
-    // ===== ANA SALDIRI =====
-    const origFire = Player.prototype.fire;
-    Player.prototype.fire = function (a, pull) {
-        if (this.charType !== CHAR_ID) return origFire.call(this, a, pull);
-        if (this.ammo < 1 || this.isDead) return;
-        if (!Number.isFinite(a)) a = this.angle || 0;
-
-        // Bar dolu + limit müsait → minyon çağır
-        if (suruBar >= BAR_MAX && minions.length < MAX_MINIONS) {
-            const type = getMinionType();
-            spawnMinion(type, this.x + (Math.random() - 0.5) * 30, this.y + 40);
-            suruBar = 0;
-            addFloatingNumber(this.x, this.y - 40, type === 'shadow' ? 'GÖLGE!' : type === 'tower' ? 'KULE!' : 'BOMBA!', C_MAIN);
-        }
-
-        suruBullets.push({
-            x: this.x, y: this.y, sx: this.x, sy: this.y,
-            vx: Math.cos(a) * PLAYER_BULLET_SPEED,
-            vy: Math.sin(a) * PLAYER_BULLET_SPEED,
-            angle: a, life: 0, maxLife: 55, isDead: false
-        });
-        this.consumeAmmo();
-        this.lastShotTime = Date.now();
-    };
-
-    // ===== AKSESUAR 1 — BAĞ KOPMASI =====
-    const origGadget = Player.prototype.activateGadget;
-    Player.prototype.activateGadget = function (a, pull) {
-        if (this.charType !== CHAR_ID) return origGadget.call(this, a, pull);
-        if (!aks1Ready || this.isDead) return;
-
-        minions.forEach((m, idx) => {
-            const ang = (idx / Math.max(1, minions.length)) * Math.PI * 2;
-            const r = 60;
-            m.x = this.x + Math.cos(ang) * r;
-            m.y = this.y + Math.sin(ang) * r;
-            m.hp = Math.min(m.maxHp, m.hp + AKS1_HEAL);
-            burst(m.x, m.y, 6, C_BOND);
-        });
-
-        aks1Ready = false;
-        aks1CD = AKS1_CD;
-        if (gadgetBtn) gadgetBtn.classList.add('cooldown');
-        if (gadgetTimerText) gadgetTimerText.innerText = Math.ceil(AKS1_CD / 60) + "s";
-        addFloatingNumber(this.x, this.y - 40, 'BAĞ KOPMASI!', C_BOND);
-        burst(this.x, this.y, 15, C_BOND);
-    };
-
-    // ===== AKSESUAR 2 — SÜRÜ ÇAĞRISI (3x bar) =====
-    const origGadget2 = Player.prototype.activateGadget2;
-    Player.prototype.activateGadget2 = function (a, pull) {
-        if (this.charType !== CHAR_ID) return origGadget2.call(this, a, pull);
-        if (!aks2Ready || this.isDead) return;
-        aks2Active = AKS2_DURATION;
-        aks2Ready = false;
-        aks2CD = AKS2_CD;
-        if (gadgetBtn2) gadgetBtn2.classList.add('cooldown');
-        if (gadgetTimerText2) gadgetTimerText2.innerText = Math.ceil(AKS2_CD / 60) + "s";
-        addFloatingNumber(this.x, this.y - 40, 'SÜRÜ ÇAĞRISI!', C_LIGHT);
-        burst(this.x, this.y, 15, C_LIGHT);
-    };
-
-    // ===== ULTI — SÜRÜ ÖFKESİ =====
-    const origUlti = Player.prototype.fireUlti;
-    Player.prototype.fireUlti = function (a, pull) {
-        if (this.charType !== CHAR_ID) return origUlti.call(this, a, pull);
-        if (!this.ultReady || this.isDead) return;
-
-        ultiBuffActive = ULTI_DURATION;
-
-        // Tüm minyonlar Elite olur (kalıcı) + hız buff (8s)
-        minions.forEach(m => {
-            if (!m.isElite) {
-                m.isElite = true;
-                m.maxHp = m.maxHp * 2;
-                m.hp = m.maxHp;
-                m.damage = m.damage * 2;
-                burst(m.x, m.y, 10, C_ELITE);
-            }
-        });
-
-        this.ultReady = false;
-        this.ultCharge = 0;
-        if (ultFill) ultFill.style.width = '0%';
-        if (ultiBtn) ultiBtn.classList.remove('ready');
-        addFloatingNumber(this.x, this.y - 50, 'SÜRÜ ÖFKESİ!', C_ELITE);
-        screenFlash = 10;
-    };
-
-    chainHook('onReset', function () { clearAll(); });
-
-    // ===== UPDATE =====
-    chainHook('onUpdate', function (ts) {
-        if (player.charType !== CHAR_ID) return;
-        if (!gameStarted) return;
-
-        if (ultiBtn && ultiBtn.style.display !== 'flex') ultiBtn.style.display = 'flex';
-        if (gadgetBtn && gadgetBtn.style.display !== 'flex') gadgetBtn.style.display = 'flex';
-        if (gadgetBtn2 && gadgetBtn2.style.display !== 'flex') gadgetBtn2.style.display = 'flex';
-
-        if (aks2Active > 0) {
-            aks2Active -= ts;
-            if (aks2Active <= 0) aks2Active = 0;
-        }
-
-        if (aks1CD > 0) {
-            aks1CD -= ts;
-            if (aks1CD <= 0) {
-                aks1CD = 0; aks1Ready = true;
-                if (gadgetBtn) gadgetBtn.classList.remove('cooldown');
-                if (gadgetTimerText) gadgetTimerText.innerText = '';
-            }
-        }
-        if (aks2CD > 0) {
-            aks2CD -= ts;
-            if (aks2CD <= 0) {
-                aks2CD = 0; aks2Ready = true;
-                if (gadgetBtn2) gadgetBtn2.classList.remove('cooldown');
-                if (gadgetTimerText2) gadgetTimerText2.innerText = '';
-            }
-        }
-        if (ultiBuffActive > 0) {
-            ultiBuffActive -= ts;
-            if (ultiBuffActive <= 0) ultiBuffActive = 0;
-        }
-
-        // Minyonlar
+        // ömür / ölüm
         for (let i = minions.length - 1; i >= 0; i--) {
             const m = minions[i];
-            if (m.isDead || m.hp <= 0) {
-                minions.splice(i, 1);
-                burst(m.x, m.y, 8, C_DARK);
-                continue;
-            }
-
-            let target = null, minD = Infinity;
-            getActiveEnemies().forEach(e => {
-                if (e.isDead) return;
-                const d = getDist(m, e);
-                if (d < minD) { minD = d; target = e; }
-            });
-            if (!target) continue;
-            m.angle = Math.atan2(target.y - m.y, target.x - m.x);
-
-            const speedMult = ultiBuffActive > 0 ? ULTI_SPEED_BUFF : 1;
-
-            if (m.type === 'shadow') {
-                if (minD > m.radius + target.radius) {
-                    m.x += Math.cos(m.angle) * m.speed * speedMult * ts;
-                    m.y += Math.sin(m.angle) * m.speed * speedMult * ts;
-                } else {
-                    if (m._atkCD <= 0) {
-                        const wasAlive = target.hp > 0;
-                        target.hp -= m.damage;
-                        addFloatingNumber(target.x, target.y, m.damage, C_SHADOW);
-                        if (wasAlive && target.hp <= 0) m.kills++;
-                        m._atkCD = 30;
-                    }
-                }
-            } else if (m.type === 'tower') {
-                m.lastShot += ts;
-                if (minD < M2_RANGE && m.lastShot >= M2_INT) {
-                    m.lastShot = 0;
-                    const ang = Math.atan2(target.y - m.y, target.x - m.x);
-                    suruBullets.push({
-                        x: m.x, y: m.y, sx: m.x, sy: m.y,
-                        vx: Math.cos(ang) * PLAYER_BULLET_SPEED * 0.9,
-                        vy: Math.sin(ang) * PLAYER_BULLET_SPEED * 0.9,
-                        angle: ang, life: 0, maxLife: 40,
-                        isDead: false, isMinionBullet: true, minionDmg: m.damage, owner: m
-                    });
-                }
-            } else if (m.type === 'bomb' && !m._exploded) {
-                if (minD > m.radius + target.radius + 5) {
-                    m.x += Math.cos(m.angle) * m.speed * speedMult * ts;
-                    m.y += Math.sin(m.angle) * m.speed * speedMult * ts;
-                } else {
-                    m._exploded = true;
-                    getActiveEnemies().forEach(e => {
-                        if (e.isDead) return;
-                        if (getDist(m, e) < M3_AOE + e.radius) {
-                            e.hp -= m.damage;
-                            addFloatingNumber(e.x, e.y, m.damage, C_BOMB);
-                        }
-                    });
-                    suruFX.push({ type: 'explosion', x: m.x, y: m.y, radius: 0, maxRadius: M3_AOE, life: 15, maxLife: 15 });
-                    m.hp = 0;
-                }
-            }
-
-            if (m._atkCD > 0) m._atkCD -= ts;
-
-            if (!m.isElite && m.kills >= ELITE_KILLS) {
-                m.isElite = true;
-                m.maxHp = m.maxHp * 2;
-                m.hp = m.maxHp;
-                m.damage = m.damage * 2;
-                burst(m.x, m.y, 10, C_ELITE);
-                addFloatingNumber(m.x, m.y - 20, 'ELİTE!', C_ELITE);
-            }
+            if (m.life <= 0 || m.hp <= 0) { spawnParticles(m.x, m.y, '#55efc4', 'smoke'); minions.splice(i, 1); }
         }
-
-        for (let i = suruFX.length - 1; i >= 0; i--) {
-            const p = suruFX[i];
-            if (p.type === 'explosion') {
-                p.radius = p.maxRadius * (1 - p.life / p.maxLife);
-            } else {
-                p.x += p.vx * ts; p.y += p.vy * ts;
-                p.vy += p.gravity * ts;
-                p.vx *= 0.95; p.vy *= 0.95;
-            }
-            p.life -= ts;
-            if (p.life <= 0) suruFX.splice(i, 1);
+        if (titan && (titan.life <= 0 || titan.hp <= 0)) {
+            spawnParticles(titan.x, titan.y, '#00b894', 'smoke'); screenShake = Math.max(screenShake, 8); titan = null;
         }
-        if (screenFlash > 0) screenFlash -= ts;
+    }
 
-        if (ultiBtn) {
-            if (ultiBuffActive > 0) ultiBtn.style.boxShadow = '0 0 25px #f1c40f';
-            else ultiBtn.style.boxShadow = '';
+    // ---- Çizim ----
+    function drawBar(x, y, w, frac, col) {
+        ctx.fillStyle = '#444'; ctx.fillRect(x - w / 2, y, w, 4);
+        ctx.fillStyle = col; ctx.fillRect(x - w / 2, y, Math.max(0, frac) * w, 4);
+    }
+    function drawMinion(m) {
+        ctx.save(); ctx.translate(m.x, m.y);
+        if (m.life < 120 && Math.floor(Date.now() / 100) % 2) ctx.globalAlpha = 0.4;
+        ctx.scale(m.spawnT, m.spawnT);
+        ctx.beginPath(); ctx.arc(0, 0, m.radius, 0, Math.PI * 2);
+        ctx.fillStyle = '#55efc4'; ctx.fill(); ctx.strokeStyle = '#00b894'; ctx.lineWidth = 3; ctx.stroke();
+        ctx.rotate(m.face || 0);
+        ctx.beginPath(); ctx.arc(m.radius * 0.45, 0, 3.5, 0, Math.PI * 2); ctx.fillStyle = '#2d3436'; ctx.fill();
+        if (m.lunge > 0) { ctx.beginPath(); ctx.arc(m.radius + 4, 0, 6 + m.lunge, 0, Math.PI * 2); ctx.strokeStyle = 'rgba(255,255,255,0.7)'; ctx.lineWidth = 2; ctx.stroke(); }
+        ctx.restore();
+        drawBar(m.x, m.y - m.radius - 10, 28, m.hp / m.maxHp, '#55efc4');
+    }
+    function drawTitan(T) {
+        ctx.save(); ctx.translate(T.x, T.y); ctx.scale(T.spawnT, T.spawnT);
+        if (T.life < 120 && Math.floor(Date.now() / 100) % 2) ctx.globalAlpha = 0.5;
+        ctx.beginPath();
+        for (let j = 0; j < 16; j++) {
+            const a = j * Math.PI / 8, r = j % 2 === 0 ? T.radius : T.radius - 7;
+            if (j === 0) ctx.moveTo(r, 0); else ctx.lineTo(Math.cos(a) * r, Math.sin(a) * r);
         }
-    });
-
-    // ===== GET EXTRA TARGETS — Minyonlar düşman mermilerine hedef =====
-    window.GAME_EXT.chainHook('getExtraTargets', function () {
-        if (!player || player.charType !== CHAR_ID) return undefined;
-        return minions.filter(m => !m.isDead && m.hp > 0);
-    });
-
-    // ===== MERMİ ÇARPIŞMA + BAĞ =====
-    const _origUBL = window.updateBulletLogic;
-    window.updateBulletLogic = function (list, isBot, ts) {
-        // Minyonlar özel wave mermilerinden hasar almalı (getExtraTargets'a eklenmeden önce kontrol)
-        if (isBot && player.charType === CHAR_ID) {
-            for (let i = list.length - 1; i >= 0; i--) {
-                const b = list[i];
-                if (!b._waveMorBullet && !b._waveArmoredBullet && !b._waveGrowingBullet) continue;
-                for (const m of minions) {
-                    if (m.isDead || m.hp <= 0) continue;
-                    if (getDist(b, m) < m.radius + 8) {
-                        const dmg = b._waveArmoredBullet ? 500 : (b._waveGrowingBullet ? (b._growingDmg || 250) : 200);
-                        m.hp -= dmg;
-                        floatingNumbers.push({
-                            x: m.x, y: m.y - 10,
-                            val: dmg, color: '#e74c3c', life: 40, opacity: 1
-                        });
-                        list.splice(i, 1);
-                        break;
-                    }
-                }
-            }
+        ctx.closePath(); ctx.fillStyle = '#00b894'; ctx.fill(); ctx.strokeStyle = '#006266'; ctx.lineWidth = 4; ctx.stroke();
+        ctx.beginPath(); ctx.arc(0, 0, T.radius * 0.55, 0, Math.PI * 2); ctx.fillStyle = '#019875'; ctx.fill();
+        ctx.rotate(T.face || 0);
+        ctx.fillStyle = '#dff9f1'; ctx.beginPath(); ctx.arc(T.radius * 0.3, -7, 4, 0, Math.PI * 2); ctx.arc(T.radius * 0.3, 7, 4, 0, Math.PI * 2); ctx.fill();
+        if (T.slamAnim > 0) { ctx.beginPath(); ctx.arc(0, 0, T.radius + 8 + (12 - T.slamAnim) * 4, 0, Math.PI * 2); ctx.strokeStyle = 'rgba(255,255,255,0.7)'; ctx.lineWidth = 3; ctx.stroke(); }
+        ctx.restore();
+        drawBar(T.x, T.y - T.radius - 14, 70, T.hp / T.maxHp, '#55efc4');
+        drawBar(T.x, T.y - T.radius - 8, 70, T.life / CFG.t.life, '#f1c40f');
+    }
+    function draw() {
+        ctx.save();
+        const all = titan ? minions.concat([titan]) : minions;
+        // bağ hatları
+        for (let i = 0; i < all.length; i++) for (let j = i + 1; j < all.length; j++) {
+            const a = all[i], b = all[j], d = getDist(a, b);
+            if (d > CFG.link.max) continue;
+            ctx.save();
+            ctx.globalAlpha = 0.35 + 0.45 * (1 - d / CFG.link.max);
+            ctx.strokeStyle = '#55efc4'; ctx.lineWidth = 3; ctx.shadowColor = '#55efc4'; ctx.shadowBlur = 12;
+            ctx.setLineDash([14, 8]); ctx.lineDashOffset = -Date.now() / 30;
+            ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke(); ctx.restore();
         }
+        minions.forEach(drawMinion);
+        if (titan) drawTitan(titan);
 
-        // Bağ özelliği — oyuncu hasar alınca minyonlara aktar
-        if (isBot && player.charType === CHAR_ID && !player.isDead) {
-            const hpBefore = player.hp;
-            _origUBL(list, isBot, ts);
-            const taken = hpBefore - player.hp;
-            if (taken > 0 && minions.length > 0) {
-                let closest = null, minD = Infinity;
-                minions.forEach(m => {
-                    if (m.isDead || m.hp <= 0) return;
-                    const d = getDist(m, player);
-                    if (d < minD) { minD = d; closest = m; }
-                });
-                if (closest) {
-                    const transfer = Math.min(taken * BOND_PCT, closest.hp);
-                    player.hp += transfer;
-                    closest.hp -= transfer;
-                    floatingNumbers.push({
-                        x: player.x + (Math.random() - 0.5) * 20,
-                        y: player.y - 25,
-                        val: '+' + Math.floor(transfer),
-                        color: C_BOND, life: 40, opacity: 1
-                    });
-                }
-            }
-            return;
+        // çağırma önizlemesi
+        if (aimData.active && player.ammo >= 1 && !player.isDead) {
+            const p = spawnPoint(aimData.angle, summonPull(), CFG.m.radius);
+            ctx.save(); ctx.setLineDash([6, 6]); ctx.strokeStyle = 'rgba(85,239,196,0.6)'; ctx.lineWidth = 2;
+            ctx.beginPath(); ctx.moveTo(player.x, player.y); ctx.lineTo(p.x, p.y); ctx.stroke();
+            ctx.setLineDash([]); ctx.beginPath(); ctx.arc(p.x, p.y, CFG.m.radius, 0, Math.PI * 2);
+            ctx.fillStyle = 'rgba(85,239,196,0.3)'; ctx.fill(); ctx.stroke(); ctx.restore();
         }
-
-        if (!isBot && player.charType === CHAR_ID) {
-            for (let i = suruBullets.length - 1; i >= 0; i--) {
-                const b = suruBullets[i];
-                if (b.isDead) { suruBullets.splice(i, 1); continue; }
-                b.x += b.vx * ts; b.y += b.vy * ts;
-                b.life += ts;
-                if (b.life > b.maxLife) { suruBullets.splice(i, 1); continue; }
-                if (b.x < WALL_THICKNESS || b.x > canvas.width - WALL_THICKNESS ||
-                    b.y < WALL_THICKNESS || b.y > canvas.height - WALL_THICKNESS) {
-                    suruBullets.splice(i, 1); continue;
-                }
-
-                let hit = null;
-                for (const e of getActiveEnemies()) {
-                    if (e.isDead) continue;
-                    if (getDist(b, e) < e.radius + 6) { hit = e; break; }
-                }
-                if (hit) {
-                    const dmg = b.isMinionBullet ? b.minionDmg : MAIN_DMG;
-                    const wasAlive = hit.hp > 0;
-                    const before = hit.hp;
-                    hit.hp -= dmg;
-                    const actualDmg = Math.min(dmg, before);
-                    addFloatingNumber(hit.x, hit.y, dmg, b.isMinionBullet ? C_TOWER : C_LIGHT);
-                    if (!b.isMinionBullet) {
-                        // Aksesuar 2 aktifken 3x bar
-                        const barGain = aks2Active > 0 ? actualDmg * AKS2_BAR_MULT : actualDmg;
-                        suruBar = Math.min(BAR_MAX, suruBar + barGain);
-                    } else {
-                        if (b.owner && wasAlive && hit.hp <= 0) b.owner.kills++;
-                    }
-                    suruBullets.splice(i, 1);
-                }
-            }
+        // titan önizlemesi
+        if (ultAim.active && player.ultReady && !player.isDead) {
+            const p = freeSpot(player.x + Math.cos(ultAim.angle) * 110, player.y + Math.sin(ultAim.angle) * 110, CFG.t.radius);
+            ctx.save(); ctx.beginPath(); ctx.arc(p.x, p.y, CFG.t.radius, 0, Math.PI * 2);
+            ctx.fillStyle = 'rgba(85,239,196,0.25)'; ctx.fill();
+            ctx.strokeStyle = 'rgba(85,239,196,0.7)'; ctx.lineWidth = 3; ctx.stroke(); ctx.restore();
         }
+        // yetenek hedef vurgusu
+        const mark = (ally, col) => { if (!ally) return; ctx.save(); ctx.beginPath(); ctx.arc(ally.x, ally.y, ally.radius + 8, 0, Math.PI * 2); ctx.strokeStyle = col; ctx.lineWidth = 3; ctx.stroke(); ctx.restore(); };
+        if (gadAim.active && player.gadgetReady && !player.isDead) mark(pickAlly(gadAim.angle, true), '#f1c40f');
+        if (gadAim2.active && player.gadget2Ready && !player.isDead) {
+            const t = pickAlly(gadAim2.angle, false); mark(t, '#e74c3c');
+            if (t) { ctx.save(); ctx.beginPath(); ctx.arc(t.x, t.y, CFG.g2.r, 0, Math.PI * 2); ctx.fillStyle = 'rgba(231,76,60,0.12)'; ctx.fill(); ctx.restore(); }
+        }
+        ctx.restore();
+    }
 
-        return _origUBL(list, isBot, ts);
-    };
+    // ---- Arayüz kurulumu (oyun başlayınca) ----
+    function setupUI() {
+        if (player.charType !== ID) return;
+        ultiBtn.style.display = 'flex'; gadgetBtn.style.display = 'flex'; gadgetBtn2.style.display = 'flex';
+        gadgetBtn.innerHTML = 'YER<br>DEĞİŞ<br><span id="gadget-timer"></span>';
+        gadgetBtn2.innerHTML = 'FEDA<br>ET<br><span id="gadget-timer-2"></span>';
+        gadgetTimerText = document.getElementById('gadget-timer');
+        gadgetTimerText2 = document.getElementById('gadget-timer-2');
+        minions = []; titan = null; linkT = 0; swapInv = 0;
+        ultFill.style.width = '0%'; ultiBtn.classList.remove('ready');
+    }
 
-    // ===== ÇİZİM =====
-    chainHook('onDraw', function (ctx2) {
-        if (player.charType !== CHAR_ID || !gameStarted) return;
+    // Kendi döngüm: ana döngüden sonra çalışır, başka mod dosyalarının hook'larını ezmez
+    function loop(t) {
+        requestAnimationFrame(loop);
+        const ts = Math.min(3, (t - lastT) / 16.666); lastT = t;
+        if (!gameStarted) { wasStarted = false; minions = []; titan = null; return; }
+        if (!wasStarted) { wasStarted = true; setupUI(); }
+        if (player.charType !== ID) { minions = []; titan = null; return; }
+        update(ts); draw();
+    }
+    requestAnimationFrame(loop);
 
-        // Minyonlar
-        minions.forEach(m => {
-            if (m.isDead) return;
-            ctx2.save();
-            ctx2.translate(m.x, m.y);
-            if (m.isElite) {
-                ctx2.globalAlpha = 0.5 + Math.sin(Date.now() / 150) * 0.2;
-                ctx2.beginPath(); ctx2.arc(0, 0, m.radius + 6, 0, Math.PI * 2);
-                ctx2.strokeStyle = C_ELITE; ctx2.lineWidth = 2.5; ctx2.stroke();
-                ctx2.globalAlpha = 1;
-            }
-            // Gölge
-            ctx2.fillStyle = 'rgba(0,0,0,0.3)';
-            ctx2.beginPath(); ctx2.ellipse(0, m.radius * 0.4, m.radius * 0.9, m.radius * 0.35, 0, 0, Math.PI * 2); ctx2.fill();
-            // Gövde
-            ctx2.rotate(m.angle);
-            ctx2.fillStyle = m.type === 'shadow' ? C_SHADOW : m.type === 'tower' ? C_TOWER : C_BOMB;
-            ctx2.beginPath(); ctx2.arc(0, 0, m.radius, 0, Math.PI * 2); ctx2.fill();
-            ctx2.strokeStyle = m.isElite ? C_ELITE : C_DARK; ctx2.lineWidth = 2; ctx2.stroke();
-            // TEK GÖZ — klasik kural (radius - 4, göz yarıçapı 5)
-            ctx2.beginPath(); ctx2.arc(m.radius - 4, 0, 5, 0, Math.PI * 2);
-            ctx2.fillStyle = 'rgba(0,0,0,.4)'; ctx2.fill();
-            ctx2.restore();
-
-            // HP bar
-            ctx2.save();
-            ctx2.fillStyle = '#444'; ctx2.fillRect(m.x - 12, m.y - m.radius - 10, 24, 3);
-            ctx2.fillStyle = m.isElite ? C_ELITE : '#2ecc71';
-            ctx2.fillRect(m.x - 12, m.y - m.radius - 10, 24 * Math.max(0, m.hp / m.maxHp), 3);
-            ctx2.restore();
+    // ---- Karakter kartı ----
+    (function addCard() {
+        const box = document.querySelector('.char-select-container');
+        if (!box || document.getElementById('char-' + ID)) return;
+        const card = document.createElement('div');
+        card.className = 'char-card'; card.id = 'char-' + ID;
+        card.innerHTML = '<div class="char-color-preview" style="background:#55efc4;"></div><span>Çağrı</span><small>Hasar: Çıraklar<br>Güç: Titan</small>';
+        card.addEventListener('click', () => {
+            selectedCharacter = ID;
+            document.querySelectorAll('.char-card').forEach(e => e.classList.remove('selected'));
+            card.classList.add('selected');
         });
-
-        // Karakter
-        if (!player.isDead) {
-            ctx2.save();
-            ctx2.translate(player.x, player.y);
-            ctx2.fillStyle = 'rgba(0,0,0,0.35)';
-            ctx2.beginPath(); ctx2.ellipse(0, player.radius * 0.4, player.radius * 0.9, player.radius * 0.35, 0, 0, Math.PI * 2); ctx2.fill();
-            if (ultiBuffActive > 0) {
-                ctx2.save();
-                ctx2.globalAlpha = 0.3 + Math.sin(Date.now() / 150) * 0.15;
-                ctx2.beginPath(); ctx2.arc(0, 0, player.radius + 12, 0, Math.PI * 2);
-                ctx2.fillStyle = C_ELITE; ctx2.fill();
-                ctx2.restore();
-            }
-            ctx2.rotate(player.angle);
-            ctx2.fillStyle = C_MAIN;
-            ctx2.beginPath(); ctx2.arc(0, 0, player.radius, 0, Math.PI * 2); ctx2.fill();
-            ctx2.strokeStyle = C_DARK; ctx2.lineWidth = 2.5; ctx2.stroke();
-            ctx2.beginPath(); ctx2.arc(player.radius - 4, 0, 5, 0, Math.PI * 2);
-            ctx2.fillStyle = 'rgba(0,0,0,.4)'; ctx2.fill();
-            ctx2.restore();
-
-            // HP bar
-            ctx2.save();
-            ctx2.fillStyle = '#444';
-            ctx2.fillRect(player.x - 22, player.y - player.radius - 15, 44, 5);
-            ctx2.fillStyle = '#2ecc71';
-            ctx2.fillRect(player.x - 22, player.y - player.radius - 15, Math.max(0, player.hp) / player.maxHp * 44, 5);
-            ctx2.restore();
-
-            // Bar
-            const barPct = suruBar / BAR_MAX;
-            const barColor = barPct >= 1 ? C_ELITE : barPct >= 0.66 ? C_TOWER : C_SHADOW;
-            ctx2.save();
-            ctx2.fillStyle = '#222';
-            ctx2.fillRect(player.x - 22, player.y - player.radius - 24, 44, 6);
-            ctx2.fillStyle = barColor;
-            ctx2.fillRect(player.x - 22, player.y - player.radius - 24, 44 * barPct, 6);
-            if (barPct >= 1) {
-                ctx2.globalAlpha = 0.5 + Math.sin(Date.now() / 100) * 0.3;
-                ctx2.strokeStyle = '#fff'; ctx2.lineWidth = 1.5;
-                ctx2.strokeRect(player.x - 22, player.y - player.radius - 24, 44, 6);
-                ctx2.globalAlpha = 1;
-            }
-            // Limit göstergesi
-            ctx2.fillStyle = minions.length >= MAX_MINIONS ? '#e74c3c' : '#aaa';
-            ctx2.font = 'bold 9px Arial'; ctx2.textAlign = 'center';
-            ctx2.fillText(minions.length + '/' + MAX_MINIONS, player.x, player.y - player.radius - 28);
-            ctx2.restore();
-        }
-
-        // Mermiler
-        suruBullets.forEach(b => {
-            ctx2.save();
-            ctx2.translate(b.x, b.y); ctx2.rotate(b.angle);
-            if (b.isMinionBullet) {
-                ctx2.beginPath(); ctx2.arc(0, 0, 5, 0, Math.PI * 2);
-                ctx2.fillStyle = C_TOWER; ctx2.fill();
-                ctx2.strokeStyle = C_WHITE; ctx2.lineWidth = 1; ctx2.stroke();
-            } else {
-                ctx2.beginPath();
-                ctx2.moveTo(8, 0); ctx2.lineTo(-6, -4); ctx2.lineTo(-6, 4); ctx2.closePath();
-                ctx2.fillStyle = C_MAIN; ctx2.fill();
-                ctx2.strokeStyle = C_LIGHT; ctx2.lineWidth = 1; ctx2.stroke();
-            }
-            ctx2.restore();
-        });
-
-        // FX
-        suruFX.forEach(fx => {
-            ctx2.save();
-            const a = fx.life / fx.maxLife;
-            if (fx.type === 'explosion') {
-                ctx2.globalAlpha = a * 0.6;
-                ctx2.beginPath(); ctx2.arc(fx.x, fx.y, fx.radius, 0, Math.PI * 2);
-                ctx2.fillStyle = C_BOMB; ctx2.fill();
-                ctx2.globalAlpha = a * 0.8;
-                ctx2.beginPath(); ctx2.arc(fx.x, fx.y, fx.radius, 0, Math.PI * 2);
-                ctx2.strokeStyle = C_WHITE; ctx2.lineWidth = 2; ctx2.stroke();
-            } else {
-                ctx2.globalAlpha = Math.min(1, fx.life / 15);
-                ctx2.beginPath(); ctx2.arc(fx.x, fx.y, fx.size, 0, Math.PI * 2);
-                ctx2.fillStyle = fx.color; ctx2.fill();
-            }
-            ctx2.restore();
-        });
-
-        // Aim
-        if (aimData.active && !player.isDead && player.ammo >= 1) {
-            const ang = aimData.angle;
-            const range = 200;
-            ctx2.save();
-            ctx2.translate(player.x, player.y);
-            ctx2.rotate(ang);
-            ctx2.fillStyle = 'rgba(255,255,255,0.08)';
-            ctx2.fillRect(0, -8, range, 16);
-            ctx2.strokeStyle = C_LIGHT;
-            ctx2.globalAlpha = 0.6;
-            ctx2.lineWidth = 1.5;
-            ctx2.strokeRect(0, -8, range, 16);
-            ctx2.globalAlpha = 1;
-            ctx2.restore();
-        }
-
-        if (screenFlash > 0) {
-            ctx2.save();
-            ctx2.globalAlpha = screenFlash / 10 * 0.4;
-            ctx2.fillStyle = C_ELITE;
-            ctx2.fillRect(0, 0, canvas.width, canvas.height);
-            ctx2.restore();
-        }
-    });
-
-    console.log('[MOD YÜKLENDİ] suru (v2 - düzeltilmiş)');
+        box.appendChild(card);
+    })();
 })();
