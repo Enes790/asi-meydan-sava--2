@@ -24,15 +24,15 @@
 
     // ---- Denge ayarları (buradan oynayabilirsin) ----
     const CFG = {
-        normal: { range: RANGE, speed: PLAYER_BULLET_SPEED * 0.85, rMin: 8, rMax: 34, dmgMin: 350, dmgMax: 1500 },
-        ult:    { range: RANGE * 1.7, speed: PLAYER_BULLET_SPEED * 0.55, rMin: 24, rMax: 90, dmgMin: 700, dmgMax: 2200, endDmg: 800, endRadius: 150 },
-        auraMin: 12, auraMax: 30,      // yol boyu itme menzili (maks 30)
+        normal: { range: RANGE, speed: PLAYER_BULLET_SPEED * 0.85, rMin: 8, rMax: 34, dmgMin: 450, dmgMax: 1200 },
+        ult:    { range: RANGE * 1.6, speed: PLAYER_BULLET_SPEED * 0.55, rMin: 24, rMax: 90, dmgMin: 50, dmgMax: 850, endDmg: 250, endRadius: 150 },
+        auraMin: 6, auraMax: 18,      // yol boyu itme menzili (maks 30)
         tickMin: 6, tickMax: 30,       // yol boyu alan hasarı (maks 30)
         tickEvery: 15,                 // kare
         splashFrac: 0.35,              // isabette çevreye giden hasar oranı
         endFrac: 0.4,                  // menzil sonunda / duvarda patlama hasar oranı
-        g1: { cd: 600, bonus: 0.45, speedMul: 1.2 },
-        g2: { cd: 900, radius: 95, life: 420, bonus: 0.3, heal: 2 }
+        g1: { cd: 600, bonus: 0.4, speedMul: 1.2 },
+        g2: { cd: 900, radius: 95, life: 420, bonus: 0.3, heal: 1000 }
     };
 
     let shots = [], ring = null, lastT = 0, wasStarted = false;
