@@ -35,24 +35,24 @@
     const TRAP_COOLDOWN = 600;           // 10 sn
     const TRAP_THROW_RANGE = 0.8;
     const TRAP_MAX = 2;
-    const TRAP_LIFE = 600;               // 10 sn
+    const TRAP_LIFE = 1400;               // 10 sn
     const TRAP_ARM_TIME = 30;            // atıldıktan yarım sn sonra kurulur
     const TRAP_RADIUS = 34;
-    const TRAP_DAMAGE = 500;
+    const TRAP_DAMAGE = 1500;
     const TRAP_ROOT = 120;               // 2 sn
 
     // Aksesuar 2: Yem
-    const BAIT_COOLDOWN = 840;           // 14 sn
+    const BAIT_COOLDOWN = 1000;           // 14 sn
     const BAIT_THROW_RANGE = 0.7;
-    const BAIT_LIFE = 240;               // 4 sn
+    const BAIT_LIFE = 260;               // 4 sn
     const BAIT_LURE_RADIUS = 280;
     const BAIT_RADIUS = 16;
 
     // Ulti: Büyük Ağ
     const NET_THROW_RANGE = 0.9;
-    const NET_RADIUS = 130;
+    const NET_RADIUS = 140;
     const NET_LIFE = 300;                // 5 sn
-    const NET_TICK_DAMAGE = 100;
+    const NET_TICK_DAMAGE = 250;
     const NET_ROOT_REFRESH = 20;
 
     window.GAME_EXT.characters[CHAR_ID] = { color: CHAR_COLOR, hp: CHAR_HP, speed: CHAR_SPEED };
