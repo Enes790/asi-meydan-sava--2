@@ -32,9 +32,9 @@
     // ---- Denge ayarları (buradan oynayabilirsin) ----
     const CFG = {
         maxMinions: 3,
-        m: { radius: 14, hp: 700, speed: 3.1, life: 900, dmg: 150, atkEvery: 40, chargeHit: 0.6 },
+        m: { radius: 14, hp: 700, speed: 3.1, life: 1000, dmg: 150, atkEvery: 40, chargeHit: 0.6 },
         t: { radius: 36, hp: 4000, speed: 1.7, life: 720, slamR: 130, slamDmg: 450, slamEvery: 75, kb: 9 },
-        link: { max: 340, dmg: 45, every: 20, chargeTick: 0.3 },
+        link: { max: 340, dmg: 75, every: 20, chargeTick: 0.3 },
         passive: 0.03,                       // kare başına bar dolumu
         g1: { cd: 600, inv: 24 },
         g2: { cd: 720, r: 130, dmg: 600, heal: 350, kb: 8 }
