@@ -35,10 +35,10 @@
 
     // ---- Denge ayarları (buradan oynayabilirsin) ----
     const CFG = {
-        coil: { radius: 16, hp: 700, life: 840, period: 100, pulseR: 125, dmg: 220, stunMs: 700, overlap: 0.4, max: 3, drop: 10 },
-        over: { time: 180, rMul: 1.5, dmgMul: 2, period: 60, endMul: 2.5, cd: 540 },
+        coil: { radius: 9, hp: 100, life: 640, period: 100, pulseR: 125, dmg: 180, stunMs: 1200, overlap: 0.4, max: 3, drop: 10 },
+        over: { time: 220, rMul: 1.5, dmgMul: 2, period: 60, endMul: 2.5, cd: 540 },
         discharge: { base: 340, coverK: 0.35, stunMs: 1000, cd: 720 },
-        tower: { radius: 40, hp: 5000, life: 960, pulseR: 220, pulseDmg: 300, pulseEvery: 55, stunMs: 800,
+        tower: { radius: 30, hp: 5000, life: 760, pulseR: 180, pulseDmg: 300, pulseEvery: 55, stunMs: 1400,
                  reflect: 0.5, reflectStunMs: 1000, endR: 200, endDmg: 800 },
         boost: { near: 220, mul: 2 },
         q: { cd: 720 },
