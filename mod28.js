@@ -1,11 +1,20 @@
 // ============================================================================
-// mod8.js — KÖY BASKINI (v5 sadeleştirilmiş)
+// mod8.js — KÖY BASKINI (v6) — Kışla + 8 İksir + Detaylı Görseller
+// Ana dosyaya dokunmaz. index.html'de TÜM mod script'lerinden SONRA:
+//   <script src="mod8.js"></script>
+//
+// ÖZELLİKLER:
+//  - Kışla: her 3sn'de 1 defender çıkarır (maks 3 aktif)
+//  - 8 İksir Toplayıcı: 2 üst, 2 alt, 2 sol, 2 sağ (duvar dışı)
+//  - Attack binaları duvar içinde, non-attack dışarıda
+//  - Detaylı görseller (v4 çizim fonksiyonları)
 // ============================================================================
 (function () {
     'use strict';
-    console.log('[MOD YÜKLENDİ] koy_baskini v5');
+    console.log('[MOD YÜKLENDİ] koy_baskini v6');
 
     const MOD_ID = 'koy_baskini';
+
     const RAID_TIME = 180;
     const ARMY = { slime: 8, bot: 4, nest: 2, bomber: 4, tank: 2 };
     const VILLAGE_SCALE = 0.92;
@@ -21,6 +30,16 @@
     const BOMBER = { r: 11, hp: 170, spd: 2.7, wallDmg: 900, bldDmg: 380, radius: 34 };
     const TANK = { r: 22, hp: 2600, spd: 0.95, dmg: 95, atk: 60 };
 
+    // Kışla defender ayarları
+    const KISLA = {
+        spawnEvery: 180,
+        maxDefenders: 3,
+        defenderHp: 400,
+        defenderDmg: 80,
+        defenderSpd: 1.7,
+        defenderAtk: 55
+    };
+
     const DEF = {
         archer: { range: 175, interval: 50, dmg: 62, speed: 9, kind: 'arrow', splash: 0 },
         cannon: { range: 150, interval: 105, dmg: 240, speed: 6.5, kind: 'ball', splash: 24 },
@@ -30,22 +49,11 @@
     };
     const BUILDING_HP = {
         hall: 5200, archer: 1500, cannon: 1800, depot: 1100, tesla: 1400, wall: 520,
-        havan: 1600, buyucu: 1300, collector: 500
+        havan: 1600, buyucu: 1300, collector: 500, kisla: 2000
     };
     const LOOT = {
         hall: 900, depot: 450, archer: 150, cannon: 150, tesla: 200,
-        havan: 250, buyucu: 180, collector: 350
-    };
-    // Görsel kimlik: renk + kısa etiket
-    const BUILDING_STYLE = {
-        hall:      { color: '#a07f5f', label: 'B' },
-        archer:    { color: '#8e9aa0', label: 'O' },
-        cannon:    { color: '#566573', label: 'T' },
-        tesla:     { color: '#34495e', label: '⚡' },
-        havan:     { color: '#5d4037', label: 'H' },
-        buyucu:    { color: '#6c5ce7', label: 'M' },
-        depot:     { color: '#8d5a2b', label: 'D' },
-        collector: { color: '#9b59b6', label: '+' }
+        havan: 250, buyucu: 180, collector: 350, kisla: 300
     };
     const DEPLOY_MARGIN = 42;
 
@@ -59,9 +67,9 @@
     const ICONS = {
         slime: '<svg viewBox="0 0 40 40"><circle cx="20" cy="20" r="16" fill="#2ecc71" stroke="#1e8449" stroke-width="3"/><circle cx="27" cy="20" r="4" fill="rgba(0,0,0,.45)"/></svg>',
         bot: '<svg viewBox="0 0 40 40"><circle cx="20" cy="20" r="16" fill="#9b59b6" stroke="#6c3483" stroke-width="3"/><circle cx="27" cy="20" r="4" fill="rgba(0,0,0,.45)"/></svg>',
-        nest: '<svg viewBox="0 0 40 40"><circle cx="20" cy="20" r="17" fill="#27ae60" stroke="#145a32" stroke-width="3"/><circle cx="20" cy="20" r="5" fill="#145a32"/></svg>',
-        bomber: '<svg viewBox="0 0 40 40"><circle cx="20" cy="22" r="13" fill="#e67e22" stroke="#a04000" stroke-width="3"/><circle cx="26" cy="22" r="3.5" fill="rgba(0,0,0,.45)"/></svg>',
-        tank: '<svg viewBox="0 0 40 40"><circle cx="20" cy="20" r="18" fill="#d35400" stroke="#873600" stroke-width="4"/><circle cx="28" cy="20" r="4.5" fill="rgba(0,0,0,.45)"/></svg>'
+        nest: '<svg viewBox="0 0 40 40"><circle cx="20" cy="20" r="17" fill="#27ae60" stroke="#145a32" stroke-width="3"/><circle cx="20" cy="20" r="11" fill="#1e8449"/><circle cx="20" cy="20" r="5" fill="#145a32"/></svg>',
+        bomber: '<svg viewBox="0 0 40 40"><circle cx="20" cy="22" r="13" fill="#e67e22" stroke="#a04000" stroke-width="3"/><path d="M24 11 Q28 5 33 7" stroke="#f1c40f" stroke-width="3" fill="none"/><circle cx="26" cy="22" r="3.5" fill="rgba(0,0,0,.45)"/></svg>',
+        tank: '<svg viewBox="0 0 40 40"><circle cx="20" cy="20" r="18" fill="#d35400" stroke="#873600" stroke-width="4"/><circle cx="20" cy="20" r="11" fill="none" stroke="#873600" stroke-width="2"/><circle cx="28" cy="20" r="4.5" fill="rgba(0,0,0,.45)"/></svg>'
     };
 
     let raid = null;
@@ -75,16 +83,17 @@
         .raid-mode #left-joystick, .raid-mode #right-joystick, .raid-mode #gadget-btn,
         .raid-mode #gadget-btn-2, .raid-mode #ulti-btn, .raid-mode #game-over-screen { display:none !important; }
         #raid-hud, #raid-bar, #raid-hint { display:none; position:absolute; z-index:30; }
-        .raid-mode #raid-hud, .raid-mode #raid-bar { display:flex; }
+        .raid-mode #raid-hud { display:flex; }
+        .raid-mode #raid-bar { display:flex; }
         .raid-mode #raid-hint.show { display:block; }
         #raid-hud { top:10px; left:50%; transform:translateX(-50%); align-items:center; gap:16px;
             background:rgba(15,25,35,.85); border:2px solid #f1c40f; border-radius:16px; padding:6px 18px;
-            color:#fff; font-weight:700; pointer-events:none; }
+            color:#fff; font-weight:700; pointer-events:none; box-shadow:0 4px 14px rgba(0,0,0,.5); }
         #raid-hud .rh-time { font-size:20px; min-width:46px; text-align:center; }
         #raid-hud .rh-mid { text-align:center; line-height:1; }
         #raid-hud .rh-stars span { font-size:22px; color:#4a5560; margin:0 1px; }
         #raid-hud .rh-stars span.on { color:#f1c40f; text-shadow:0 0 8px #f1c40f; }
-        #raid-hud .rh-pct { font-size:15px; }
+        #raid-hud .rh-pct { font-size:15px; color:#ecf0f1; }
         #raid-hud .rh-loot { font-size:16px; color:#f1c40f; min-width:54px; text-align:right; }
         #raid-bar { bottom:14px; left:50%; transform:translateX(-50%); gap:6px; }
         .raid-troop { width:64px; padding:5px 3px 4px; background:rgba(15,25,35,.88); border:3px solid #34495e;
@@ -98,16 +107,17 @@
         #raid-hint { bottom:112px; left:50%; transform:translateX(-50%); background:rgba(15,25,35,.85);
             color:#ecf0f1; padding:8px 16px; border-radius:12px; font-size:13px; font-weight:700;
             pointer-events:none; text-align:center; max-width:86%; }
-        #raid-result { display:none; position:absolute; inset:0; background:rgba(0,0,0,.7); z-index:40;
-            flex-direction:column; align-items:center; justify-content:center; color:#fff; text-align:center; }
+        #raid-result { display:none; position:absolute; top:0; left:0; width:100%; height:100%;
+            background:rgba(0,0,0,.7); z-index:40; flex-direction:column; align-items:center;
+            justify-content:center; color:#fff; text-align:center; }
         .raid-mode #raid-result.show { display:flex; }
-        #raid-result h1 { font-size:clamp(28px,8vw,44px); color:#f1c40f; margin:0 0 6px; }
+        #raid-result h1 { font-size:clamp(28px,8vw,44px); color:#f1c40f; margin:0 0 6px; text-shadow:0 4px 12px rgba(0,0,0,.6); }
         #raid-result .rr-stars span { font-size:clamp(44px,13vw,70px); color:#4a5560; margin:0 4px; }
         #raid-result .rr-stars span.on { color:#f1c40f; text-shadow:0 0 18px #f1c40f; }
-        #raid-result .rr-stats { font-size:17px; margin:10px 0 18px; line-height:1.6; }
+        #raid-result .rr-stats { font-size:17px; margin:10px 0 18px; line-height:1.6; color:#ecf0f1; }
         #raid-result button { padding:13px 30px; margin:5px; font-size:17px; font-weight:700; color:#fff; border:none;
-            border-radius:10px; cursor:pointer; background:#2ecc71; }
-        #raid-result button.alt { background:#e74c3c; }
+            border-radius:10px; cursor:pointer; background:#2ecc71; box-shadow:0 4px 0 #27ae60; }
+        #raid-result button.alt { background:#e74c3c; box-shadow:0 4px 0 #c0392b; }
         #mode-picker { display:flex; gap:10px; margin:2px 0 14px; justify-content:center; flex-wrap:wrap; }
         .mode-pill { padding:10px 18px; border-radius:20px; background:rgba(0,0,0,.4); border:3px solid transparent;
             color:#fff; font-weight:700; cursor:pointer; font-size:14px; }
@@ -152,7 +162,8 @@
     });
 
     document.getElementById('rr-retry').addEventListener('click', () => {
-        resultEl.classList.remove('show'); initRaid();
+        resultEl.classList.remove('show');
+        initRaid();
     });
     document.getElementById('rr-menu').addEventListener('click', () => {
         resultEl.classList.remove('show');
@@ -197,7 +208,7 @@
         raid = {
             W, H, k, cx, cy, topUI, botUI,
             hw: 155 * k, hh: 125 * k,
-            walls: [], buildings: [], troops: [], projs: [], parts: [], nums: [],
+            walls: [], buildings: [], troops: [], projs: [], parts: [], nums: [], defenders: [],
             army: Object.assign({}, ARMY),
             selected: 'slime', time: RAID_TIME, started: false, over: false, idle: 0,
             destroyed: 0, total: 0, hallDown: false, loot: 0, shake: 0,
@@ -205,6 +216,7 @@
             bg: null, drag: false, lastDeploy: 0, lastPos: { x: 0, y: 0 }, hudCache: ''
         };
 
+        // Duvarlar
         const wr = 10 * k, step = 13;
         const addWall = (x, y) => raid.walls.push({ type: 'wall', x: cx + x * k, y: cy + y * k, r: wr,
             hp: BUILDING_HP.wall, maxHp: BUILDING_HP.wall, destroyed: false, hitFlash: 0 });
@@ -217,7 +229,7 @@
             hp: BUILDING_HP[type], maxHp: BUILDING_HP[type],
             destroyed: false, hitFlash: 0,
             aim: Math.random() * Math.PI * 2, reload: 30 + Math.random() * 30, recoil: 0,
-            color: BUILDING_STYLE[type].color, label: BUILDING_STYLE[type].label
+            spawnTimer: 0
         });
 
         // === ATTACK BİNALARI — DUVAR İÇİNDE ===
@@ -229,9 +241,14 @@
         addB('buyucu', -55, -95, 18); addB('buyucu', 55, 95, 18);
         addB('depot', 0, 95, 20); addB('depot', -125, 55, 20); addB('depot', 125, -55, 20);
 
-        // === NON-ATTACK (iksir) — DUVAR DIŞINDA ===
-        addB('collector', -195, -60, 16); addB('collector', -195, 60, 16);
-        addB('collector', 195, -60, 16); addB('collector', 195, 60, 16);
+        // === KIŞLA — DUVAR İÇİNDE (defender üretir) ===
+        addB('kisla', 55, 0, 22);
+
+        // === 8 İKSİR TOPLAYICI — DUVAR DIŞINDA (2 üst, 2 alt, 2 sol, 2 sağ) ===
+        addB('collector', -80, -180, 14); addB('collector', 80, -180, 14);   // üst
+        addB('collector', -80, 180, 14);  addB('collector', 80, 180, 14);    // alt
+        addB('collector', -210, -55, 14); addB('collector', -210, 55, 14);   // sol
+        addB('collector', 210, -55, 14);  addB('collector', 210, 55, 14);    // sağ
 
         raid.total = raid.buildings.length;
         buildBackground();
@@ -241,27 +258,65 @@
         updateHUD(true);
     }
 
-    // Sadeleştirilmiş arka plan: tek gradient + köy toprağı
+    // ===== ARKA PLAN =====
     function buildBackground() {
-        const { W, H, cx, cy, hw, hh } = raid;
+        const { W, H, cx, cy, hw, hh, k } = raid;
         const bg = document.createElement('canvas');
         bg.width = W; bg.height = H;
         const g = bg.getContext('2d');
+        let seed = 1234567;
+        const rnd = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
 
         const grad = g.createLinearGradient(0, 0, 0, H);
-        grad.addColorStop(0, '#4f9a43');
-        grad.addColorStop(1, '#3b7d35');
-        g.fillStyle = grad;
-        g.fillRect(0, 0, W, H);
+        grad.addColorStop(0, '#4f9a43'); grad.addColorStop(1, '#3b7d35');
+        g.fillStyle = grad; g.fillRect(0, 0, W, H);
 
-        rr(g, cx - hw - 30, cy - hh - 30, (hw + 30) * 2, (hh + 30) * 2, 30);
-        const dirt = g.createRadialGradient(cx, cy, 20, cx, cy, hw + 30);
-        dirt.addColorStop(0, '#c9a46a');
-        dirt.addColorStop(1, '#a98650');
+        for (let i = 0; i < W * H / 700; i++) {
+            const x = rnd() * W, y = rnd() * H;
+            g.fillStyle = rnd() < 0.5 ? 'rgba(255,255,255,0.045)' : 'rgba(0,0,0,0.06)';
+            g.beginPath(); g.arc(x, y, 1 + rnd() * 2.2, 0, Math.PI * 2); g.fill();
+        }
+        g.strokeStyle = 'rgba(30,90,30,0.55)'; g.lineWidth = 1.2;
+        for (let i = 0; i < W * H / 3500; i++) {
+            const x = rnd() * W, y = rnd() * H;
+            g.beginPath(); g.moveTo(x, y); g.lineTo(x - 2, y - 5); g.moveTo(x, y); g.lineTo(x + 2, y - 6); g.stroke();
+        }
+        const flowerColors = ['#f1c40f', '#ecf0f1', '#e74c3c', '#fd79a8'];
+        for (let i = 0; i < W * H / 12000; i++) {
+            g.fillStyle = flowerColors[Math.floor(rnd() * flowerColors.length)];
+            g.beginPath(); g.arc(rnd() * W, rnd() * H, 2.2, 0, Math.PI * 2); g.fill();
+        }
+
+        const pad = 30 * k;
+        rr(g, cx - hw - pad, cy - hh - pad, (hw + pad) * 2, (hh + pad) * 2, 30 * k);
+        const dirt = g.createRadialGradient(cx, cy, 20, cx, cy, hw + pad);
+        dirt.addColorStop(0, '#c9a46a'); dirt.addColorStop(1, '#a98650');
         g.fillStyle = dirt; g.fill();
-        g.strokeStyle = 'rgba(90,60,30,0.6)';
-        g.lineWidth = 3;
-        g.stroke();
+        g.strokeStyle = 'rgba(90,60,30,0.6)'; g.lineWidth = 3; g.stroke();
+        for (let i = 0; i < 180; i++) {
+            const x = cx + (rnd() - 0.5) * (hw + pad) * 2, y = cy + (rnd() - 0.5) * (hh + pad) * 2;
+            g.fillStyle = 'rgba(70,45,20,0.12)';
+            g.beginPath(); g.arc(x, y, 1 + rnd() * 3, 0, Math.PI * 2); g.fill();
+        }
+
+        function bush(x, y, s) {
+            g.fillStyle = 'rgba(0,0,0,0.22)'; g.beginPath(); g.ellipse(x + 3, y + s * 0.8, s * 1.1, s * 0.5, 0, 0, Math.PI * 2); g.fill();
+            g.fillStyle = '#2a6b2a'; g.beginPath(); g.arc(x, y, s, 0, Math.PI * 2); g.fill();
+            g.fillStyle = '#378a37'; g.beginPath(); g.arc(x - s * 0.3, y - s * 0.3, s * 0.65, 0, Math.PI * 2); g.fill();
+        }
+        for (let i = 0; i < 26; i++) {
+            const side = Math.floor(rnd() * 4);
+            let x = rnd() * W, y = rnd() * H;
+            if (side === 0) y = rnd() * 36 + 4;
+            else if (side === 1) y = H - rnd() * 30 - 4;
+            else if (side === 2) x = rnd() * 22 + 2;
+            else x = W - rnd() * 22 - 2;
+            bush(x, y, 10 + rnd() * 12);
+        }
+
+        const vig = g.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.35, W / 2, H / 2, Math.max(W, H) * 0.75);
+        vig.addColorStop(0, 'rgba(0,0,0,0)'); vig.addColorStop(1, 'rgba(0,0,0,0.38)');
+        g.fillStyle = vig; g.fillRect(0, 0, W, H);
 
         raid.bg = bg;
     }
@@ -322,6 +377,62 @@
         }
         const idx = raid.troops.indexOf(t);
         if (idx > -1) raid.troops.splice(idx, 1);
+    }
+
+    // ===== KIŞLA DEFENDER =====
+    function spawnDefender(x, y) {
+        const kt = TROOP_SCALE * clamp(raid.k / VILLAGE_SCALE, 0.9, 1.25);
+        raid.defenders.push({
+            x, y, radius: 12 * kt,
+            hp: KISLA.defenderHp, maxHp: KISLA.defenderHp,
+            dmg: KISLA.defenderDmg, speed: KISLA.defenderSpd,
+            atk: 0, atkInt: KISLA.defenderAtk,
+            target: null, isDead: false, isDefender: true,
+            angle: 0, hitFlash: 0
+        });
+        addParts(x, y, '#e74c3c', 8, 2, 22, 3);
+        addRing(x, y, '#e74c3c', 25 * raid.k, 14);
+    }
+
+    function updateDefenders(ts) {
+        for (let i = raid.defenders.length - 1; i >= 0; i--) {
+            const d = raid.defenders[i];
+            if (d.isDead || d.hp <= 0) {
+                addParts(d.x, d.y, '#e74c3c', 10, 2.4, 26, 4);
+                raid.defenders.splice(i, 1);
+                continue;
+            }
+            if (d.hitFlash > 0) d.hitFlash -= ts;
+
+            let best = null, bd = Infinity;
+            raid.troops.forEach(t => {
+                if (t.isDead) return;
+                const dd = Math.hypot(t.x - d.x, t.y - d.y);
+                if (dd < bd) { bd = dd; best = t; }
+            });
+            if (!best) continue;
+
+            d.angle = Math.atan2(best.y - d.y, best.x - d.x);
+            d.atk -= ts;
+
+            const inRange = bd <= d.radius + best.radius + 5;
+            if (!inRange) {
+                d.x += Math.cos(d.angle) * d.speed * raid.k * ts;
+                d.y += Math.sin(d.angle) * d.speed * raid.k * ts;
+            } else if (d.atk <= 0) {
+                damageTroop(best, d.dmg);
+                d.atk = d.atkInt;
+                addParts(best.x, best.y, '#e74c3c', 3, 1.5, 12, 2);
+            }
+        }
+    }
+
+    function damageDefender(d, dmg) {
+        if (d.isDead) return;
+        d.hp -= dmg;
+        d.hitFlash = 4;
+        addNum(d.x, d.y - d.radius - 6, Math.round(dmg), '#e74c3c');
+        if (d.hp <= 0) d.isDead = true;
     }
 
     // ===== BİRLİKLER =====
@@ -421,13 +532,24 @@
         else if (t.blocked) tgt = t.blocked;
         else if (t.type === 'tank') tgt = nearestDefense(t) || nearestBuilding(t);
         else tgt = nearestBuilding(t);
+
+        // Yakın defender'a öncelik (tehdit)
+        let nearDefender = null, nd = Infinity;
+        raid.defenders.forEach(d => {
+            if (d.isDead) return;
+            const dd = Math.hypot(d.x - t.x, d.y - t.y);
+            if (dd < nd && dd < 70 * raid.k) { nd = dd; nearDefender = d; }
+        });
+        if (nearDefender) tgt = nearDefender;
+
         t.target = tgt;
         if (!tgt) return;
         const dx = tgt.x - t.x, dy = tgt.y - t.y, d = Math.hypot(dx, dy) || 1;
         t.angle = Math.atan2(dy, dx);
         t.atk -= ts;
         const isBot = t.type === 'bot';
-        const inRange = isBot ? (d - tgt.r <= BOT.range * raid.k) : (d <= t.radius + tgt.r + 3);
+        const tgtR = tgt.r || tgt.radius || 0;
+        const inRange = isBot ? (d - tgtR <= BOT.range * raid.k) : (d <= t.radius + tgtR + 3);
         if (!inRange) {
             const sp = t.speed * raid.k * ts;
             t.x += dx / d * sp; t.y += dy / d * sp;
@@ -439,6 +561,10 @@
                 t.atk = BOT.atk;
             } else if (t.type === 'bomber') {
                 bomberExplode(t);
+            } else if (tgt.isDefender) {
+                damageDefender(tgt, t.dmg);
+                addParts(tgt.x, tgt.y, t.color, 3, 1.6, 14, 2.5);
+                t.atk = t.atkInt;
             } else {
                 damageBuilding(tgt, t.dmg);
                 addParts(tgt.x, tgt.y, t.color, 3, 1.6, 14, 2.5);
@@ -449,7 +575,20 @@
 
     // ===== SAVUNMA =====
     function updateDefense(b, ts) {
-        if (b.destroyed || !DEF[b.type]) return;
+        if (b.destroyed) return;
+
+        // KIŞLA — defender çıkarır (attack değil)
+        if (b.type === 'kisla') {
+            b.spawnTimer += ts;
+            if (b.spawnTimer >= KISLA.spawnEvery && raid.defenders.length < KISLA.maxDefenders) {
+                b.spawnTimer = 0;
+                const a = Math.random() * Math.PI * 2;
+                spawnDefender(b.x + Math.cos(a) * b.r * 1.5, b.y + Math.sin(a) * b.r * 1.5);
+            }
+            return;
+        }
+
+        if (!DEF[b.type]) return;
         const cfg = DEF[b.type];
         const range = cfg.range * raid.k;
         b.reload -= ts;
@@ -467,6 +606,7 @@
                 b.reload = cfg.interval;
                 raid.troops.forEach(t => { if (!t.isDead && dist(b, t) - t.radius < range) damageTroop(t, cfg.dmg * raid.defMult); });
                 addRing(b.x, b.y, '#f1c40f', range, 16);
+                addParts(b.x, b.y, '#f1c40f', 6, 2.2, 16, 2.5);
             }
             return;
         }
@@ -474,7 +614,10 @@
         b.aim = Math.atan2(best.y - b.y, best.x - b.x);
         if (b.reload <= 0) {
             b.reload = cfg.interval;
-            if (b.type === 'cannon' || b.type === 'havan') b.recoil = 8;
+            if (b.type === 'cannon' || b.type === 'havan') {
+                b.recoil = 8;
+                addParts(b.x + Math.cos(b.aim) * b.r * 1.4, b.y + Math.sin(b.aim) * b.r * 1.4, '#bdc3c7', 5, 1.5, 18, 3);
+            }
             raid.projs.push({ kind: cfg.kind, from: 'def', x: b.x, y: b.y, target: best, tx: best.x, ty: best.y,
                 speed: cfg.speed * raid.k, dmg: cfg.dmg * raid.defMult, splash: cfg.splash * raid.k, angle: b.aim });
         }
@@ -496,8 +639,11 @@
                     } else if (p.target && !p.target.isDead) {
                         damageTroop(p.target, p.dmg);
                     }
+                } else if (p.target && p.target.isDefender && !p.target.isDead) {
+                    damageDefender(p.target, p.dmg);
                 } else if (p.target && !p.target.destroyed) {
                     damageBuilding(p.target, p.dmg);
+                    addParts(p.tx, p.ty, '#9b59b6', 4, 1.8, 16, 3);
                 }
                 raid.projs.splice(i, 1);
             } else {
@@ -529,6 +675,7 @@
         raid.started = true;
         hintEl.classList.remove('show');
         addParts(px, py, '#ffffff', 8, 1.8, 18, 3);
+        raid.parts.push({ x: px, y: py, vx: 0, vy: 0, life: 14, maxLife: 14, color: '#ffffff', size: 4, ring: true });
         if (raid.army[raid.selected] <= 0) pickNextTroop();
         updateBar();
     }
@@ -628,6 +775,7 @@
         if (raid.started) raid.time -= ts / 60;
 
         raid.buildings.forEach(b => updateDefense(b, ts));
+        updateDefenders(ts);
         raid.troops.slice().forEach(t => { if (!t.isDead) updateTroop(t, ts); });
         updateProjectiles(ts);
 
@@ -657,7 +805,7 @@
         hintEl.classList.remove('show');
     };
 
-    // ===== ÇİZİM (SADELEŞTİRİLMİŞ) =====
+    // ===== ÇİZİM =====
     function shadow(c, x, y, rx, ry) {
         c.fillStyle = 'rgba(0,0,0,0.28)';
         c.beginPath(); c.ellipse(x + 3, y + ry, rx, ry * 0.55, 0, 0, Math.PI * 2); c.fill();
@@ -667,39 +815,209 @@
         c.fillStyle = col; c.fillRect(x - w / 2, y, w * clamp(pct, 0, 1), 4);
     }
 
-    // TEK generic bina çizimi (renk + harf ikon)
-    function drawBuilding(c, b) {
+    function drawHall(c, b) {
         const r = b.r, x = b.x, y = b.y, f = b.hitFlash > 0;
-        shadow(c, x, y + r * 0.55, r * 1.1, r * 0.5);
+        shadow(c, x, y + r * 0.7, r * 1.2, r * 0.55);
+        rr(c, x - r, y - r * 0.55, r * 2, r * 1.45, 6);
+        c.fillStyle = f ? '#fff' : '#a07f5f'; c.fill();
+        c.strokeStyle = '#5d4037'; c.lineWidth = 3; c.stroke();
+        c.strokeStyle = 'rgba(60,40,25,0.35)'; c.lineWidth = 1;
+        for (let i = 1; i < 4; i++) { c.beginPath(); c.moveTo(x - r, y - r * 0.55 + i * r * 0.36); c.lineTo(x + r, y - r * 0.55 + i * r * 0.36); c.stroke(); }
+        c.beginPath(); c.moveTo(x - r * 1.12, y - r * 0.5); c.lineTo(x, y - r * 1.3); c.lineTo(x + r * 1.12, y - r * 0.5); c.closePath();
+        c.fillStyle = f ? '#fff' : '#cf3a2b'; c.fill();
+        c.strokeStyle = '#7b241c'; c.lineWidth = 2; c.stroke();
+        c.beginPath(); c.moveTo(x, y - r * 1.3); c.lineTo(x + r * 1.12, y - r * 0.5); c.lineTo(x, y - r * 0.5); c.closePath();
+        c.fillStyle = f ? '#fff' : '#a93226'; c.fill();
+        rr(c, x - r * 0.2, y + r * 0.22, r * 0.4, r * 0.68, 4); c.fillStyle = '#4e342e'; c.fill();
+        c.fillStyle = '#f9e79f';
+        rr(c, x - r * 0.72, y - r * 0.15, r * 0.3, r * 0.3, 3); c.fill();
+        rr(c, x + r * 0.42, y - r * 0.15, r * 0.3, r * 0.3, 3); c.fill();
+        const wave = Math.sin(Date.now() / 220) * 4;
+        c.strokeStyle = '#3e2723'; c.lineWidth = 2;
+        c.beginPath(); c.moveTo(x, y - r * 1.3); c.lineTo(x, y - r * 1.75); c.stroke();
+        c.beginPath(); c.moveTo(x, y - r * 1.75); c.lineTo(x + r * 0.55, y - r * 1.62 + wave * 0.4); c.lineTo(x, y - r * 1.48); c.closePath();
+        c.fillStyle = '#f1c40f'; c.fill();
+    }
 
-        // Gövde (daire)
+    function drawArcher(c, b) {
+        const r = b.r, x = b.x, y = b.y, f = b.hitFlash > 0;
+        shadow(c, x, y + r * 0.6, r * 1.1, r * 0.6);
         c.beginPath(); c.arc(x, y, r, 0, Math.PI * 2);
-        c.fillStyle = f ? '#fff' : b.color; c.fill();
-        c.strokeStyle = 'rgba(0,0,0,0.6)'; c.lineWidth = 3; c.stroke();
-
-        // İç halka (derinlik hissi)
-        c.beginPath(); c.arc(x, y, r * 0.78, 0, Math.PI * 2);
-        c.fillStyle = 'rgba(0,0,0,0.15)'; c.fill();
-
-        // Etiket harfi
-        c.fillStyle = f ? '#000' : '#fff';
-        c.font = `bold ${Math.floor(r * 0.95)}px Arial`;
-        c.textAlign = 'center';
-        c.textBaseline = 'middle';
-        c.fillText(b.label, x, y + r * 0.05);
-
-        // Hall için taç (tek özel)
-        if (b.type === 'hall') {
-            c.fillStyle = '#f1c40f';
-            c.beginPath();
-            c.moveTo(x - r * 0.4, y - r * 0.85);
-            c.lineTo(x - r * 0.2, y - r * 1.15);
-            c.lineTo(x, y - r * 0.9);
-            c.lineTo(x + r * 0.2, y - r * 1.15);
-            c.lineTo(x + r * 0.4, y - r * 0.85);
-            c.closePath();
-            c.fill();
+        c.fillStyle = f ? '#fff' : '#8e9aa0'; c.fill();
+        c.strokeStyle = '#566573'; c.lineWidth = 3; c.stroke();
+        c.fillStyle = f ? '#fff' : '#7b8794';
+        for (let i = 0; i < 8; i++) {
+            const a = i * Math.PI / 4;
+            c.beginPath(); c.arc(x + Math.cos(a) * r * 0.9, y + Math.sin(a) * r * 0.9, r * 0.17, 0, Math.PI * 2); c.fill();
         }
+        c.beginPath(); c.arc(x, y, r * 0.68, 0, Math.PI * 2); c.fillStyle = '#a0714a'; c.fill();
+        c.strokeStyle = '#6d4c41'; c.lineWidth = 2; c.stroke();
+        c.beginPath(); c.arc(x, y, r * 0.3, 0, Math.PI * 2); c.fillStyle = '#f5cba7'; c.fill();
+        c.beginPath(); c.arc(x, y - r * 0.08, r * 0.32, Math.PI, Math.PI * 2); c.fillStyle = '#27ae60'; c.fill();
+        c.save(); c.translate(x, y); c.rotate(b.aim);
+        c.strokeStyle = '#6d4c41'; c.lineWidth = 3;
+        c.beginPath(); c.arc(r * 0.5, 0, r * 0.4, -1.15, 1.15); c.stroke();
+        c.strokeStyle = '#ecf0f1'; c.lineWidth = 1;
+        c.beginPath(); c.moveTo(r * 0.5 + Math.cos(-1.15) * r * 0.4, Math.sin(-1.15) * r * 0.4);
+        c.lineTo(r * 0.5 + Math.cos(1.15) * r * 0.4, Math.sin(1.15) * r * 0.4); c.stroke();
+        c.restore();
+    }
+
+    function drawCannon(c, b) {
+        const r = b.r, x = b.x, y = b.y, f = b.hitFlash > 0;
+        shadow(c, x, y + r * 0.6, r * 1.1, r * 0.6);
+        c.beginPath(); c.arc(x, y, r, 0, Math.PI * 2);
+        c.fillStyle = f ? '#fff' : '#566573'; c.fill();
+        c.strokeStyle = '#2c3e50'; c.lineWidth = 3; c.stroke();
+        c.beginPath(); c.arc(x, y, r * 0.7, 0, Math.PI * 2); c.fillStyle = '#424949'; c.fill();
+        c.save(); c.translate(x, y); c.rotate(b.aim);
+        const back = b.recoil > 0 ? -b.recoil * 0.5 : 0;
+        rr(c, -r * 0.2 + back, -r * 0.3, r * 1.45, r * 0.6, 4);
+        c.fillStyle = f ? '#fff' : '#1c2833'; c.fill();
+        c.strokeStyle = '#85929e'; c.lineWidth = 1.5; c.stroke();
+        rr(c, r * 1.0 + back, -r * 0.36, r * 0.28, r * 0.72, 3); c.fillStyle = '#34495e'; c.fill();
+        c.restore();
+        c.beginPath(); c.arc(x, y, r * 0.22, 0, Math.PI * 2); c.fillStyle = '#d4ac0d'; c.fill();
+    }
+
+    function drawTesla(c, b) {
+        const r = b.r, x = b.x, y = b.y, f = b.hitFlash > 0;
+        shadow(c, x, y + r * 0.6, r * 1.1, r * 0.6);
+        c.beginPath(); c.arc(x, y, r, 0, Math.PI * 2);
+        c.fillStyle = f ? '#fff' : '#34495e'; c.fill();
+        c.strokeStyle = '#f1c40f'; c.lineWidth = 3; c.stroke();
+        c.beginPath(); c.arc(x, y, r * 0.64, 0, Math.PI * 2); c.fillStyle = '#2c3e50'; c.fill();
+        c.beginPath();
+        c.moveTo(x + r * 0.14, y - r * 0.55); c.lineTo(x - r * 0.3, y + r * 0.08); c.lineTo(x - r * 0.02, y + r * 0.08);
+        c.lineTo(x - r * 0.14, y + r * 0.55); c.lineTo(x + r * 0.3, y - r * 0.1); c.lineTo(x + r * 0.02, y - r * 0.1);
+        c.closePath(); c.fillStyle = '#f1c40f'; c.fill();
+        const ch = clamp(1 - b.reload / DEF.tesla.interval, 0, 1);
+        c.beginPath(); c.arc(x, y, r + 4, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * ch);
+        c.strokeStyle = 'rgba(241,196,15,0.9)'; c.lineWidth = 2; c.stroke();
+    }
+
+    function drawHavan(c, b) {
+        const r = b.r, x = b.x, y = b.y, f = b.hitFlash > 0;
+        shadow(c, x, y + r * 0.6, r * 1.1, r * 0.6);
+        c.beginPath(); c.arc(x, y, r, 0, Math.PI * 2);
+        c.fillStyle = f ? '#fff' : '#5d4037'; c.fill();
+        c.strokeStyle = '#3e2723'; c.lineWidth = 3; c.stroke();
+        c.beginPath(); c.arc(x, y, r * 0.72, 0, Math.PI * 2);
+        c.fillStyle = f ? '#fff' : '#2c3e50'; c.fill();
+        c.strokeStyle = '#1a1a1a'; c.lineWidth = 2; c.stroke();
+        c.save(); c.translate(x, y); c.rotate(b.aim + Math.PI / 6);
+        const back = b.recoil > 0 ? -b.recoil * 0.6 : 0;
+        rr(c, -r * 0.25 + back, -r * 0.22, r * 1.15, r * 0.44, 4);
+        c.fillStyle = f ? '#fff' : '#3e2723'; c.fill();
+        c.strokeStyle = '#1a1a1a'; c.lineWidth = 2; c.stroke();
+        c.beginPath(); c.arc(r * 0.9 + back, 0, r * 0.22, 0, Math.PI * 2);
+        c.fillStyle = '#000'; c.fill();
+        c.restore();
+        if (b.recoil > 0) {
+            c.save();
+            c.globalAlpha = b.recoil / 8;
+            c.fillStyle = '#f39c12';
+            c.beginPath();
+            c.arc(x + Math.cos(b.aim + Math.PI / 6) * r * 0.9, y + Math.sin(b.aim + Math.PI / 6) * r * 0.9, r * 0.5, 0, Math.PI * 2);
+            c.fill();
+            c.restore();
+        }
+    }
+
+    function drawBuyucu(c, b) {
+        const r = b.r, x = b.x, y = b.y, f = b.hitFlash > 0;
+        shadow(c, x, y + r * 0.6, r * 1.1, r * 0.6);
+        c.beginPath(); c.arc(x, y, r, 0, Math.PI * 2);
+        c.fillStyle = f ? '#fff' : '#6c5ce7'; c.fill();
+        c.strokeStyle = '#4834d4'; c.lineWidth = 3; c.stroke();
+        c.beginPath(); c.arc(x, y, r * 0.68, 0, Math.PI * 2);
+        c.fillStyle = f ? '#fff' : '#2c3e50'; c.fill();
+        c.strokeStyle = '#1a1a1a'; c.lineWidth = 1.5; c.stroke();
+        const pulse = 0.75 + Math.sin(Date.now() / 250 + x * 0.01) * 0.25;
+        c.save();
+        c.shadowColor = '#a29bfe'; c.shadowBlur = 12 * pulse;
+        c.beginPath(); c.arc(x, y, r * 0.38 * pulse, 0, Math.PI * 2);
+        c.fillStyle = f ? '#fff' : '#a29bfe'; c.fill();
+        c.strokeStyle = '#fff'; c.lineWidth = 2; c.stroke();
+        c.restore();
+        c.save(); c.translate(x, y); c.rotate(b.aim);
+        c.fillStyle = 'rgba(162, 155, 254, 0.5)';
+        c.beginPath(); c.moveTo(r * 0.55, 0); c.lineTo(r * 0.75, -r * 0.15); c.lineTo(r * 0.75, r * 0.15); c.closePath(); c.fill();
+        c.restore();
+    }
+
+    function drawCollector(c, b) {
+        const r = b.r, x = b.x, y = b.y, f = b.hitFlash > 0;
+        shadow(c, x, y + r * 0.5, r * 1.05, r * 0.45);
+        rr(c, x - r * 0.9, y - r * 0.9, r * 1.8, r * 1.8, r * 0.35);
+        c.fillStyle = f ? '#fff' : '#8d6e63'; c.fill();
+        c.strokeStyle = '#4e342e'; c.lineWidth = 2.5; c.stroke();
+        c.strokeStyle = '#3e2723'; c.lineWidth = 2;
+        c.beginPath(); c.moveTo(x - r * 0.9, y - r * 0.35); c.lineTo(x + r * 0.9, y - r * 0.35); c.stroke();
+        c.beginPath(); c.moveTo(x - r * 0.9, y + r * 0.35); c.lineTo(x + r * 0.9, y + r * 0.35); c.stroke();
+        c.beginPath(); c.arc(x, y - r * 0.25, r * 0.6, 0, Math.PI * 2);
+        c.fillStyle = f ? '#fff' : 'rgba(155, 89, 182, 0.85)'; c.fill();
+        c.strokeStyle = '#8e44ad'; c.lineWidth = 1.5; c.stroke();
+        c.fillStyle = '#f9ca24';
+        c.font = 'bold ' + Math.floor(r * 0.7) + 'px Arial';
+        c.textAlign = 'center';
+        c.fillText('+', x + r * 0.7, y - r * 0.7);
+    }
+
+    function drawKisla(c, b) {
+        const r = b.r, x = b.x, y = b.y, f = b.hitFlash > 0;
+        shadow(c, x, y + r * 0.7, r * 1.15, r * 0.55);
+        rr(c, x - r, y - r * 0.6, r * 2, r * 1.5, 5);
+        c.fillStyle = f ? '#fff' : '#4a5568'; c.fill();
+        c.strokeStyle = '#1a202c'; c.lineWidth = 3; c.stroke();
+        c.beginPath(); c.moveTo(x - r * 1.1, y - r * 0.55);
+        c.lineTo(x, y - r * 1.35); c.lineTo(x + r * 1.1, y - r * 0.55); c.closePath();
+        c.fillStyle = f ? '#fff' : '#c0392b'; c.fill();
+        c.strokeStyle = '#7b241c'; c.lineWidth = 2; c.stroke();
+        rr(c, x - r * 0.28, y + r * 0.15, r * 0.56, r * 0.72, 3);
+        c.fillStyle = '#1a202c'; c.fill();
+        c.strokeStyle = '#f1c40f'; c.lineWidth = 3;
+        c.beginPath(); c.moveTo(x - r * 0.4, y - r * 0.15); c.lineTo(x + r * 0.4, y + r * 0.15); c.stroke();
+        c.beginPath(); c.moveTo(x + r * 0.4, y - r * 0.15); c.lineTo(x - r * 0.4, y + r * 0.15); c.stroke();
+        if (raid.defenders && raid.defenders.length < KISLA.maxDefenders) {
+            const prog = b.spawnTimer / KISLA.spawnEvery;
+            c.strokeStyle = 'rgba(241,196,15,0.8)'; c.lineWidth = 2;
+            c.beginPath(); c.arc(x, y, r + 6, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * prog); c.stroke();
+        }
+    }
+
+    function drawDefender(c, d) {
+        const r = d.radius, x = d.x, y = d.y, f = d.hitFlash > 0;
+        c.save();
+        c.translate(x, y);
+        c.fillStyle = 'rgba(0,0,0,0.3)';
+        c.beginPath(); c.ellipse(0, r * 0.4, r * 0.9, r * 0.35, 0, 0, Math.PI * 2); c.fill();
+        c.rotate(d.angle);
+        c.fillStyle = f ? '#fff' : '#e74c3c';
+        c.beginPath(); c.arc(0, 0, r, 0, Math.PI * 2); c.fill();
+        c.strokeStyle = '#7b241c'; c.lineWidth = 2; c.stroke();
+        c.beginPath(); c.arc(r - 3, 0, 3, 0, Math.PI * 2);
+        c.fillStyle = '#fff'; c.fill();
+        c.restore();
+        c.fillStyle = '#444'; c.fillRect(x - 10, y - r - 6, 20, 2);
+        c.fillStyle = '#e74c3c'; c.fillRect(x - 10, y - r - 6, 20 * clamp(d.hp / d.maxHp, 0, 1), 2);
+    }
+
+    function drawDepot(c, b) {
+        const r = b.r, x = b.x, y = b.y, f = b.hitFlash > 0;
+        shadow(c, x, y + r * 0.7, r * 1.15, r * 0.55);
+        rr(c, x - r, y - r * 0.6, r * 2, r * 1.5, 5);
+        c.fillStyle = f ? '#fff' : '#8d5a2b'; c.fill();
+        c.strokeStyle = '#4e2f12'; c.lineWidth = 3; c.stroke();
+        c.strokeStyle = 'rgba(40,20,5,0.45)'; c.lineWidth = 1.5;
+        for (let i = 1; i < 4; i++) { c.beginPath(); c.moveTo(x - r, y - r * 0.6 + i * r * 0.37); c.lineTo(x + r, y - r * 0.6 + i * r * 0.37); c.stroke(); }
+        rr(c, x - r * 1.05, y - r * 0.85, r * 2.1, r * 0.4, 4); c.fillStyle = f ? '#fff' : '#b07a3c'; c.fill();
+        c.strokeStyle = '#4e2f12'; c.lineWidth = 2; c.stroke();
+        c.fillStyle = '#f1c40f'; c.strokeStyle = '#b7950b'; c.lineWidth = 1;
+        [[-0.45, -0.95], [-0.1, -1.05], [0.3, -0.95], [0.05, -0.8], [-0.3, -0.8]].forEach(p => {
+            c.beginPath(); c.arc(x + p[0] * r, y + p[1] * r, r * 0.17, 0, Math.PI * 2); c.fill(); c.stroke();
+        });
+        rr(c, x - r * 0.14, y + r * 0.05, r * 0.28, r * 0.32, 3); c.fillStyle = '#f1c40f'; c.fill();
     }
 
     function drawWall(c, w) {
@@ -707,6 +1025,7 @@
         rr(c, w.x - r, w.y - r, r * 2, r * 2, 3);
         c.fillStyle = f ? '#fff' : '#a5b0b4'; c.fill();
         c.strokeStyle = '#6b7780'; c.lineWidth = 1.5; c.stroke();
+        c.fillStyle = 'rgba(255,255,255,0.28)'; c.fillRect(w.x - r + 2, w.y - r + 2, r * 2 - 4, r * 0.55);
     }
 
     function drawRubble(c, b) {
@@ -717,6 +1036,8 @@
             const a = i * 1.05 + b.x;
             c.beginPath(); c.arc(b.x + Math.cos(a) * b.r * 0.5, b.y + Math.sin(a) * b.r * 0.5, b.r * 0.22, 0, Math.PI * 2); c.fill();
         }
+        c.fillStyle = 'rgba(230,126,34,' + (0.25 + Math.sin(Date.now() / 300 + b.x) * 0.15) + ')';
+        c.beginPath(); c.arc(b.x, b.y, b.r * 0.3, 0, Math.PI * 2); c.fill();
     }
 
     function drawTroop(c, t) {
@@ -743,6 +1064,7 @@
             c.fillStyle = '#ecf0f1'; c.beginPath(); c.moveTo(10, 0); c.lineTo(5, -3); c.lineTo(5, 3); c.closePath(); c.fill();
         } else if (p.kind === 'ball') {
             c.fillStyle = '#2c3e50'; c.beginPath(); c.arc(0, 0, 6, 0, Math.PI * 2); c.fill();
+            c.fillStyle = 'rgba(255,255,255,0.4)'; c.beginPath(); c.arc(-2, -2, 2, 0, Math.PI * 2); c.fill();
         } else {
             c.fillStyle = '#9b59b6'; c.beginPath(); c.arc(0, 0, 5, 0, Math.PI * 2); c.fill();
             c.strokeStyle = '#fff'; c.lineWidth = 1.5; c.stroke();
@@ -769,11 +1091,23 @@
         const list = [];
         r.buildings.forEach(b => { if (!b.destroyed) list.push({ y: b.y, b }); });
         r.troops.forEach(t => { if (!t.isDead) list.push({ y: t.y, t }); });
+        r.defenders.forEach(d => { if (!d.isDead) list.push({ y: d.y, d }); });
         list.sort((a, b) => a.y - b.y);
         list.forEach(o => {
             if (o.b) {
-                drawBuilding(c, o.b);
-                if (o.b.hp < o.b.maxHp) bar(c, o.b.x, o.b.y - o.b.r - (o.b.type === 'hall' ? r.k * 24 : 12), o.b.r * 1.6, o.b.hp / o.b.maxHp, o.b.hp / o.b.maxHp > 0.4 ? '#2ecc71' : '#e74c3c');
+                const b = o.b;
+                if (b.type === 'hall') drawHall(c, b);
+                else if (b.type === 'archer') drawArcher(c, b);
+                else if (b.type === 'cannon') drawCannon(c, b);
+                else if (b.type === 'tesla') drawTesla(c, b);
+                else if (b.type === 'havan') drawHavan(c, b);
+                else if (b.type === 'buyucu') drawBuyucu(c, b);
+                else if (b.type === 'collector') drawCollector(c, b);
+                else if (b.type === 'kisla') drawKisla(c, b);
+                else drawDepot(c, b);
+                if (b.hp < b.maxHp) bar(c, b.x, b.y - b.r - (b.type === 'hall' ? r.k * 36 : 12), b.r * 1.6, b.hp / b.maxHp, b.hp / b.maxHp > 0.4 ? '#2ecc71' : '#e74c3c');
+            } else if (o.d) {
+                drawDefender(c, o.d);
             } else {
                 drawTroop(c, o.t);
             }
