@@ -1,14 +1,19 @@
 // ============================================================================
-// MOD: KÖY BASKINI (mod8.js) - Clash of Clans havasında köy yıkma
+// MOD: KÖY BASKINI (mod8.js) - Clash of Clans havasında köy yıkma   [v2]
 // ----------------------------------------------------------------------------
 // Bu modda karakter yok. Alt çubuktan birlik seçip köyün DIŞINA dokunarak
 // (basılı tutup sürükleyerek de) birlik bırakırsın. Birlikler köyü kendi
 // kendine yıkar:
-//   Slime   : yakın dövüşçü, ölünce ikiye bölünür (iki kez)
-//   Mor Bot : uzaktan ateş eder, klasik tek gözlü görünüm
-//   Yuva    : sabit durur, kısa sürede slime doğurup çöker
-// Köy: 1 Belediye Binası, 2 Okçu Kulesi, 2 Top, 3 Depo, çevresinde duvar.
+//   Slime    : yakın dövüşçü, ölünce ikiye bölünür (iki kez)
+//   Mor Bot  : uzaktan ateş eder, klasik tek gözlü görünüm
+//   Yuva     : sabit durur, kısa sürede slime doğurup çöker
+//   Bombacı  : hızlı, kırılgan; en yakın DUVARA koşup patlar (duvar yıkıcı)
+//   Dev Bot  : yavaş ve çok dayanıklı; önce SAVUNMA binalarına saldırır
+// Köy: 1 Belediye Binası, 2 Okçu Kulesi, 2 Top, 2 Tesla Kulesi, 3 Depo, duvar.
+//   Tesla Kulesi: çevresindeki TÜM birliklere belli aralıkla elektrik darbesi
+//   yayar (slime sürülerine karşı iyidir; uzaktan ateş eden botlar menzil dışından yıkar).
 // Yıkım %50 = 1 yıldız, Belediye = 1 yıldız, %100 = 1 yıldız. Süre 3 dakika.
+// Köy ve birlikler [v2]'de küçültüldü (VILLAGE_SCALE / TROOP_SCALE).
 // Birlikler klasik moddaki botlarla aynı çizim fonksiyonuyla (drawEntity) çiziliyor.
 // Denge ayarları aşağıdaki sabitlerde, tek yerden değiştirilir.
 // ============================================================================
@@ -21,7 +26,9 @@
 
     // ---- Denge ayarları ----
     const RAID_TIME = 180;                                  // saniye
-    const ARMY = { slime: 8, bot: 4, nest: 2 };             // elindeki birlik sayısı
+    const ARMY = { slime: 8, bot: 4, nest: 2, bomber: 4, tank: 2 };   // elindeki birlik sayısı
+    const VILLAGE_SCALE = 0.8;                              // köyün genel boyutu (küçültmek için düşür)
+    const TROOP_SCALE = 0.75;                               // birliklerin boyutu
     const SLIME = [                                         // 0: büyük, 1: orta, 2: küçük
         { r: 24, hp: 620, dmg: 90, spd: 1.55 },
         { r: 16, hp: 300, dmg: 60, spd: 1.8 },
@@ -30,23 +37,30 @@
     const SLIME_ATK = 48;                                   // kare (0.8 sn)
     const BOT = { r: 18, hp: 880, spd: 1.25, range: 135, dmg: 105, atk: 66 };
     const NEST = { r: 30, hp: 1500, spawnEvery: 140, spawns: 4 };
+    const BOMBER = { r: 11, hp: 170, spd: 2.7, wallDmg: 900, bldDmg: 380, radius: 34 };   // patlama yarıçapı (köy ölçeğiyle çarpılır)
+    const TANK = { r: 22, hp: 2600, spd: 0.95, dmg: 95, atk: 60 };
     const DEF = {
         archer: { range: 175, interval: 50, dmg: 62, speed: 9, kind: 'arrow', splash: 0 },
-        cannon: { range: 150, interval: 105, dmg: 240, speed: 6.5, kind: 'ball', splash: 24 }
+        cannon: { range: 150, interval: 105, dmg: 240, speed: 6.5, kind: 'ball', splash: 24 },
+        tesla: { range: 100, interval: 85, dmg: 115, kind: 'pulse', splash: 0 }
     };
-    const BUILDING_HP = { hall: 5200, archer: 1500, cannon: 1800, depot: 1100, wall: 520 };
-    const LOOT = { hall: 900, depot: 450, archer: 150, cannon: 150 };
+    const BUILDING_HP = { hall: 5200, archer: 1500, cannon: 1800, depot: 1100, tesla: 1400, wall: 520 };
+    const LOOT = { hall: 900, depot: 450, archer: 150, cannon: 150, tesla: 200 };
     const DEPLOY_MARGIN = 42;                               // köyün çevresinde birlik bırakılamayan şerit
 
     const TROOP_INFO = {
         slime: { label: 'Slime' },
         bot: { label: 'Mor Bot' },
-        nest: { label: 'Yuva' }
+        nest: { label: 'Yuva' },
+        bomber: { label: 'Bombacı' },
+        tank: { label: 'Dev Bot' }
     };
     const ICONS = {
         slime: '<svg viewBox="0 0 40 40"><circle cx="20" cy="20" r="16" fill="#2ecc71" stroke="#1e8449" stroke-width="3"/><circle cx="27" cy="20" r="4" fill="rgba(0,0,0,.45)"/></svg>',
         bot: '<svg viewBox="0 0 40 40"><circle cx="20" cy="20" r="16" fill="#9b59b6" stroke="#6c3483" stroke-width="3"/><circle cx="27" cy="20" r="4" fill="rgba(0,0,0,.45)"/></svg>',
-        nest: '<svg viewBox="0 0 40 40"><circle cx="20" cy="20" r="17" fill="#27ae60" stroke="#145a32" stroke-width="3"/><circle cx="20" cy="20" r="11" fill="#1e8449"/><circle cx="20" cy="20" r="5" fill="#145a32"/></svg>'
+        nest: '<svg viewBox="0 0 40 40"><circle cx="20" cy="20" r="17" fill="#27ae60" stroke="#145a32" stroke-width="3"/><circle cx="20" cy="20" r="11" fill="#1e8449"/><circle cx="20" cy="20" r="5" fill="#145a32"/></svg>',
+        bomber: '<svg viewBox="0 0 40 40"><circle cx="20" cy="22" r="13" fill="#e67e22" stroke="#a04000" stroke-width="3"/><path d="M24 11 Q28 5 33 7" stroke="#f1c40f" stroke-width="3" fill="none"/><circle cx="26" cy="22" r="3.5" fill="rgba(0,0,0,.45)"/></svg>',
+        tank: '<svg viewBox="0 0 40 40"><circle cx="20" cy="20" r="18" fill="#d35400" stroke="#873600" stroke-width="4"/><circle cx="20" cy="20" r="11" fill="none" stroke="#873600" stroke-width="2"/><circle cx="28" cy="20" r="4.5" fill="rgba(0,0,0,.45)"/></svg>'
     };
 
     let raid = null;
@@ -75,16 +89,16 @@
         #raid-hud .rh-stars span.on { color:#f1c40f; text-shadow:0 0 8px #f1c40f; }
         #raid-hud .rh-pct { font-size:15px; color:#ecf0f1; }
         #raid-hud .rh-loot { font-size:16px; color:#f1c40f; min-width:54px; text-align:right; }
-        #raid-bar { bottom:14px; left:50%; transform:translateX(-50%); gap:10px; }
-        .raid-troop { width:80px; padding:6px 4px 5px; background:rgba(15,25,35,.88); border:3px solid #34495e;
-            border-radius:14px; text-align:center; color:#fff; font-size:11px; font-weight:700; position:relative;
+        #raid-bar { bottom:14px; left:50%; transform:translateX(-50%); gap:6px; }
+        .raid-troop { width:64px; padding:5px 3px 4px; background:rgba(15,25,35,.88); border:3px solid #34495e;
+            border-radius:14px; text-align:center; color:#fff; font-size:10px; font-weight:700; position:relative;
             transition:all .15s; cursor:pointer; }
-        .raid-troop svg { width:38px; height:38px; display:block; margin:0 auto 2px; }
+        .raid-troop svg { width:30px; height:30px; display:block; margin:0 auto 2px; }
         .raid-troop.sel { border-color:#2ecc71; box-shadow:0 0 14px rgba(46,204,113,.75); transform:translateY(-8px); }
         .raid-troop.empty { opacity:.3; }
         .raid-troop .rt-count { position:absolute; top:-9px; right:-7px; background:#e74c3c; border-radius:11px;
-            padding:1px 7px; font-size:12px; border:2px solid #fff; }
-        #raid-hint { bottom:122px; left:50%; transform:translateX(-50%); background:rgba(15,25,35,.85);
+            padding:1px 6px; font-size:11px; border:2px solid #fff; }
+        #raid-hint { bottom:112px; left:50%; transform:translateX(-50%); background:rgba(15,25,35,.85);
             color:#ecf0f1; padding:8px 16px; border-radius:12px; font-size:13px; font-weight:700;
             pointer-events:none; text-align:center; max-width:86%; }
         #raid-result { display:none; position:absolute; top:0; left:0; width:100%; height:100%;
@@ -185,16 +199,16 @@
         const W = canvas.width, H = canvas.height;
         const topUI = 76, botUI = 118;
         const availH = H - topUI - botUI;
-        const k = clamp(Math.min(W * 0.72 / 280, availH * 0.55 / 230), 0.7, 1.5);
+        const k = clamp(Math.min(W * 0.72 / 280, availH * 0.55 / 230), 0.7, 1.5) * VILLAGE_SCALE;
         const cx = W / 2, cy = topUI + availH / 2;
 
         raid = {
             W, H, k, cx, cy, topUI, botUI,
             hw: 130 * k, hh: 105 * k,
             walls: [], buildings: [], troops: [], projs: [], parts: [], nums: [],
-            army: { slime: ARMY.slime, bot: ARMY.bot, nest: ARMY.nest },
+            army: Object.assign({}, ARMY),
             selected: 'slime', time: RAID_TIME, started: false, over: false, idle: 0,
-            destroyed: 0, total: 8, hallDown: false, loot: 0, shake: 0,
+            destroyed: 0, total: 0, hallDown: false, loot: 0, shake: 0,
             defMult: window.GAME_DIFFICULTY === 'easy' ? 0.7 : 1,
             bg: null, drag: false, lastDeploy: 0, lastPos: { x: 0, y: 0 }, hudCache: ''
         };
@@ -213,7 +227,9 @@
         addB('hall', 0, 0, 38);
         addB('archer', -80, -55, 18); addB('archer', 80, 55, 18);
         addB('cannon', 80, -55, 18); addB('cannon', -80, 55, 18);
+        addB('tesla', 0, 72, 17); addB('tesla', 58, 0, 17);
         addB('depot', 0, -72, 20); addB('depot', -100, 0, 20); addB('depot', 100, 0, 20);
+        raid.total = raid.buildings.length;
 
         buildBackground();
         hintEl.classList.add('show');
@@ -301,6 +317,9 @@
         if (raid.nums.length > 60) raid.nums.shift();
         raid.nums.push({ x: x + (Math.random() - 0.5) * 16, y, txt, color, life: 55 });
     }
+    function addRing(x, y, color, maxR, life) {
+        raid.parts.push({ x, y, vx: 0, vy: 0, life, maxLife: life, color, size: 3, ring: true, ringMax: maxR });
+    }
 
     // =======================================================================
     // HASAR / YIKIM
@@ -349,15 +368,19 @@
     // BİRLİKLER
     // =======================================================================
     function spawnTroop(type, x, y, stage) {
-        const kt = clamp(raid.k, 0.9, 1.25);
+        const kt = TROOP_SCALE * clamp(raid.k / VILLAGE_SCALE, 0.9, 1.25);
         const base = { type, x, y, isDead: false, kbX: 0, kbY: 0, atk: 0, target: null, blocked: null,
-            angle: Math.atan2(raid.cy - y, raid.cx - x), stage: stage || 0 };
+            angle: Math.atan2(raid.cy - y, raid.cx - x), stage: stage || 0, atkInt: SLIME_ATK };
         let t;
         if (type === 'slime') {
             const s = SLIME[base.stage];
             t = Object.assign(base, { radius: s.r * kt, hp: s.hp, maxHp: s.hp, speed: s.spd, dmg: s.dmg, color: '#2ecc71' });
         } else if (type === 'bot') {
             t = Object.assign(base, { radius: BOT.r * kt, hp: BOT.hp, maxHp: BOT.hp, speed: BOT.spd, dmg: BOT.dmg, color: '#9b59b6' });
+        } else if (type === 'bomber') {
+            t = Object.assign(base, { radius: BOMBER.r * kt, hp: BOMBER.hp, maxHp: BOMBER.hp, speed: BOMBER.spd, dmg: 0, color: '#e67e22' });
+        } else if (type === 'tank') {
+            t = Object.assign(base, { radius: TANK.r * kt, hp: TANK.hp, maxHp: TANK.hp, speed: TANK.spd, dmg: TANK.dmg, color: '#d35400', atkInt: TANK.atk });
         } else {
             t = Object.assign(base, { radius: NEST.r * kt, hp: NEST.hp, maxHp: NEST.hp, speed: 0, dmg: 0,
                 color: '#27ae60', isNest: true, timer: 0, spawned: 0 });
@@ -372,6 +395,24 @@
             if (b.destroyed) return;
             const d = dist(t, b);
             if (d < bd) { bd = d; best = b; }
+        });
+        return best;
+    }
+    function nearestDefense(t) {
+        let best = null, bd = Infinity;
+        raid.buildings.forEach(b => {
+            if (b.destroyed || !DEF[b.type]) return;
+            const d = dist(t, b);
+            if (d < bd) { bd = d; best = b; }
+        });
+        return best;
+    }
+    function nearestWall(t) {
+        let best = null, bd = Infinity;
+        raid.walls.forEach(w => {
+            if (w.destroyed) return;
+            const d = dist(t, w);
+            if (d < bd) { bd = d; best = w; }
         });
         return best;
     }
@@ -402,10 +443,26 @@
         }
     }
 
+    // Bombacı patlaması: duvarlara çok, binalara orta hasar
+    function bomberExplode(t) {
+        const R = BOMBER.radius * raid.k;
+        raid.walls.forEach(w => { if (!w.destroyed && Math.hypot(w.x - t.x, w.y - t.y) < R + w.r) damageBuilding(w, BOMBER.wallDmg); });
+        raid.buildings.forEach(b => { if (!b.destroyed && Math.hypot(b.x - t.x, b.y - t.y) < R + b.r) damageBuilding(b, BOMBER.bldDmg); });
+        addParts(t.x, t.y, '#e67e22', 14, 3, 26, 4);
+        addParts(t.x, t.y, '#f1c40f', 8, 2.4, 22, 3);
+        addRing(t.x, t.y, '#e67e22', R, 16);
+        raid.shake = Math.max(raid.shake, 6);
+        t.isDead = true;
+    }
+
     function updateTroop(t, ts) {
         if (t.type === 'nest') { updateNest(t, ts); return; }
         if (t.blocked && t.blocked.destroyed) t.blocked = null;
-        const tgt = t.blocked || nearestBuilding(t);
+        let tgt;
+        if (t.type === 'bomber') tgt = nearestWall(t) || nearestBuilding(t);          // duvar yıkıcı
+        else if (t.blocked) tgt = t.blocked;
+        else if (t.type === 'tank') tgt = nearestDefense(t) || nearestBuilding(t);     // önce savunmalar
+        else tgt = nearestBuilding(t);
         t.target = tgt;
         if (!tgt) return;
         const dx = tgt.x - t.x, dy = tgt.y - t.y, d = Math.hypot(dx, dy) || 1;
@@ -422,19 +479,21 @@
                 raid.projs.push({ kind: 'orb', from: 'troop', x: t.x, y: t.y, target: tgt, tx: tgt.x, ty: tgt.y,
                     speed: 8 * raid.k, dmg: BOT.dmg, splash: 0, angle: t.angle });
                 t.atk = BOT.atk;
+            } else if (t.type === 'bomber') {
+                bomberExplode(t);
             } else {
                 damageBuilding(tgt, t.dmg);
-                addParts(tgt.x, tgt.y, '#2ecc71', 3, 1.6, 14, 2.5);
-                t.atk = SLIME_ATK;
+                addParts(tgt.x, tgt.y, t.color, 3, 1.6, 14, 2.5);
+                t.atk = t.atkInt;
             }
         }
     }
 
     // =======================================================================
-    // SAVUNMA (okçu kulesi, top)
+    // SAVUNMA (okçu kulesi, top, tesla kulesi)
     // =======================================================================
     function updateDefense(b, ts) {
-        if (b.destroyed || (b.type !== 'archer' && b.type !== 'cannon')) return;
+        if (b.destroyed || !DEF[b.type]) return;
         const cfg = DEF[b.type];
         const range = cfg.range * raid.k;
         b.reload -= ts;
@@ -446,6 +505,18 @@
             if (d - t.radius < range && d < bd) { bd = d; best = t; }
         });
         if (!best) return;
+
+        // Tesla: çevresindeki TÜM birliklere darbe
+        if (b.type === 'tesla') {
+            if (b.reload <= 0) {
+                b.reload = cfg.interval;
+                raid.troops.forEach(t => { if (!t.isDead && dist(b, t) - t.radius < range) damageTroop(t, cfg.dmg * raid.defMult); });
+                addRing(b.x, b.y, '#f1c40f', range, 16);
+                addParts(b.x, b.y, '#f1c40f', 6, 2.2, 16, 2.5);
+            }
+            return;
+        }
+
         b.aim = Math.atan2(best.y - b.y, best.x - b.x);
         if (b.reload <= 0) {
             b.reload = cfg.interval;
@@ -622,7 +693,7 @@
 
         if (raid.destroyed === raid.total) { endRaid('win'); return; }
         if (raid.time <= 0) { raid.time = 0; updateHUD(true); endRaid('time'); return; }
-        const left = raid.army.slime + raid.army.bot + raid.army.nest;
+        const left = Object.keys(raid.army).reduce((s, k) => s + raid.army[k], 0);
         if (raid.started && left === 0 && raid.troops.length === 0) {
             raid.idle += ts;
             if (raid.idle > 90) endRaid('lose');
@@ -723,6 +794,24 @@
         c.beginPath(); c.arc(x, y, r * 0.22, 0, Math.PI * 2); c.fillStyle = '#d4ac0d'; c.fill();
     }
 
+    function drawTesla(c, b) {
+        const r = b.r, x = b.x, y = b.y, f = b.hitFlash > 0;
+        shadow(c, x, y + r * 0.6, r * 1.1, r * 0.6);
+        c.beginPath(); c.arc(x, y, r, 0, Math.PI * 2);
+        c.fillStyle = f ? '#fff' : '#34495e'; c.fill();
+        c.strokeStyle = '#f1c40f'; c.lineWidth = 3; c.stroke();
+        c.beginPath(); c.arc(x, y, r * 0.64, 0, Math.PI * 2); c.fillStyle = '#2c3e50'; c.fill();
+        // şimşek
+        c.beginPath();
+        c.moveTo(x + r * 0.14, y - r * 0.55); c.lineTo(x - r * 0.3, y + r * 0.08); c.lineTo(x - r * 0.02, y + r * 0.08);
+        c.lineTo(x - r * 0.14, y + r * 0.55); c.lineTo(x + r * 0.3, y - r * 0.1); c.lineTo(x + r * 0.02, y - r * 0.1);
+        c.closePath(); c.fillStyle = '#f1c40f'; c.fill();
+        // şarj yayı
+        const ch = clamp(1 - b.reload / DEF.tesla.interval, 0, 1);
+        c.beginPath(); c.arc(x, y, r + 4, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * ch);
+        c.strokeStyle = 'rgba(241,196,15,0.9)'; c.lineWidth = 2; c.stroke();
+    }
+
     function drawDepot(c, b) {
         const r = b.r, x = b.x, y = b.y, f = b.hitFlash > 0;
         shadow(c, x, y + r * 0.7, r * 1.15, r * 0.55);
@@ -806,6 +895,7 @@
                 if (b.type === 'hall') drawHall(c, b);
                 else if (b.type === 'archer') drawArcher(c, b);
                 else if (b.type === 'cannon') drawCannon(c, b);
+                else if (b.type === 'tesla') drawTesla(c, b);
                 else drawDepot(c, b);
                 if (b.hp < b.maxHp) bar(c, b.x, b.y - b.r - (b.type === 'hall' ? r.k * 36 : 12), b.r * 1.6, b.hp / b.maxHp, b.hp / b.maxHp > 0.4 ? '#2ecc71' : '#e74c3c');
             } else {
@@ -819,7 +909,8 @@
             c.globalAlpha = clamp(p.life / p.maxLife, 0, 1);
             if (p.ring) {
                 c.strokeStyle = p.color; c.lineWidth = 2;
-                c.beginPath(); c.arc(p.x, p.y, 8 + (p.maxLife - p.life) * 1.6, 0, Math.PI * 2); c.stroke();
+                const rad = p.ringMax ? p.ringMax * (1 - p.life / p.maxLife) : 8 + (p.maxLife - p.life) * 1.6;
+                c.beginPath(); c.arc(p.x, p.y, Math.max(1, rad), 0, Math.PI * 2); c.stroke();
             } else {
                 c.fillStyle = p.color;
                 c.beginPath(); c.arc(p.x, p.y, p.size, 0, Math.PI * 2); c.fill();
