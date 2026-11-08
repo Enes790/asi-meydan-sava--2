@@ -1,49 +1,53 @@
 // ============================================================================
-// mod36.js - "Asalak" karakteri (sülük çağırıcı)
+// mod37.js - "Tetik" karakteri (nişancı, 3 mermi türü)
 // Ana dosyaya dokunmaz. index.html'de TÜM mod script'lerinden SONRA eklenmeli:
-//   <script src="mod36.js"></script>
+//   <script src="mod37.js"></script>
 //
-// Asalak'ın çağırdıkları Çağrı'nın koşan çıraklarından da, Volt'un yerinde
-// duran bobinlerinden de farklı hisseder: SÜLÜKLER düşmana hızla gidip YAPIŞIR,
-// beslendikçe büyür ve güçlenir, emdikleri canın bir kısmı sana geri döner.
-//  - Ana saldırı (Sülük): Sağ joystick'i çek-bırak, çektiğin mesafede bir sülük
-//    doğar (1 cephane). Aynı anda en fazla 3 sülük (4.'yü çağırırsan en eskisi
-//    gider). Sülük, üzerinde en az sülük olan en yakın düşmanı seçer, yapışır ve
-//    her 0.5 sn can emer. Uçarken düşman mermisi isabet ederse ölür.
-//  - Özgün mekanik - BESLENME: Sülük emdikçe 3 kademe büyür (1 -> 2 -> 3).
-//    Emme hasarı kademeyle artar ve düşmanın o anki canının %1'i kadar ek hasar
-//    verir (dev botlara karşı iyi). Emilen canın %20'si sana şifa olur.
-//    Düşman ölünce sülük kademesini koruyarak yeni konağa gider.
-//  - Yetenek 1 (KULUÇKA): Tüm sülükleri anında bir konağa yapıştırır ve eksik
-//    sülükleri (3'e kadar) doğrudan düşmanların üzerinde doğurur.
-//  - Yetenek 2 (KAN HIRSI): 6 sn boyunca emme hasarı x1.6, şifa x2, sülük hızı x1.5.
-//  - Güç (KRALİÇE): Ağır bir Kraliçe Asalak yanında belirir (12 sn). Her 0.75 sn'de
-//    bir yavru sülük doğurur (en fazla 8); yavrular hemen düşmana yapışıp 3 sn emer.
-//    Kraliçe seni takip eder, düşman mermilerini yutar. Aynı anda 1 Kraliçe.
-//  - Bar: emilen hasarla ve zamanla dolar.
+// Tetik bir NİŞANCIDIR. Karakterin üstünde 3 renkli bölgeli bir BAR sürekli
+// sağa sola gider. Sağ joystick'e dokunup NİŞAN ALMAYA BAŞLADIĞIN AN bar DURUR
+// ve durduğu bölge mermi türünü seçer (sonra rahatça nişan alırsın):
+//   MAVİ  (B) Büyüyen mermi : uzaklaştıkça büyür, hasarı 350 -> 1300 artar.
+//   YEŞİL (K) Kök mermisi   : 600 hasar. İsabet eden düşman 2 sn boyunca
+//                             vurulduğu yerden 20 birimden fazla uzaklaşamaz.
+//   MOR   (T) Takas mermisi : 400 hasar. İsabet eden düşmanla YER DEĞİŞTİRİRSİN
+//                             (kısa dokunulmazlık). 2 cephane harcar.
+//  - Yetenek 1 (KİLİT): Barı durdurur, seçili tür sonraki 3 atış için kilitlenir.
+//  - Yetenek 2 (AV İŞARETİ): Joystick yönündeki düşmanı 4 sn işaretler. Tüm
+//    mermilerin işaretliye doğru kıvrılır ve işaretli senden %25 fazla hasar alır.
+//  - Güç (KADER MERMİSİ): Yavaş, dev bir mermi. Sağ joystick'i çevirerek mermiyi
+//    SEN YÖNLENDİRİRSİN (4 sn uçar). Uçtukça büyür ve hasarı 900 -> 2400 artar,
+//    duvardan 1 kez seker, çarpınca büyük patlar ve çevredekileri 2 sn yerinde
+//    tutar (kök). Uçarken normal atış kapalıdır.
+//  - Bar: mermi isabetleriyle ve zamanla dolar.
 // ============================================================================
 (function () {
     'use strict';
-    const ID = 'asalak';
+    const ID = 'tetik';
     const cl = (v, a, b) => Math.max(a, Math.min(b, v));
     const clamp01 = v => Math.max(0, Math.min(1, v));
+    const lerp = (a, b, t) => a + (b - a) * t;
+    const angDiff = (a, b) => { let d = a - b; while (d > Math.PI) d -= Math.PI * 2; while (d < -Math.PI) d += Math.PI * 2; return d; };
 
     window.GAME_EXT = window.GAME_EXT || { characters: {}, modes: {}, obstacleTypes: {}, botTypes: {}, hooks: {} };
-    window.GAME_EXT.characters[ID] = { color: '#b33771', hp: 3600, speed: 3.4 };
+    window.GAME_EXT.characters[ID] = { color: '#f1f2f6', hp: 3400, speed: 3.4 };
 
     // ---- Denge ayarları (buradan oynayabilirsin) ----
     const CFG = {
-        leech: { radius: [11, 14, 18], hp: 350, speed: 4.2, life: 1200, max: 3, tickEvery: 30,
-                 drainBase: [45, 70, 100], hostPct: 0.01, feedStage: [400, 1000], heal: 0.2 },
-        baby: { radius: 8, hp: 150, speed: 5, drainBase: 35, attachLife: 200, max: 8 },
-        frenzy: { time: 360, drain: 1.6, heal: 2, speed: 1.5, cd: 660 },
-        q: { cd: 480 },
-        queen: { radius: 30, hp: 3500, life: 720, birthEvery: 45, followDist: 110, speed: 1.6 },
-        passive: 0.02, chargeDiv: 30
+        bar: { period: 90, w: 72, h: 9 },
+        b1: { speed: PLAYER_BULLET_SPEED * 0.95, range: RANGE * 1.3, rMin: 6, rMax: 28, dmgMin: 350, dmgMax: 1300 },
+        b2: { speed: PLAYER_BULLET_SPEED * 1.15, range: RANGE * 1.2, r: 8, dmg: 600, rootLimit: 20, rootFrames: 120 },
+        b3: { speed: PLAYER_BULLET_SPEED, range: RANGE * 1.25, r: 9, dmg: 400, cost: 2, inv: 24 },
+        mark: { time: 240, mult: 1.25, turn: 0.07, maxAngle: 2.2, cd: 540 },
+        lock: { shots: 3, cd: 480 },
+        fate: { speed: 4.6, life: 240, turn: 0.08, r0: 18, r1: 46, dmg0: 900, dmg1: 2400, expR: 130, splash: 0.6, rootFrames: 120, expireFactor: 0.6 },
+        passive: 0.02, chargeDiv: 25
     };
+    const COL = ['#0abde3', '#10ac84', '#a55eea'], LET = ['B', 'K', 'T'];
 
-    let leeches = [], queen = null, frenzyT = 0, healAcc = 0, healT = 0, rings = [], lastT = 0, wasStarted = false;
-    const blockers = () => obstacles.concat(cactusWalls || []);
+    let shots = [], fate = null, mark = null, lockShots = 0, lockType = 0;
+    let phase = 0, frozen = false, frozenType = 0, frozenPos = 0, lastAim = false, invT = 0, lastMM = 0;
+    let lastT = 0, wasStarted = false;
+    window.addEventListener('mousemove', () => { lastMM = Date.now(); });
 
     // ---- Güç şarjı: ana oyunun şarjı bu karakter için kapalı, kendi barımız var ----
     const prevCharge = window.chargeUlti;
@@ -52,317 +56,299 @@
         return prevCharge.apply(this, arguments);
     };
     function charge(n) {
-        if (!gameStarted || player.charType !== ID || player.ultReady || queen) return;
+        if (!gameStarted || player.charType !== ID || player.ultReady || fate) return;
         player.ultCharge = Math.min(100, player.ultCharge + n);
         ultFill.style.width = player.ultCharge + '%';
         if (player.ultCharge >= 100) {
             player.ultReady = true; ultiBtn.classList.add('ready');
-            addFloatingNumber(player.x, player.y - 40, 'KRALİÇE HAZIR!', '#b33771');
+            addFloatingNumber(player.x, player.y - 40, 'KADER HAZIR!', '#f1f2f6');
         }
     }
 
-    function freeSpot(x, y, r) {
-        const pad = WALL_THICKNESS + r + 4;
-        x = cl(x, pad, canvas.width - pad); y = cl(y, pad, canvas.height - pad);
-        for (let it = 0; it < 6; it++) {
-            let moved = false;
-            for (const o of blockers()) {
-                const d = getDist({ x, y }, o) || 0.001, min = o.radius + r + 2;
-                if (d < min) { x += (x - o.x) / d * (min - d); y += (y - o.y) / d * (min - d); moved = true; }
-            }
-            x = cl(x, pad, canvas.width - pad); y = cl(y, pad, canvas.height - pad);
-            if (!moved) break;
-        }
-        return { x, y };
-    }
-    function summonPull() {
-        let pull = Math.hypot(aimData.x, aimData.y);
-        if (!(aimData.active && pull >= 0.1)) pull = Math.hypot(lastMouseX - player.x, lastMouseY - player.y) / (RANGE * 0.8);
-        return cl(pull, 0.1, 1);
-    }
-    function spawnPoint(a, pull, r) {
-        const dist = Math.max(60, pull * RANGE * 0.8);
-        return freeSpot(player.x + Math.cos(a) * dist, player.y + Math.sin(a) * dist, r);
-    }
-    const bulletDmg = b => {
-        const easy = window.GAME_DIFFICULTY === 'easy';
-        if (b.type === 'stationary_bot_bullet') return easy ? 300 : 350;
-        if (b.type === 'boomerang') return easy ? 200 : 250;
-        return easy ? 480 : 500;
-    };
-    function moveAlly(m, tx, ty, speed, ts) {
-        const dx = tx - m.x, dy = ty - m.y, d = Math.hypot(dx, dy) || 1;
-        let dirx = dx / d, diry = dy / d;
-        for (const o of blockers()) {
-            const od = getDist(m, o) || 0.001, reach = o.radius + m.radius + 38;
-            if (od < reach) {
-                const nx = (m.x - o.x) / od, ny = (m.y - o.y) / od;
-                let tx2 = -ny, ty2 = nx;
-                if (tx2 * dirx + ty2 * diry < 0) { tx2 = -tx2; ty2 = -ty2; }
-                const w = (reach - od) / 38 * 1.6;
-                dirx += (nx * 0.5 + tx2) * w; diry += (ny * 0.5 + ty2) * w;
-            }
-        }
-        const l = Math.hypot(dirx, diry) || 1;
-        m.fa = Math.atan2(diry, dirx);
-        m.x += dirx / l * speed * ts; m.y += diry / l * speed * ts;
-    }
-    function resolveAlly(m) {
-        for (const o of blockers()) {
-            const d = getDist(m, o) || 0.001, min = m.radius + o.radius;
-            if (d < min) { m.x += (m.x - o.x) / d * (min - d); m.y += (m.y - o.y) / d * (min - d); }
-        }
-        const pad = WALL_THICKNESS + m.radius;
-        m.x = cl(m.x, pad, canvas.width - pad); m.y = cl(m.y, pad, canvas.height - pad);
-    }
+    // ---- Bar ----
+    function barPos() { const u = (phase % CFG.bar.period) / CFG.bar.period; return u < 0.5 ? u * 2 : (1 - u) * 2; }
+    const zoneOf = p => Math.min(2, Math.floor(p * 3));
+    const currentType = () => lockShots > 0 ? lockType : (frozen ? frozenType : zoneOf(barPos()));
+    const costOf = t => t === 2 ? CFG.b3.cost : 1;
+    const rangeOf = t => t === 0 ? CFG.b1.range : (t === 1 ? CFG.b2.range : CFG.b3.range);
 
-    // ---- Sülük yardımcıları ----
-    function mkLeech(x, y, baby) {
-        const hp = baby ? CFG.baby.hp : CFG.leech.hp;
-        return { x, y, radius: baby ? CFG.baby.radius : CFG.leech.radius[0], hp, maxHp: hp, life: CFG.leech.life,
-                 host: null, ang: Math.random() * Math.PI * 2, fa: 0, feed: 0, stage: 1, tick: 0, baby: !!baby,
-                 attachT: 0, drop: baby ? 0 : 8, wig: Math.random() * 10 };
+    // ---- Mermi ----
+    function mkShot(type, x, y, a) {
+        const C = type === 0 ? CFG.b1 : (type === 1 ? CFG.b2 : CFG.b3);
+        return { type, x, y, ang: a, vx: Math.cos(a) * C.speed, vy: Math.sin(a) * C.speed, speed: C.speed, range: C.range, dist: 0, r: type === 0 ? C.rMin : C.r };
     }
-    const nonBaby = () => leeches.filter(l => !l.baby);
-    function hostCounts() {
-        const cnt = new Map();
-        leeches.forEach(l => { if (l.host) cnt.set(l.host, (cnt.get(l.host) || 0) + 1); });
-        return cnt;
-    }
-    function pickHost(from, enemies, cnt) {
-        let best = null, bs = 1e9;
-        for (const e of enemies) {
-            if (e.hp <= 0) continue;
-            const s = (cnt.get(e) || 0) * 600 + getDist(from, e);
-            if (s < bs) { bs = s; best = e; }
-        }
-        return best;
-    }
-    function attach(l, h, cnt) {
-        l.host = h; l.ang = Math.random() * Math.PI * 2;
-        l.x = h.x + Math.cos(l.ang) * h.radius * 0.85; l.y = h.y + Math.sin(l.ang) * h.radius * 0.85;
-        cnt.set(h, (cnt.get(h) || 0) + 1);
-    }
-
-    // ---- Ana saldırı: Sülük çağır ----
     const origFire = Player.prototype.fire;
     Player.prototype.fire = function (a, pull) {
         if (this.charType !== ID) return origFire.call(this, a, pull);
-        const p = spawnPoint(a, pull !== undefined ? clamp01(pull) : summonPull(), CFG.leech.radius[0]);
-        const nb = nonBaby();
-        if (nb.length >= CFG.leech.max) { const old = nb[0]; spawnParticles(old.x, old.y, '#e84393', 'smoke'); leeches.splice(leeches.indexOf(old), 1); }
-        leeches.push(mkLeech(p.x, p.y, false));
-        spawnParticles(p.x, p.y, '#e84393', 'normal');
-        this.consumeAmmo();
+        if (fate) return;                                   // Kader Mermisi uçarken normal atış kapalı (joystick yönlendirme içindir)
+        const type = currentType(), cost = costOf(type);
+        if (this.ammo < cost) { addFloatingNumber(this.x, this.y - 30, 'CEPHANE YETMEDİ!', '#e74c3c'); return; }
+        if (lockShots > 0) { lockShots--; if (lockShots === 0) addFloatingNumber(this.x, this.y - 40, 'KİLİT BİTTİ', '#f1f2f6'); }
+        shots.push(mkShot(type, this.x, this.y, a));
+        for (let i = 0; i < cost; i++) this.consumeAmmo();
     };
+
+    function hitEnemy(s, e, g) {
+        let dmg = s.type === 0 ? lerp(CFG.b1.dmgMin, CFG.b1.dmgMax, g) : (s.type === 1 ? CFG.b2.dmg : CFG.b3.dmg);
+        if (mark && mark.e === e) dmg *= CFG.mark.mult;
+        dmg = Math.round(dmg);
+        e.hp -= dmg; addFloatingNumber(e.x, e.y, dmg, COL[s.type]); charge(dmg / CFG.chargeDiv);
+        if (s.type === 1) {
+            e.cRoot = { x: e.x, y: e.y, t: CFG.b2.rootFrames };
+            addFloatingNumber(e.x, e.y - 22, 'KÖK!', COL[1]);
+        } else if (s.type === 2 && !e.isNest && !player.isDead) {
+            const px = player.x, py = player.y;
+            spawnParticles(px, py, COL[2], 'smoke');
+            player.x = e.x; player.y = e.y; e.x = px; e.y = py; e.cRoot = null;
+            if (e.kbX !== undefined) { e.kbX = 0; e.kbY = 0; }
+            spawnParticles(player.x, player.y, COL[2], 'smoke');
+            player.jumpInvulnerable = true; invT = CFG.b3.inv;
+            addFloatingNumber(player.x, player.y - 30, 'TAKAS!', COL[2]);
+        }
+    }
+
+    function updateShots(ts, enemies) {
+        const mk = (mark && mark.e.hp > 0) ? mark.e : null;
+        for (let i = shots.length - 1; i >= 0; i--) {
+            const s = shots[i];
+            if (mk) {
+                const diff = angDiff(Math.atan2(mk.y - s.y, mk.x - s.x), s.ang);
+                if (Math.abs(diff) < CFG.mark.maxAngle) {
+                    s.ang += cl(diff, -CFG.mark.turn * ts, CFG.mark.turn * ts);
+                    s.vx = Math.cos(s.ang) * s.speed; s.vy = Math.sin(s.ang) * s.speed;
+                }
+            }
+            s.x += s.vx * ts; s.y += s.vy * ts; s.dist += s.speed * ts;
+            const g = clamp01(s.dist / s.range);
+            if (s.type === 0) s.r = lerp(CFG.b1.rMin, CFG.b1.rMax, g);
+            if (Math.random() < 0.5 * Math.min(1, ts)) particles.push({ x: s.x, y: s.y, vx: (Math.random() - .5), vy: (Math.random() - .5), life: 16, maxLife: 30, color: COL[s.type], size: 2.5, type: 'normal' });
+            const pad = WALL_THICKNESS + 3;
+            let remove = s.x < pad || s.x > canvas.width - pad || s.y < pad || s.y > canvas.height - pad || s.dist >= s.range;
+            if (!remove) for (const o of obstacles) if (getDist(s, o) < o.radius + s.r) { o.hp -= 150; remove = true; break; }
+            if (!remove) for (const e of enemies) {
+                if (e.hp <= 0 || getDist(s, e) >= e.radius + s.r) continue;
+                hitEnemy(s, e, g); remove = true; break;
+            }
+            if (remove) { spawnParticles(s.x, s.y, COL[s.type], 'normal'); shots.splice(i, 1); }
+        }
+    }
 
     // ---- Yetenekler ----
     const origG1 = Player.prototype.activateGadget;
     Player.prototype.activateGadget = function (a, pull) {
         if (this.charType !== ID) return origG1.call(this, a, pull);
         if (!this.gadgetReady || this.isDead) return;
-        const enemies = getActiveEnemies().filter(e => e.hp > 0);
-        if (!enemies.length) { addFloatingNumber(this.x, this.y - 30, 'HEDEF YOK!', '#e74c3c'); return; }
-        const cnt = hostCounts();
-        nonBaby().forEach(l => { if (!l.host) { const h = pickHost(l, enemies, cnt); if (h) { attach(l, h, cnt); l.drop = 0; } } });
-        while (nonBaby().length < CFG.leech.max) {
-            const h = pickHost(this, enemies, cnt); if (!h) break;
-            const l = mkLeech(h.x, h.y, false); l.drop = 0; leeches.push(l); attach(l, h, cnt);
-            spawnParticles(l.x, l.y, '#e84393', 'normal');
-        }
-        rings.push({ x: this.x, y: this.y, r: 20, max: 90, life: 14, maxLife: 14 });
-        addFloatingNumber(this.x, this.y - 30, 'KULUÇKA!', '#e84393');
-        this.setCooldown(); this.gadgetCooldown = CFG.q.cd;
+        lockType = currentType(); lockShots = CFG.lock.shots; frozen = false;
+        addFloatingNumber(this.x, this.y - 30, 'KİLİT: ' + LET[lockType] + ' x' + lockShots, COL[lockType]);
+        this.setCooldown(); this.gadgetCooldown = CFG.lock.cd;
     };
 
+    function pickEnemy(angle) {
+        const ang = angle !== undefined ? angle : player.angle;
+        let best = null, bs = 1e9;
+        getActiveEnemies().forEach(e => {
+            if (e.hp <= 0) return;
+            const diff = Math.abs(angDiff(getAngle(player, e), ang));
+            if (diff > 1.05) return;                    // ~60°
+            const score = diff * 300 + getDist(player, e) * 0.3;
+            if (score < bs) { bs = score; best = e; }
+        });
+        return best;
+    }
     const origG2 = Player.prototype.activateGadget2;
     Player.prototype.activateGadget2 = function (a, pull) {
         if (this.charType !== ID) return origG2.call(this, a, pull);
         if (!this.gadget2Ready || this.isDead) return;
-        frenzyT = CFG.frenzy.time;
-        rings.push({ x: this.x, y: this.y, r: 20, max: 80, life: 14, maxLife: 14 });
-        addFloatingNumber(this.x, this.y - 30, 'KAN HIRSI!', '#ff4757');
-        this.gadget2Ready = false; this.gadget2Cooldown = CFG.frenzy.cd; gadgetBtn2.classList.add('cooldown');
+        const e = pickEnemy(a);
+        if (!e) { addFloatingNumber(this.x, this.y - 30, 'HEDEF YOK!', '#e74c3c'); return; }
+        mark = { e, t: CFG.mark.time };
+        addFloatingNumber(e.x, e.y - 30, 'AV İŞARETİ!', '#ff4757');
+        this.gadget2Ready = false; this.gadget2Cooldown = CFG.mark.cd; gadgetBtn2.classList.add('cooldown');
     };
 
     const origUlt = Player.prototype.fireUlti;
     Player.prototype.fireUlti = function (a, pull) {
         if (this.charType !== ID) return origUlt.call(this, a, pull);
-        if (!this.ultReady || this.isDead) return;
-        if (queen) { addFloatingNumber(this.x, this.y - 40, 'KRALİÇE ZATEN VAR!', '#e74c3c'); return; }
-        const Q = CFG.queen, p = freeSpot(this.x + Math.cos(a) * 110, this.y + Math.sin(a) * 110, Q.radius);
-        queen = { x: p.x, y: p.y, radius: Q.radius, hp: Q.hp, maxHp: Q.hp, life: Q.life, birth: 20, fa: a };
-        spawnParticles(p.x, p.y, '#b33771', 'smoke'); screenShake = Math.max(screenShake, 8);
-        addFloatingNumber(this.x, this.y - 40, 'KRALİÇE!', '#b33771');
+        if (!this.ultReady || this.isDead || fate) return;
+        fate = { x: this.x, y: this.y, ang: a, age: 0, r: CFG.fate.r0, bounces: 0 };
+        addFloatingNumber(this.x, this.y - 40, 'KADER MERMİSİ!', '#f1f2f6'); screenShake = Math.max(screenShake, 6);
         this.ultReady = false; this.ultCharge = 0; ultFill.style.width = '0%'; ultiBtn.classList.remove('ready');
     };
+
+    // ---- Kader Mermisi ----
+    function explodeFate(direct, factor) {
+        const F = CFG.fate, f = fate, g = clamp01(f.age / F.life);
+        const base = lerp(F.dmg0, F.dmg1, g) * factor;
+        getActiveEnemies().forEach(e => {
+            if (e.hp <= 0) return;
+            const isDirect = e === direct;
+            if (!isDirect && getDist(f, e) >= F.expR + e.radius) return;
+            let dmg = base * (isDirect ? 1 : F.splash);
+            if (mark && mark.e === e) dmg *= CFG.mark.mult;
+            dmg = Math.round(dmg);
+            e.hp -= dmg; addFloatingNumber(e.x, e.y, dmg, '#f1f2f6'); charge(0);
+            e.cRoot = { x: e.x, y: e.y, t: F.rootFrames };
+        });
+        obstacles.forEach(o => { if (getDist(f, o) < F.expR + o.radius) o.hp -= 600; });
+        explosions.push({ x: f.x, y: f.y, radius: 0, maxRadius: F.expR, life: 16, maxLife: 16 });
+        spawnParticles(f.x, f.y, '#f1f2f6', 'smoke'); screenShake = Math.max(screenShake, 12);
+        fate = null;
+    }
+    function updateFate(ts, enemies) {
+        const F = CFG.fate, f = fate;
+        f.age += ts;
+        const g = clamp01(f.age / F.life);
+        f.r = lerp(F.r0, F.r1, g);
+        let want = null;
+        if (aimData.active) want = aimData.angle;
+        else if (Date.now() - lastMM < 3000) want = Math.atan2(lastMouseY - f.y, lastMouseX - f.x);
+        if (want !== null) f.ang += cl(angDiff(want, f.ang), -F.turn * ts, F.turn * ts);
+        f.x += Math.cos(f.ang) * F.speed * ts; f.y += Math.sin(f.ang) * F.speed * ts;
+        if (Math.random() < 0.8 * Math.min(1, ts)) particles.push({ x: f.x, y: f.y, vx: (Math.random() - .5) * 2, vy: (Math.random() - .5) * 2, life: 20, maxLife: 40, color: '#f1f2f6', size: 3 + f.r * 0.1, type: 'normal' });
+
+        const pad = WALL_THICKNESS + f.r * 0.5;
+        let bounced = false;
+        if (f.x < pad || f.x > canvas.width - pad) { f.ang = Math.PI - f.ang; f.x = cl(f.x, pad, canvas.width - pad); bounced = true; }
+        if (f.y < pad || f.y > canvas.height - pad) { f.ang = -f.ang; f.y = cl(f.y, pad, canvas.height - pad); bounced = true; }
+        if (bounced) { f.bounces++; if (f.bounces > 1) { explodeFate(null, 1); return; } }
+
+        for (const e of enemies) if (e.hp > 0 && getDist(f, e) < e.radius + f.r) { explodeFate(e, 1); return; }
+        for (const o of obstacles) if (getDist(f, o) < o.radius + f.r) { explodeFate(null, 1); return; }
+        if (f.age >= F.life) explodeFate(null, F.expireFactor);
+    }
 
     // ---- Güncelleme ----
     function update(ts) {
         charge(CFG.passive * ts);
         const enemies = getActiveEnemies(), eset = new Set(enemies);
-        const frenzy = frenzyT > 0; if (frenzy) frenzyT -= ts;
 
-        leeches.forEach(l => { if (l.host && !(eset.has(l.host) && l.host.hp > 0)) l.host = null; });
-        const cnt = hostCounts();
-
-        leeches.forEach(l => {
-            if (!l.baby) l.life -= ts;
-            if (l.drop > 0) { l.drop -= ts; return; }
-            if (l.host) {
-                const h = l.host;
-                l.x = h.x + Math.cos(l.ang) * h.radius * 0.85; l.y = h.y + Math.sin(l.ang) * h.radius * 0.85;
-                l.fa = l.ang + Math.PI;
-                if (l.baby) { l.attachT += ts; if (l.attachT >= CFG.baby.attachLife) l.life = -1; }
-                l.tick += ts;
-                if (l.tick >= CFG.leech.tickEvery) {
-                    l.tick = 0;
-                    const base = l.baby ? CFG.baby.drainBase : CFG.leech.drainBase[l.stage - 1];
-                    const d = Math.round((base + CFG.leech.hostPct * h.hp) * (frenzy ? CFG.frenzy.drain : 1));
-                    h.hp -= d; l.feed += d;
-                    addFloatingNumber(h.x, h.y, d, '#ff6b81'); charge(d / CFG.chargeDiv);
-                    if (!player.isDead) {
-                        const hl = d * CFG.leech.heal * (frenzy ? CFG.frenzy.heal : 1);
-                        player.hp = Math.min(player.maxHp, player.hp + hl); healAcc += hl;
-                    }
-                    if (!l.baby) {
-                        const ns = l.feed >= CFG.leech.feedStage[1] ? 3 : (l.feed >= CFG.leech.feedStage[0] ? 2 : 1);
-                        if (ns > l.stage) { l.stage = ns; l.radius = CFG.leech.radius[ns - 1]; addFloatingNumber(l.x, l.y - 18, 'BESLENDİ!', '#ff6b81'); }
-                    }
-                }
-            } else {
-                const target = pickHost(l, enemies, cnt);
-                const sp = (l.baby ? CFG.baby.speed : CFG.leech.speed) * (frenzy && !l.baby ? CFG.frenzy.speed : 1);
-                if (target) {
-                    moveAlly(l, target.x, target.y, sp, ts);
-                    if (getDist(l, target) < target.radius + l.radius + 3) attach(l, target, cnt);
-                } else if (getDist(l, player) > 90) moveAlly(l, player.x, player.y, sp * 0.8, ts);
-                resolveAlly(l);
-            }
+        // kök: vurulduğu yerden 20 birimden fazla uzaklaşamaz
+        enemies.forEach(e => {
+            const r = e.cRoot; if (!r) return;
+            r.t -= ts; if (r.t <= 0) { e.cRoot = null; return; }
+            const dx = e.x - r.x, dy = e.y - r.y, d = Math.hypot(dx, dy);
+            if (d > CFG.b2.rootLimit) { e.x = r.x + dx / d * CFG.b2.rootLimit; e.y = r.y + dy / d * CFG.b2.rootLimit; }
         });
 
-        // şifa yazısı (toplu)
-        healT += ts;
-        if (healT >= 60) { if (healAcc >= 20) addFloatingNumber(player.x, player.y, '+' + Math.floor(healAcc), '#2ecc71'); healAcc = 0; healT = 0; }
+        // takas sonrası kısa dokunulmazlık
+        if (invT > 0) { invT -= ts; if (invT <= 0 && !player.isJumping) player.jumpInvulnerable = false; }
 
-        // Kraliçe
-        if (queen) {
-            const Q = CFG.queen;
-            queen.life -= ts; queen.birth += ts;
-            if (getDist(queen, player) > Q.followDist) moveAlly(queen, player.x, player.y, Q.speed, ts);
-            resolveAlly(queen);
-            const babies = leeches.filter(l => l.baby).length;
-            if (queen.birth >= Q.birthEvery && babies < CFG.baby.max && enemies.length) {
-                queen.birth = 0; leeches.push(mkLeech(queen.x, queen.y, true));
-                spawnParticles(queen.x, queen.y, '#ff9ff3', 'normal');
-            }
-        }
+        // av işareti
+        if (mark) { mark.t -= ts; if (mark.t <= 0 || mark.e.hp <= 0 || !eset.has(mark.e)) mark = null; }
 
-        // düşman mermileri: uçan sülükleri ve Kraliçe'yi vurur
-        const targets = leeches.filter(l => !l.host && l.drop <= 0);
-        if (queen) targets.push(queen);
-        for (let bi = botBullets.length - 1; bi >= 0; bi--) {
-            const b = botBullets[bi];
-            for (const a of targets) {
-                if (getDist(b, a) >= a.radius + 10) continue;
-                if (b.type === 'boomerang') {
-                    b.hitTargets = b.hitTargets || [];
-                    if (b.hitTargets.includes(a)) continue;
-                    b.hitTargets.push(a);
-                }
-                const dmg = bulletDmg(b);
-                a.hp -= dmg; addFloatingNumber(a.x, a.y, dmg, '#e74c3c');
-                if (b.type !== 'boomerang') { botBullets.splice(bi, 1); break; }
-            }
-        }
+        // bar: nişan alma başlayınca durur
+        const aiming = aimData.active && !player.isDead && !fate;
+        if (aiming && !lastAim && lockShots <= 0) { frozen = true; frozenPos = barPos(); frozenType = zoneOf(frozenPos); }
+        if (!aiming && lastAim) frozen = false;
+        lastAim = aiming;
+        if (!frozen && lockShots <= 0 && !fate) phase += ts;
 
-        // ömür / ölüm
-        for (let i = leeches.length - 1; i >= 0; i--) {
-            const l = leeches[i];
-            if (l.life <= 0 || l.hp <= 0) { spawnParticles(l.x, l.y, '#e84393', 'normal'); leeches.splice(i, 1); }
-        }
-        if (queen && (queen.life <= 0 || queen.hp <= 0)) { spawnParticles(queen.x, queen.y, '#b33771', 'smoke'); screenShake = Math.max(screenShake, 6); queen = null; }
-        for (let i = rings.length - 1; i >= 0; i--) { rings[i].life -= ts; if (rings[i].life <= 0) rings.splice(i, 1); }
+        updateShots(ts, enemies);
+        if (fate) updateFate(ts, enemies);
     }
 
     // ---- Çizim ----
-    function bar(x, y, w, f, col) {
-        ctx.fillStyle = '#444'; ctx.fillRect(x - w / 2, y, w, 4);
-        ctx.fillStyle = col; ctx.fillRect(x - w / 2, y, Math.max(0, f) * w, 4);
-    }
-    function drawLeech(l) {
-        const t = Date.now();
-        const col = l.baby ? '#ff9ff3' : ['#e84393', '#d63031', '#7b1e1e'][l.stage - 1];
-        ctx.save(); ctx.translate(l.x, l.y);
-        if (l.drop > 0) { const k = l.drop / 8; ctx.translate(0, -k * 30); ctx.scale(1 + k * 0.6, 1 + k * 0.6); }
-        if (!l.baby && l.life < 120 && Math.floor(t / 100) % 2) ctx.globalAlpha = 0.45;
-        ctx.rotate(l.fa || 0);
-        const r = l.radius, wig = Math.sin(t / (l.baby ? 60 : 90) + l.wig) * r * 0.35;
-        ctx.fillStyle = col; ctx.strokeStyle = '#3b0a1e'; ctx.lineWidth = 2;
-        [[r * 0.6, 0, r], [-r * 0.4, wig * 0.5, r * 0.85], [-r * 1.3, wig, r * 0.6]].forEach(c => {
-            ctx.beginPath(); ctx.arc(c[0], c[1], c[2], 0, Math.PI * 2); ctx.fill(); ctx.stroke();
-        });
-        ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(r * 1.0, -r * 0.35, r * 0.2, 0, Math.PI * 2); ctx.arc(r * 1.0, r * 0.35, r * 0.2, 0, Math.PI * 2); ctx.fill();
-        if (frenzyT > 0 && !l.baby) { ctx.beginPath(); ctx.arc(0, 0, r * 1.9, 0, Math.PI * 2); ctx.strokeStyle = 'rgba(255,71,87,0.7)'; ctx.lineWidth = 2; ctx.stroke(); }
+    function drawBar() {
+        const B = CFG.bar, x = player.x - B.w / 2, y = player.y - 54;
+        ctx.save();
+        if (fate) ctx.globalAlpha = 0.35;
+        for (let z = 0; z < 3; z++) { ctx.globalAlpha = (fate ? 0.3 : 0.85); ctx.fillStyle = COL[z]; ctx.fillRect(x + z * B.w / 3, y, B.w / 3, B.h); }
+        ctx.globalAlpha = fate ? 0.4 : 1;
+        ctx.fillStyle = '#fff'; ctx.font = 'bold 8px Arial'; ctx.textAlign = 'center';
+        for (let z = 0; z < 3; z++) ctx.fillText(LET[z], x + (z + 0.5) * B.w / 3, y + B.h - 1.5);
+        const pos = lockShots > 0 ? (lockType + 0.5) / 3 : (frozen ? frozenPos : barPos());
+        ctx.fillStyle = '#fff'; ctx.fillRect(x + pos * B.w - 1.5, y - 3, 3, B.h + 6);
+        if (frozen || lockShots > 0) { ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.strokeRect(x - 1, y - 1, B.w + 2, B.h + 2); }
+        if (lockShots > 0) { ctx.fillStyle = COL[lockType]; ctx.font = 'bold 11px Arial'; ctx.fillText('KİLİT x' + lockShots, player.x, y - 6); }
         ctx.restore();
-        if (!l.host && !l.baby && l.drop <= 0) bar(l.x, l.y - l.radius - 10, 24, l.hp / l.maxHp, '#e84393');
-    }
-    function drawQueen(q) {
-        ctx.save(); ctx.translate(q.x, q.y);
-        if (q.life < 120 && Math.floor(Date.now() / 100) % 2) ctx.globalAlpha = 0.5;
-        ctx.beginPath(); ctx.ellipse(0, 0, q.radius * 1.15, q.radius, 0, 0, Math.PI * 2);
-        ctx.fillStyle = '#6c1d45'; ctx.fill(); ctx.strokeStyle = '#ff9ff3'; ctx.lineWidth = 4; ctx.stroke();
-        ctx.fillStyle = '#b33771';
-        [[-10, -8, 6], [8, -4, 5], [-2, 10, 7], [14, 9, 4]].forEach(s => { ctx.beginPath(); ctx.arc(s[0], s[1], s[2], 0, Math.PI * 2); ctx.fill(); });
-        ctx.beginPath(); ctx.moveTo(-12, -q.radius + 2); ctx.lineTo(-6, -q.radius - 10); ctx.lineTo(0, -q.radius + 1); ctx.lineTo(6, -q.radius - 10); ctx.lineTo(12, -q.radius + 2);
-        ctx.strokeStyle = '#f9ca24'; ctx.lineWidth = 3; ctx.stroke();
-        ctx.restore();
-        bar(q.x, q.y - q.radius - 18, 70, q.hp / q.maxHp, '#ff9ff3');
-        bar(q.x, q.y - q.radius - 12, 70, q.life / CFG.queen.life, '#f9ca24');
     }
     function draw() {
         ctx.save();
-        rings.forEach(r => {
-            const k = 1 - r.life / r.maxLife;
-            ctx.save(); ctx.strokeStyle = 'rgba(232,67,147,' + (1 - k) + ')'; ctx.lineWidth = 4;
-            ctx.beginPath(); ctx.arc(r.x, r.y, r.r + (r.max - r.r) * k, 0, Math.PI * 2); ctx.stroke(); ctx.restore();
+        const enemies = getActiveEnemies();
+
+        // kök halkaları
+        enemies.forEach(e => {
+            if (!e.cRoot) return;
+            ctx.save(); ctx.setLineDash([4, 4]); ctx.strokeStyle = 'rgba(16,172,132,0.9)'; ctx.lineWidth = 2;
+            ctx.beginPath(); ctx.arc(e.cRoot.x, e.cRoot.y, CFG.b2.rootLimit + e.radius, 0, Math.PI * 2); ctx.stroke(); ctx.restore();
         });
-        leeches.forEach(drawLeech);
-        if (queen) drawQueen(queen);
-        // kan hırsı: oyuncu çevresinde kırmızı halka
-        if (frenzyT > 0 && !player.isDead) {
-            ctx.save(); ctx.globalAlpha = 0.6 * clamp01(frenzyT / 30);
-            ctx.beginPath(); ctx.arc(player.x, player.y, player.radius + 8 + Math.sin(Date.now() / 100) * 2, 0, Math.PI * 2);
-            ctx.strokeStyle = '#ff4757'; ctx.lineWidth = 3; ctx.stroke(); ctx.restore();
-            ctx.save(); ctx.fillStyle = '#ff4757'; ctx.font = 'bold 16px Arial'; ctx.textAlign = 'center';
-            ctx.fillText('KAN HIRSI ' + Math.ceil(frenzyT / 60) + 's', canvas.width / 2, 66); ctx.restore();
-        }
-        // sülük çağırma önizlemesi: hangi düşmana gidecek?
-        if (aimData.active && player.ammo >= 1 && !player.isDead) {
-            const p = spawnPoint(aimData.angle, summonPull(), CFG.leech.radius[0]);
-            const h = pickHost(p, getActiveEnemies(), hostCounts());
-            ctx.save(); ctx.lineWidth = 2; ctx.strokeStyle = 'rgba(232,67,147,0.7)';
-            ctx.setLineDash([6, 6]); ctx.beginPath(); ctx.moveTo(player.x, player.y); ctx.lineTo(p.x, p.y); ctx.stroke(); ctx.setLineDash([]);
-            ctx.beginPath(); ctx.arc(p.x, p.y, CFG.leech.radius[0], 0, Math.PI * 2); ctx.fillStyle = 'rgba(232,67,147,0.3)'; ctx.fill(); ctx.stroke();
-            if (h) { ctx.beginPath(); ctx.arc(h.x, h.y, h.radius + 8, 0, Math.PI * 2); ctx.stroke(); }
+        // av işareti
+        if (mark && mark.e.hp > 0) {
+            const e = mark.e, t = Date.now() / 300;
+            ctx.save(); ctx.translate(e.x, e.y); ctx.rotate(t);
+            ctx.strokeStyle = '#ff4757'; ctx.lineWidth = 3;
+            ctx.beginPath(); ctx.arc(0, 0, e.radius + 10, 0, Math.PI * 2); ctx.stroke();
+            for (let k = 0; k < 4; k++) { ctx.rotate(Math.PI / 2); ctx.beginPath(); ctx.moveTo(e.radius + 5, 0); ctx.lineTo(e.radius + 16, 0); ctx.stroke(); }
             ctx.restore();
+            ctx.save(); ctx.beginPath(); ctx.arc(e.x, e.y, e.radius + 16, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * clamp01(mark.t / CFG.mark.time));
+            ctx.strokeStyle = 'rgba(255,71,87,0.6)'; ctx.lineWidth = 2; ctx.stroke(); ctx.restore();
         }
-        // Kraliçe önizlemesi
-        if (ultAim.active && player.ultReady && !player.isDead) {
-            const p = freeSpot(player.x + Math.cos(ultAim.angle) * 110, player.y + Math.sin(ultAim.angle) * 110, CFG.queen.radius);
-            ctx.save(); ctx.beginPath(); ctx.arc(p.x, p.y, CFG.queen.radius, 0, Math.PI * 2);
-            ctx.fillStyle = 'rgba(179,55,119,0.3)'; ctx.fill(); ctx.strokeStyle = 'rgba(255,159,243,0.8)'; ctx.lineWidth = 3; ctx.stroke(); ctx.restore();
+
+        // mermiler
+        shots.forEach(s => {
+            ctx.save(); ctx.translate(s.x, s.y); ctx.rotate(s.ang);
+            ctx.beginPath(); ctx.arc(0, 0, s.r, 0, Math.PI * 2); ctx.fillStyle = COL[s.type]; ctx.fill();
+            ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.stroke();
+            if (s.type === 2) { ctx.rotate(Date.now() / 100); ctx.beginPath(); ctx.arc(0, 0, s.r * 0.55, 0, Math.PI * 1.4); ctx.stroke(); }
+            if (s.type === 1) { ctx.beginPath(); ctx.arc(0, 0, s.r + 4, 0, Math.PI * 2); ctx.strokeStyle = 'rgba(16,172,132,0.6)'; ctx.stroke(); }
+            ctx.restore();
+        });
+        // Kader Mermisi
+        if (fate) {
+            const f = fate, F = CFG.fate;
+            ctx.save(); ctx.translate(f.x, f.y);
+            const gr = ctx.createRadialGradient(0, 0, f.r * 0.1, 0, 0, f.r);
+            gr.addColorStop(0, '#ffffff'); gr.addColorStop(0.6, '#a55eea'); gr.addColorStop(1, '#2d1b4e');
+            ctx.beginPath(); ctx.arc(0, 0, f.r, 0, Math.PI * 2); ctx.fillStyle = gr; ctx.fill();
+            ctx.strokeStyle = '#f1f2f6'; ctx.lineWidth = 3; ctx.stroke();
+            ctx.rotate(Date.now() / 200); ctx.setLineDash([8, 8]);
+            ctx.beginPath(); ctx.arc(0, 0, f.r + 8, 0, Math.PI * 2); ctx.strokeStyle = 'rgba(255,255,255,0.6)'; ctx.stroke();
+            ctx.restore();
+            ctx.save(); ctx.fillStyle = '#f1f2f6'; ctx.font = 'bold 16px Arial'; ctx.textAlign = 'center';
+            ctx.fillText('KADER ' + Math.ceil((F.life - f.age) / 60) + 's - joystick ile yönlendir', canvas.width / 2, 66); ctx.restore();
         }
+
+        // nişan önizlemesi (seçili türe göre)
+        if (aimData.active && player.ammo >= 1 && !player.isDead && !fate) {
+            const t = currentType(), rg = rangeOf(t);
+            const ex = player.x + Math.cos(aimData.angle) * rg, ey = player.y + Math.sin(aimData.angle) * rg;
+            const lack = player.ammo < costOf(t);
+            ctx.save(); ctx.setLineDash([6, 6]); ctx.strokeStyle = lack ? 'rgba(231,76,60,0.7)' : COL[t]; ctx.globalAlpha = 0.7; ctx.lineWidth = 2;
+            ctx.beginPath(); ctx.moveTo(player.x, player.y); ctx.lineTo(ex, ey); ctx.stroke();
+            ctx.setLineDash([]); ctx.beginPath(); ctx.arc(ex, ey, t === 0 ? CFG.b1.rMax : 10, 0, Math.PI * 2); ctx.stroke(); ctx.restore();
+        }
+        // av işareti: kimi seçecek?
+        if (gadAim2.active && player.gadget2Ready && !player.isDead) {
+            const e = pickEnemy(gadAim2.angle);
+            if (e) {
+                ctx.save(); ctx.setLineDash([6, 6]); ctx.strokeStyle = 'rgba(255,71,87,0.8)'; ctx.lineWidth = 2;
+                ctx.beginPath(); ctx.moveTo(player.x, player.y); ctx.lineTo(e.x, e.y); ctx.stroke();
+                ctx.setLineDash([]); ctx.beginPath(); ctx.arc(e.x, e.y, e.radius + 12, 0, Math.PI * 2); ctx.stroke(); ctx.restore();
+            }
+        }
+        // Kader Mermisi önizlemesi
+        if (ultAim.active && player.ultReady && !player.isDead && !fate) {
+            ctx.save(); ctx.setLineDash([8, 8]); ctx.strokeStyle = 'rgba(165,94,234,0.8)'; ctx.lineWidth = 3;
+            ctx.beginPath(); ctx.moveTo(player.x, player.y);
+            ctx.lineTo(player.x + Math.cos(ultAim.angle) * 160, player.y + Math.sin(ultAim.angle) * 160); ctx.stroke();
+            ctx.setLineDash([]); ctx.beginPath(); ctx.arc(player.x + Math.cos(ultAim.angle) * 40, player.y + Math.sin(ultAim.angle) * 40, CFG.fate.r0, 0, Math.PI * 2); ctx.stroke(); ctx.restore();
+        }
+
+        if (!player.isDead) drawBar();
         ctx.restore();
     }
 
     // ---- Arayüz kurulumu (oyun başlayınca) ----
-    function clearState() { leeches = []; queen = null; frenzyT = 0; healAcc = 0; healT = 0; rings = []; }
+    function clearState() {
+        if (player.charType === ID && !player.isJumping) player.jumpInvulnerable = false;
+        [bot, bot2].concat(getActiveEnemies()).forEach(e => { if (e) e.cRoot = null; });
+        shots = []; fate = null; mark = null; lockShots = 0; phase = 0; frozen = false; lastAim = false; invT = 0;
+    }
     function setupUI() {
         if (player.charType !== ID) return;
         ultiBtn.style.display = 'flex'; gadgetBtn.style.display = 'flex'; gadgetBtn2.style.display = 'flex';
-        gadgetBtn.innerHTML = 'KULUÇKA<br><span id="gadget-timer"></span>';
-        gadgetBtn2.innerHTML = 'KAN<br>HIRSI<br><span id="gadget-timer-2"></span>';
+        gadgetBtn.innerHTML = 'KİLİT<br><span id="gadget-timer"></span>';
+        gadgetBtn2.innerHTML = 'AV<br>İŞARETİ<br><span id="gadget-timer-2"></span>';
         gadgetTimerText = document.getElementById('gadget-timer');
         gadgetTimerText2 = document.getElementById('gadget-timer-2');
         clearState();
@@ -373,9 +359,9 @@
     function loop(t) {
         requestAnimationFrame(loop);
         const ts = Math.min(3, (t - lastT) / 16.666); lastT = t;
-        if (!gameStarted) { wasStarted = false; clearState(); return; }
+        if (!gameStarted) { wasStarted = false; shots = []; fate = null; mark = null; lockShots = 0; frozen = false; lastAim = false; return; }
         if (!wasStarted) { wasStarted = true; setupUI(); }
-        if (player.charType !== ID) { clearState(); return; }
+        if (player.charType !== ID) { shots = []; fate = null; mark = null; lockShots = 0; frozen = false; lastAim = false; return; }
         update(ts); draw();
     }
     requestAnimationFrame(loop);
@@ -386,7 +372,7 @@
         if (!box || document.getElementById('char-' + ID)) return;
         const card = document.createElement('div');
         card.className = 'char-card'; card.id = 'char-' + ID;
-        card.innerHTML = '<div class="char-color-preview" style="background:#b33771;"></div><span>Asalak</span><small>Hasar: Sülükler<br>Güç: Kraliçe</small>';
+        card.innerHTML = '<div class="char-color-preview" style="background:linear-gradient(135deg,#0abde3,#10ac84,#a55eea);"></div><span>Tetik</span><small>Hasar: 3 Mermi<br>Güç: Kader</small>';
         card.addEventListener('click', () => {
             selectedCharacter = ID;
             document.querySelectorAll('.char-card').forEach(e => e.classList.remove('selected'));
