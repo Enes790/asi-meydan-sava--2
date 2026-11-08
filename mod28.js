@@ -1,17 +1,34 @@
 // ============================================================================
-// mod8.js — KÖY BASKINI (v11) — Tam sürüm
+// mod8.js — KÖY BASKINI (v12)
+// v11 (Şahin, Baloncu, KENERK, Havan, Büyücü, Bomba, X-Yay, Cehennem...) korunur.
+// v12 YENİLİKLERİ:
+//  - Köy düzeni GENİŞ: yatay telefonda yatay, dikey telefonda otomatik dikey döner.
+//    Alt çubuk yüksekliği ölçülür, köy her ekrana sığar (sıkışıklık çözüldü).
+//  - Küçük ALTIN DEPOSU ve İKSİR DEPOSU, ordu kampları, kışla, laboratuvar, büyü
+//    fabrikası, klan kalesi: saldırı yapmayan (non-defense) çok sayıda bina.
+//  - HAVA SAVUNMASI: sadece baloncuya ateş eder.
+//  - Gizli TUZAKLAR: gizli bomba ve yay tuzağı (binalardan sayılmaz, SHOW_TRAPS ile görülür).
+//  - BÜYÜLER (alttaki çubuktan seç, haritaya dokun): Yıldırım, Öfke, Şifa.
+//  - İşçi kulübeleri ve ağaçlar (yıkılamaz süs, hedef alınmaz).
+//  - Hasar döngülerindeki liste değiştirme hataları giderildi; Cehennem şarjı sıfırlanır.
 // ============================================================================
 (function () {
     'use strict';
-    console.log('[MOD YÜKLENDİ] koy_baskini v11');
+    console.log('[MOD YÜKLENDİ] koy_baskini v12');
 
     const MOD_ID = 'koy_baskini';
     const RAID_TIME = 180;
-    const WALL_THICKNESS = 14;
     const RETARGET_FRAMES = 12;
+    const SHOW_TRAPS = false;                    // true yaparsan tuzaklar silik görünür
 
     const ARMY = { slime: 8, bot: 4, nest: 2, bomber: 4, tank: 2, sahin: 3, balon: 2, kenerk: 1 };
-    const VILLAGE_SCALE = 0.92;
+    const SPELL_COUNT = { lightning: 2, rage: 2, heal: 2 };
+    const SPELLS = {
+        lightning: { radius: 34, dmg: 240, strikes: 3, interval: 10 },
+        rage: { radius: 80, life: 360, speedMul: 1.4, dmgMul: 1.5 },
+        heal: { radius: 80, life: 300, hps: 260 }
+    };
+    const VILLAGE_SCALE = 0.95;
     const TROOP_SCALE = 0.75;
 
     const SLIME = [
@@ -37,6 +54,7 @@
         devArrowDmg: 250, devArrowMaxBld: 3,
         slimeCount: 4, slimeDelay: 120, slimeInterval: 60
     };
+    const TRAP = { trigger: 14, bombR: 42, bombDmg: 220, springMaxHp: 1200, springDmg: 350 };
 
     const DEF = {
         archer: { range: 165, interval: 50, dmg: 62, speed: 9, kind: 'arrow', splash: 0 },
@@ -46,25 +64,31 @@
         buyucu: { range: 135, interval: 70, dmg: 90, speed: 8, kind: 'orb', splash: 50 },
         bomba:  { range: 70, interval: 90, dmg: 180, speed: 7, kind: 'ball', splash: 40, groundOnly: false },
         xyay:   { range: 190, interval: 70, dmg: 130, speed: 12, kind: 'arrow', splash: 0, groundOnly: true },
+        hava:   { range: 150, interval: 60, dmg: 110, speed: 10, kind: 'missile', splash: 0, airOnly: true },
         cehennem: { range: 160, kind: 'beam', splash: 0, isInferno: true }
     };
     const BUILDING_HP = {
         hall: 5200, archer: 1500, cannon: 1800, depot: 1100, tesla: 1400, wall: 520,
         havan: 1600, buyucu: 1300, collector: 500, altin: 550,
-        bomba: 900, xyay: 2200, cehennem: 1800
+        bomba: 900, xyay: 2200, cehennem: 1800,
+        hava: 1300, goldstore: 1500, elixstore: 1500, camp: 800, barracks: 900, lab: 900, spellfac: 900, castle: 2000
     };
     const LOOT = {
         hall: 900, depot: 450, archer: 150, cannon: 150, tesla: 200,
         havan: 250, buyucu: 180, collector: 350, altin: 400,
-        bomba: 200, xyay: 280, cehennem: 320
+        bomba: 200, xyay: 280, cehennem: 320,
+        hava: 200, goldstore: 450, elixstore: 450, camp: 120, barracks: 150, lab: 200, spellfac: 200, castle: 400
     };
-    const DEPLOY_MARGIN = 42;
+    const DEPLOY_MARGIN = 30;
     const DMG_COLOR = { physical: '#f1c40f', splash: '#e67e22', heal: '#2ecc71', crit: '#ff7675' };
 
     const TROOP_INFO = {
         slime: { label: 'Slime' }, bot: { label: 'Mor Bot' }, nest: { label: 'Yuva' },
         bomber: { label: 'Bombacı' }, tank: { label: 'Dev Bot' }, sahin: { label: 'Şahin' },
-        balon: { label: 'Baloncu' }, kenerk: { label: 'KENERK' }
+        balon: { label: 'Baloncu' }, kenerk: { label: 'KENERK' },
+        lightning: { label: 'Yıldırım', spell: true },
+        rage: { label: 'Öfke', spell: true },
+        heal: { label: 'Şifa', spell: true }
     };
     const ICONS = {
         slime: '<svg viewBox="0 0 40 40"><circle cx="20" cy="20" r="16" fill="#2ecc71" stroke="#1e8449" stroke-width="3"/><circle cx="27" cy="20" r="4" fill="rgba(0,0,0,.45)"/></svg>',
@@ -74,7 +98,10 @@
         tank: '<svg viewBox="0 0 40 40"><circle cx="20" cy="20" r="18" fill="#d35400" stroke="#873600" stroke-width="4"/><circle cx="20" cy="20" r="11" fill="none" stroke="#873600" stroke-width="2"/><circle cx="28" cy="20" r="4.5" fill="rgba(0,0,0,.45)"/></svg>',
         sahin: '<svg viewBox="0 0 40 40"><circle cx="20" cy="20" r="16" fill="#3498db" stroke="#21618c" stroke-width="3"/><path d="M10 20 L30 20 M26 13 L30 20 L26 27" stroke="#fff" stroke-width="3" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>',
         balon: '<svg viewBox="0 0 40 40"><ellipse cx="20" cy="15" rx="14" ry="12" fill="#e74c3c" stroke="#7b241c" stroke-width="3"/><path d="M14 26 L26 26 L23 32 L17 32 Z" fill="#7b241c"/><circle cx="20" cy="32" r="3" fill="#f1c40f"/></svg>',
-        kenerk: '<svg viewBox="0 0 40 40"><circle cx="20" cy="20" r="16" fill="#f39c12" stroke="#7e5109" stroke-width="3"/><path d="M12 12 L20 8 L28 12 L26 20 L20 24 L14 20 Z" fill="#f1c40f" stroke="#7e5109" stroke-width="1.5"/><circle cx="20" cy="16" r="2.5" fill="#fff"/></svg>'
+        kenerk: '<svg viewBox="0 0 40 40"><circle cx="20" cy="20" r="16" fill="#f39c12" stroke="#7e5109" stroke-width="3"/><path d="M12 12 L20 8 L28 12 L26 20 L20 24 L14 20 Z" fill="#f1c40f" stroke="#7e5109" stroke-width="1.5"/><circle cx="20" cy="16" r="2.5" fill="#fff"/></svg>',
+        lightning: '<svg viewBox="0 0 40 40"><circle cx="20" cy="20" r="17" fill="#6c5ce7" stroke="#4834d4" stroke-width="3"/><path d="M23 6 L11 22 L19 22 L16 34 L29 17 L21 17 Z" fill="#f1c40f" stroke="#b7950b" stroke-width="1.5"/></svg>',
+        rage: '<svg viewBox="0 0 40 40"><circle cx="20" cy="20" r="17" fill="#c0392b" stroke="#7b241c" stroke-width="3"/><path d="M20 6 Q27 15 24 21 Q28 20 28 26 Q28 33 20 34 Q12 33 12 26 Q12 20 17 17 Q16 12 20 6 Z" fill="#f39c12" stroke="#f1c40f" stroke-width="1.5"/></svg>',
+        heal: '<svg viewBox="0 0 40 40"><circle cx="20" cy="20" r="17" fill="#27ae60" stroke="#145a32" stroke-width="3"/><path d="M17 9 H23 V17 H31 V23 H23 V31 H17 V23 H9 V17 H17 Z" fill="#fff"/></svg>'
     };
 
     let raid = null;
@@ -106,6 +133,7 @@
             border-radius:12px; text-align:center; color:#fff; font-size:9px; font-weight:700; position:relative;
             transition:all .15s; cursor:pointer; user-select:none; -webkit-user-select:none; touch-action:none; }
         .raid-troop svg { width:26px; height:26px; display:block; margin:0 auto 2px; }
+        .raid-troop.spell:not(.sel) { border-color:#9b59b6; }
         .raid-troop.sel { border-color:#2ecc71; box-shadow:0 0 14px rgba(46,204,113,.75); transform:translateY(-8px); }
         .raid-troop.empty { opacity:.3; }
         .raid-troop.hero { border-color:#f1c40f; box-shadow:0 0 10px rgba(241,196,15,.5); }
@@ -158,7 +186,7 @@
         '<div class="rh-pct" id="rh-pct">0%</div></div>' +
         '<div class="rh-loot" id="rh-loot">0</div>');
     const barEl = makeEl('div', 'raid-bar', '');
-    const hintEl = makeEl('div', 'raid-hint', 'Alttan birlik seç, köyün dışına dokun');
+    const hintEl = makeEl('div', 'raid-hint', 'Alttan birlik veya büyü seç, dokun');
     const resultEl = makeEl('div', 'raid-result',
         '<h1 id="rr-title"></h1><div class="rr-stars" id="rr-stars"><span>★</span><span>★</span><span>★</span></div>' +
         '<div class="rr-stats" id="rr-stats"></div>' +
@@ -173,7 +201,7 @@
 
     Object.keys(TROOP_INFO).forEach(type => {
         const b = document.createElement('div');
-        b.className = 'raid-troop' + (type === 'kenerk' ? ' hero' : '');
+        b.className = 'raid-troop' + (type === 'kenerk' ? ' hero' : '') + (TROOP_INFO[type].spell ? ' spell' : '');
         b.dataset.t = type;
         b.innerHTML = ICONS[type] + '<span>' + TROOP_INFO[type].label + '</span><span class="rt-count">0</span>';
         b.addEventListener('pointerdown', e => {
@@ -231,69 +259,92 @@
     // ===== KÖY KURULUMU =====
     function initRaid() {
         const W = canvas.width, H = canvas.height;
-        const topUI = 76, botUI = 118;
+        const portrait = H > W;
+        const topUI = 70;
+        const barH = barEl.offsetHeight || 64;           // alt çubuk satır sayısına göre ölçülür
+        const botUI = barH + 28;
+        hintEl.style.bottom = (botUI + 8) + 'px';
         const availH = H - topUI - botUI;
-        const k = clamp(Math.min(W * 0.85 / 460, availH * 0.78 / 400), 0.5, 1.35) * VILLAGE_SCALE;
+        const HALF_LONG = 340, HALF_SHORT = 125;         // köyün tasarım yarı boyutları (uzun / kısa kenar)
+        const kW = portrait ? (W * 0.94) / (2 * HALF_SHORT) : (W * 0.94) / (2 * HALF_LONG);
+        const kH = portrait ? (availH * 0.94) / (2 * HALF_LONG) : (availH * 0.94) / (2 * HALF_SHORT);
+        const k = clamp(Math.min(kW, kH), 0.3, 1.6) * VILLAGE_SCALE;
         const cx = W / 2, cy = topUI + availH / 2;
+        const P = (x, y) => portrait ? { x: cx + y * k, y: cy + x * k } : { x: cx + x * k, y: cy + y * k };
 
         raid = {
-            W, H, k, cx, cy, topUI, botUI,
-            hw: 200 * k, hh: 160 * k,
-            walls: [], buildings: [], defList: [], troops: [], projs: [], parts: [], nums: [],
-            army: Object.assign({}, ARMY),
+            W, H, k, cx, cy, topUI, botUI, portrait,
+            hw: (portrait ? HALF_SHORT : HALF_LONG) * k, hh: (portrait ? HALF_LONG : HALF_SHORT) * k,
+            walls: [], buildings: [], defList: [], decor: [], traps: [], zones: [], bolts: [], spellFx: [],
+            troops: [], projs: [], parts: [], nums: [],
+            army: Object.assign({}, ARMY, SPELL_COUNT),
             selected: 'slime', time: RAID_TIME, started: false, over: false, idle: 0,
             destroyed: 0, total: 0, hallDown: false, loot: 0, shake: 0,
-            defMult: 1, bg: null, drag: false, lastDeploy: 0, lastPos: { x: 0, y: 0 }, hudCache: '',
+            defMult: window.GAME_DIFFICULTY === 'easy' ? 0.7 : 1,
+            bg: null, drag: false, lastDeploy: 0, lastPos: { x: 0, y: 0 }, hudCache: '',
             hero: null, heroUsed: false, heroSlimeQueue: [], frameCount: 0
         };
 
-        const wr = 8 * k, step = 10;
-        const addWall = (x, y) => raid.walls.push({ type: 'wall', x: cx + x * k, y: cy + y * k, r: wr,
-            hp: BUILDING_HP.wall, maxHp: BUILDING_HP.wall, destroyed: false, hitFlash: 0 });
-        for (let x = -200; x <= 187; x += step) { addWall(x, -160); addWall(x, 160); }
-        addWall(200, -160); addWall(200, 160);
-        for (let y = -160 + step; y <= 160 - step; y += step) { addWall(-200, y); addWall(200, y); }
+        // Duvarlar (tasarım: 500 x 220)
+        const wr = 8 * k, step = 10, WX = 250, WY = 110;
+        const addWall = (x, y) => {
+            const p = P(x, y);
+            raid.walls.push({ type: 'wall', x: p.x, y: p.y, r: wr, hp: BUILDING_HP.wall, maxHp: BUILDING_HP.wall, destroyed: false, hitFlash: 0 });
+        };
+        for (let x = -WX; x <= WX - step; x += step) { addWall(x, -WY); addWall(x, WY); }
+        addWall(WX, -WY); addWall(WX, WY);
+        for (let y = -WY + step; y <= WY - step; y += step) { addWall(-WX, y); addWall(WX, y); }
 
-        const addB = (type, x, y, r) => raid.buildings.push({
-            type, x: cx + x * k, y: cy + y * k, r: r * k,
-            hp: BUILDING_HP[type], maxHp: BUILDING_HP[type],
-            destroyed: false, hitFlash: 0,
-            aim: Math.random() * Math.PI * 2, reload: 30 + Math.random() * 30, recoil: 0,
-            infernoCharge: 0, infernoTarget: null
-        });
+        const addB = (type, x, y, r) => {
+            const p = P(x, y);
+            raid.buildings.push({
+                type, x: p.x, y: p.y, r: r * k,
+                hp: BUILDING_HP[type], maxHp: BUILDING_HP[type],
+                destroyed: false, hitFlash: 0,
+                aim: Math.random() * Math.PI * 2, reload: 30 + Math.random() * 30, recoil: 0,
+                infernoCharge: 0, infernoTarget: null
+            });
+        };
 
-        // İç halka — ana binalar
-        addB('hall', 0, 0, 30);
-        addB('archer', -105, -65, 14); addB('archer', 105, 65, 14);
-        addB('cannon', 105, -65, 14); addB('cannon', -105, 65, 14);
-        addB('tesla', 0, 85, 12); addB('tesla', 75, 0, 12);
-        addB('havan', -125, -25, 15); addB('havan', 125, 25, 15); addB('havan', 0, -95, 15);
-        addB('buyucu', -55, -95, 14); addB('buyucu', 55, 95, 14);
-        addB('depot', 0, 95, 15); addB('depot', -125, 55, 15); addB('depot', 125, -55, 15);
-
-        // ⚠ X-Yay (2)
-        addB('xyay', -165, -100, 14);
-        addB('xyay', 165, 100, 14);
-
-        // ⚠ Bomba Kulesi (2)
-        addB('bomba', -165, 100, 11);
-        addB('bomba', 165, -100, 11);
-
-        // ⚠ Cehennem Kulesi (2)
-        addB('cehennem', -95, 30, 12);
-        addB('cehennem', 95, -30, 12);
-
-        // Dış kaynaklar
-        addB('collector', -80, -220, 10); addB('collector', 80, -220, 10);
-        addB('collector', -80, 220, 10);  addB('collector', 80, 220, 10);
-        addB('collector', -230, -55, 10); addB('collector', -230, 55, 10);
-        addB('collector', 230, -55, 10);  addB('collector', 230, 55, 10);
-        // ⚠ Altın toplayıcı (4)
-        addB('altin', -50, -220, 10); addB('altin', 110, -220, 10);
-        addB('altin', -50, 220, 10);  addB('altin', 110, 220, 10);
+        // Merkez
+        addB('hall', 0, 0, 26);
+        // Küçük depolar (hall çevresi)
+        addB('goldstore', -50, -28, 11); addB('goldstore', 50, 28, 11);
+        addB('elixstore', 50, -28, 11); addB('elixstore', -50, 28, 11);
+        // Savunmalar
+        addB('archer', -72, -62, 13); addB('archer', 72, 62, 13);
+        addB('cannon', 72, -62, 13); addB('cannon', -72, 62, 13);
+        addB('tesla', 0, 70, 11); addB('tesla', 0, -70, 11);
+        addB('havan', -135, 0, 14); addB('havan', 135, 0, 14); addB('havan', 135, -70, 14);
+        addB('buyucu', -135, -70, 13); addB('buyucu', 135, 70, 13);
+        addB('hava', -100, 35, 12); addB('hava', 100, -35, 12);
+        addB('xyay', -200, 0, 13); addB('xyay', 200, 0, 13);
+        addB('bomba', -200, -70, 10); addB('bomba', 200, 70, 10);
+        addB('cehennem', -200, 70, 11); addB('cehennem', 200, -70, 11);
+        // Saldırı yapmayan (non-defense) binalar
+        addB('barracks', -170, -35, 13); addB('lab', -170, 35, 13);
+        addB('spellfac', 170, -35, 13); addB('castle', 170, 35, 16);
+        addB('camp', -135, 70, 15); addB('camp', -100, -40, 15);
+        addB('camp', 100, 40, 15); addB('camp', 200, -35, 15);
+        addB('depot', -170, -75, 12); addB('depot', 170, 75, 12);
+        // Duvar dışı kaynaklar
+        [-60, 0, 60].forEach(y => { addB('collector', -285, y, 10); addB('collector', 285, y, 10); });
+        [-30, 30].forEach(y => { addB('altin', -320, y, 10); addB('altin', 320, y, 10); });
 
         raid.defList = raid.buildings.filter(b => DEF[b.type]);
         raid.total = raid.buildings.length;
+
+        // Süsler (yıkılamaz, hedef alınmaz)
+        const addD = (type, x, y, r) => { const p = P(x, y); raid.decor.push({ type, x: p.x, y: p.y, r: r * k }); };
+        addD('hut', -30, -92, 7); addD('hut', 30, 92, 7); addD('hut', -205, 35, 7);
+        addD('hut', 232, 0, 7); addD('hut', -232, 0, 7);
+        [[-275, -95], [275, 95], [-275, 95], [275, -95], [-300, -85], [300, 85]].forEach(t => addD('tree', t[0], t[1], 11));
+
+        // Gizli tuzaklar (binalardan sayılmaz)
+        const addT = (type, x, y) => { const p = P(x, y); raid.traps.push({ type, x: p.x, y: p.y }); };
+        addT('bomb', -232, -40); addT('bomb', 232, 40); addT('bomb', -100, 0); addT('bomb', 100, 0);
+        addT('spring', -300, 15); addT('spring', 300, -15); addT('spring', -100, -70);
+
         raid.hero = null;
         raid.heroUsed = false;
         raid.heroSlimeQueue = [];
@@ -333,9 +384,9 @@
             g.beginPath(); g.arc(rnd() * W, rnd() * H, 2.2, 0, Math.PI * 2); g.fill();
         }
 
-        const pad = 30 * k;
+        const pad = 18 * k;
         rr(g, cx - hw - pad, cy - hh - pad, (hw + pad) * 2, (hh + pad) * 2, 30 * k);
-        const dirt = g.createRadialGradient(cx, cy, 20, cx, cy, hw + pad);
+        const dirt = g.createRadialGradient(cx, cy, 20, cx, cy, Math.max(hw, hh) + pad);
         dirt.addColorStop(0, '#c9a46a'); dirt.addColorStop(1, '#a98650');
         g.fillStyle = dirt; g.fill();
         g.strokeStyle = 'rgba(90,60,30,0.6)'; g.lineWidth = 3; g.stroke();
@@ -399,10 +450,8 @@
         // Bomba Kulesi ölünce patlar — 200 hasar
         if (b.type === 'bomba') {
             const R = 60 * raid.k;
-            for (const t of raid.troops) {
-                if (!t.isDead && Math.hypot(t.x - b.x, t.y - b.y) < R + t.radius) {
-                    damageTroop(t, 200);
-                }
+            for (const t of raid.troops.slice()) {
+                if (!t.isDead && Math.hypot(t.x - b.x, t.y - b.y) < R + t.radius) damageTroop(t, 200);
             }
             addRing(b.x, b.y, '#e74c3c', R, 22);
             addParts(b.x, b.y, '#e74c3c', 18, 3.5, 28, 5);
@@ -432,6 +481,7 @@
     }
 
     function killTroop(t) {
+        if (t.isDead) return;
         t.isDead = true;
         addParts(t.x, t.y, t.color, 10, 2.4, 30, 4);
         if (t.type === 'slime' && t.stage < 2) {
@@ -452,9 +502,9 @@
 
     // ===== BİRLİKLER =====
     function spawnTroop(type, x, y, stage) {
-        const kt = TROOP_SCALE * clamp(raid.k / VILLAGE_SCALE, 0.9, 1.25);
+        const kt = TROOP_SCALE * clamp(raid.k / VILLAGE_SCALE, 0.7, 1.25);
         const base = { type, x, y, isDead: false, kbX: 0, kbY: 0, atk: 0, target: null, blocked: null,
-            angle: Math.atan2(raid.cy - y, raid.cx - x), stage: stage || 0, atkInt: SLIME_ATK, _retarget: 0 };
+            angle: Math.atan2(raid.cy - y, raid.cx - x), stage: stage || 0, atkInt: SLIME_ATK, _retarget: 0, rageT: 0 };
         let t;
         if (type === 'slime') {
             const s = SLIME[base.stage];
@@ -599,6 +649,12 @@
     function updateTroop(t, ts) {
         if (t.type === 'nest') { updateNest(t, ts); return; }
 
+        // Öfke büyüsü etkisi
+        const rage = t.rageT > 0;
+        if (rage) t.rageT -= ts;
+        const sMul = rage ? SPELLS.rage.speedMul : 1;
+        const dMul = rage ? SPELLS.rage.dmgMul : 1;
+
         if (t.type === 'kenerk' && t.hp < t.maxHp) {
             t.hp = Math.min(t.maxHp, t.hp + KENERK.passiveRegen / 60 * ts);
             if (Math.random() < 0.08) addParts(t.x, t.y, '#2ecc71', 1, 0.5, 10, 1.5);
@@ -626,7 +682,7 @@
         if (!tgt || tgt.destroyed) return;
         const dx = tgt.x - t.x, dy = tgt.y - t.y, d = Math.hypot(dx, dy) || 1;
         t.angle = Math.atan2(dy, dx);
-        t.atk -= ts;
+        t.atk -= ts * sMul;
 
         let troopRange = null;
         if (t.type === 'bot') troopRange = BOT.range * raid.k;
@@ -639,7 +695,7 @@
                        : (d <= t.radius + tgt.r + 3);
 
         if (!inRange) {
-            const sp = t.speed * raid.k * ts;
+            const sp = t.speed * raid.k * ts * sMul;
             t.x += dx / d * sp; t.y += dy / d * sp;
             resolveWalls(t, dx / d, dy / d);
         } else if (t.atk <= 0) {
@@ -650,7 +706,7 @@
                 else dmg = t.burstLeft > 0 ? SAHIN.burstDmg : SAHIN.fallbackDmg;
 
                 raid.projs.push({ kind: 'orb', from: 'troop', x: t.x, y: t.y, target: tgt, tx: tgt.x, ty: tgt.y,
-                    speed: 8 * raid.k, dmg: dmg, splash: 0, angle: t.angle });
+                    speed: 8 * raid.k, dmg: dmg * dMul, splash: 0, angle: t.angle });
 
                 if (t.type === 'sahin') {
                     if (t.burstLeft > 0) {
@@ -671,7 +727,7 @@
             } else if (t.type === 'bomber') {
                 bomberExplode(t);
             } else {
-                damageBuilding(tgt, t.dmg);
+                damageBuilding(tgt, t.dmg * dMul);
                 addParts(tgt.x, tgt.y, t.color, 3, 1.6, 14, 2.5);
                 t.atk = t.atkInt;
             }
@@ -717,6 +773,89 @@
         }
     }
 
+    // ===== BÜYÜLER =====
+    function castSpell(type, x, y) {
+        if (!raid || raid.over || raid.army[type] <= 0) return;
+        if (x < 8 || x > raid.W - 8 || y < raid.topUI - 10 || y > raid.H - raid.botUI + 10) { addNum(x, y, '✕', '#ff7675'); return; }
+        const S = SPELLS[type];
+        raid.army[type]--;
+        raid.started = true;
+        hintEl.classList.remove('show');
+        if (type === 'lightning') {
+            raid.spellFx.push({ x, y, left: S.strikes, wait: 0 });
+            addRing(x, y, '#f1c40f', S.radius * raid.k, 14);
+        } else {
+            raid.zones.push({ type, x, y, r: S.radius * raid.k, life: S.life, maxLife: S.life });
+            addRing(x, y, type === 'rage' ? '#e74c3c' : '#2ecc71', S.radius * raid.k, 18);
+        }
+        if (raid.army[type] <= 0) pickNextTroop();
+        updateBar();
+    }
+
+    function updateSpells(ts) {
+        const L = SPELLS.lightning;
+        for (let i = raid.spellFx.length - 1; i >= 0; i--) {
+            const f = raid.spellFx[i];
+            f.wait -= ts;
+            if (f.wait <= 0) {
+                f.left--; f.wait = L.interval;
+                raid.bolts.push({ x: f.x, y: f.y, life: 12, maxLife: 12 });
+                const R = L.radius * raid.k;
+                for (const b of raid.buildings.slice()) {
+                    if (!b.destroyed && Math.hypot(b.x - f.x, b.y - f.y) < R + b.r) damageBuilding(b, L.dmg);
+                }
+                addParts(f.x, f.y, '#f1c40f', 8, 2.6, 18, 3);
+                raid.shake = Math.max(raid.shake, 5);
+                if (f.left <= 0) raid.spellFx.splice(i, 1);
+            }
+        }
+        for (let i = raid.zones.length - 1; i >= 0; i--) {
+            const z = raid.zones[i];
+            z.life -= ts;
+            if (z.life <= 0) { raid.zones.splice(i, 1); continue; }
+            for (const t of raid.troops) {
+                if (t.isDead || Math.hypot(t.x - z.x, t.y - z.y) > z.r + t.radius) continue;
+                if (z.type === 'rage') { t.rageT = 8; if (Math.random() < 0.04) addParts(t.x, t.y, '#e74c3c', 1, 0.8, 14, 2); }
+                else {
+                    t.hp = Math.min(t.maxHp, t.hp + SPELLS.heal.hps / 60 * ts);
+                    if (Math.random() < 0.05) addParts(t.x, t.y, '#2ecc71', 1, 0.8, 16, 2);
+                }
+            }
+        }
+        for (let i = raid.bolts.length - 1; i >= 0; i--) {
+            raid.bolts[i].life -= ts;
+            if (raid.bolts[i].life <= 0) raid.bolts.splice(i, 1);
+        }
+    }
+
+    // ===== TUZAKLAR =====
+    function updateTraps() {
+        for (let i = raid.traps.length - 1; i >= 0; i--) {
+            const tr = raid.traps[i];
+            let trigger = null;
+            for (const t of raid.troops) {
+                if (t.isDead || t.type === 'balon' || t.type === 'nest') continue;
+                if (Math.hypot(t.x - tr.x, t.y - tr.y) < TRAP.trigger * raid.k + t.radius) { trigger = t; break; }
+            }
+            if (!trigger) continue;
+            raid.traps.splice(i, 1);
+            if (tr.type === 'bomb') {
+                const R = TRAP.bombR * raid.k;
+                for (const u of raid.troops.slice()) {
+                    if (!u.isDead && u.type !== 'balon' && Math.hypot(u.x - tr.x, u.y - tr.y) < R + u.radius) damageTroop(u, TRAP.bombDmg);
+                }
+                addRing(tr.x, tr.y, '#e67e22', R, 18);
+                addParts(tr.x, tr.y, '#e67e22', 12, 3, 24, 4);
+                raid.shake = Math.max(raid.shake, 6);
+            } else {
+                if (!trigger.isHero && trigger.hp <= TRAP.springMaxHp) { addNum(trigger.x, trigger.y - 14, 'FIRLADI!', '#f1c40f'); killTroop(trigger); }
+                else damageTroop(trigger, TRAP.springDmg);
+                addRing(tr.x, tr.y, '#bdc3c7', 26 * raid.k, 14);
+                addParts(tr.x, tr.y, '#bdc3c7', 8, 2.4, 20, 3);
+            }
+        }
+    }
+
     // ===== SAVUNMA =====
     function updateDefense(b, ts) {
         if (b.destroyed || !DEF[b.type]) return;
@@ -728,15 +867,19 @@
         for (const t of raid.troops) {
             if (t.isDead) continue;
             if (cfg.groundOnly && t.type === 'balon') continue;
+            if (cfg.airOnly && t.type !== 'balon') continue;
             const d = dist(b, t);
             if (d - t.radius < range && d < bd) { bd = d; best = t; }
         }
-        if (!best) return;
+        if (!best) {
+            if (cfg.isInferno) { b.infernoTarget = null; b.infernoCharge = 0; }
+            return;
+        }
 
         if (b.type === 'tesla') {
             if (b.reload <= 0) {
                 b.reload = cfg.interval;
-                for (const t of raid.troops) {
+                for (const t of raid.troops.slice()) {
                     if (!t.isDead && dist(b, t) - t.radius < range) damageTroop(t, cfg.dmg * raid.defMult);
                 }
                 addRing(b.x, b.y, '#f1c40f', range, 16);
@@ -806,7 +949,7 @@
                     raid.projs.splice(i, 1); continue;
                 }
                 let hit = false;
-                for (const b of raid.defList) {
+                for (const b of raid.defList.slice()) {
                     if (b.destroyed || p.hitBlds.has(b)) continue;
                     if (Math.hypot(b.x - p.x, b.y - p.y) < b.r + 15 * raid.k) {
                         p.hitBlds.add(b);
@@ -828,7 +971,7 @@
             if (d <= sp + hitR) {
                 if (p.from === 'def') {
                     if (p.splash > 0) {
-                        for (const t of raid.troops) {
+                        for (const t of raid.troops.slice()) {
                             if (!t.isDead && Math.hypot(t.x - p.tx, t.y - p.ty) < p.splash + t.radius) damageTroop(t, p.dmg);
                         }
                         addParts(p.tx, p.ty, '#e67e22', 8, 2.2, 20, 4);
@@ -863,6 +1006,7 @@
         if (!raid || raid.over) return;
         if (!raid.selected || raid.army[raid.selected] <= 0) pickNextTroop();
         if (!raid.selected) return;
+        if (SPELLS[raid.selected]) { castSpell(raid.selected, px, py); return; }       // büyü: haritanın her yerine
         if (!canDeploy(px, py)) { if (showMsg) addNum(px, py, '✕', '#ff7675'); return; }
         spawnTroop(raid.selected, px, py, 0);
         raid.army[raid.selected]--;
@@ -887,6 +1031,7 @@
     });
     canvas.addEventListener('pointermove', e => {
         if (window.GAME_MODE !== MOD_ID || !raid || !raid.drag || raid.over) return;
+        if (raid.selected && SPELLS[raid.selected]) return;                             // büyü sürüklenerek atılmaz
         const p = toCanvas(e);
         const now = performance.now();
         if (now - raid.lastDeploy > 140 && Math.hypot(p.x - raid.lastPos.x, p.y - raid.lastPos.y) > 18) {
@@ -1005,9 +1150,10 @@
         if (raid.over) return;
         if (raid.started) raid.time -= ts / 60;
 
-        for (const b of raid.defList) updateDefense(b, ts);
-        const troopsCopy = raid.troops.slice();
-        for (const t of troopsCopy) if (!t.isDead) updateTroop(t, ts);
+        updateSpells(ts);
+        for (const b of raid.defList.slice()) updateDefense(b, ts);
+        for (const t of raid.troops.slice()) if (!t.isDead) updateTroop(t, ts);
+        updateTraps();
         updateProjectiles(ts);
 
         updateHUD(false);
@@ -1015,7 +1161,7 @@
         if (raid.destroyed === raid.total) { endRaid('win'); return; }
         if (raid.time <= 0) { raid.time = 0; updateHUD(true); endRaid('time'); return; }
         let left = 0;
-        for (const k in raid.army) left += raid.army[k];
+        for (const k in raid.army) if (!SPELLS[k]) left += raid.army[k];
         if (raid.started && left === 0 && raid.troops.length === 0) {
             raid.idle += ts;
             if (raid.idle > 90) endRaid('lose');
@@ -1026,7 +1172,7 @@
         label: 'Köy Baskını',
         onStart() {
             raid = null;
-            try { if (!player.isDead) player.isDead = true; } catch(e) {}
+            try { if (!player.isDead) player.isDead = true; } catch (e) {}
             heroBtn.classList.remove('show', 'used', 'ready');
         },
         onUpdate(ts) { raidUpdate(ts); }
@@ -1211,6 +1357,21 @@
         c.fillText('⬇', x, y + r * 1.5);
     }
 
+    function drawHava(c, b) {
+        const r = b.r, x = b.x, y = b.y, f = b.hitFlash > 0;
+        shadow(c, x, y + r * 0.6, r * 1.1, r * 0.6);
+        c.beginPath(); c.arc(x, y, r, 0, Math.PI * 2);
+        c.fillStyle = f ? '#fff' : '#7f8c8d'; c.fill();
+        c.strokeStyle = '#34495e'; c.lineWidth = 3; c.stroke();
+        c.beginPath(); c.arc(x, y, r * 0.62, 0, Math.PI * 2); c.fillStyle = '#2c3e50'; c.fill();
+        c.save(); c.translate(x, y); c.rotate(b.aim);
+        c.fillStyle = f ? '#fff' : '#ecf0f1';
+        [-0.38, 0, 0.38].forEach(o => { rr(c, r * 0.05, r * o - r * 0.1, r * 0.95, r * 0.2, 2); c.fill(); });
+        c.fillStyle = '#e74c3c';
+        [-0.38, 0, 0.38].forEach(o => { c.beginPath(); c.arc(r * 1.0, r * o, r * 0.11, 0, Math.PI * 2); c.fill(); });
+        c.restore();
+    }
+
     function drawInferno(c, b) {
         const r = b.r, x = b.x, y = b.y, f = b.hitFlash > 0;
         const chargeRatio = Math.min(1, b.infernoCharge / 315);
@@ -1294,6 +1455,109 @@
         });
     }
 
+    // --- Yeni non-defense binalar ---
+    function drawGoldStore(c, b) {
+        const r = b.r, x = b.x, y = b.y, f = b.hitFlash > 0;
+        shadow(c, x, y + r * 0.6, r * 1.1, r * 0.5);
+        rr(c, x - r, y - r * 0.55, r * 2, r * 1.35, 4);
+        c.fillStyle = f ? '#fff' : '#8d5a2b'; c.fill(); c.strokeStyle = '#4e2f12'; c.lineWidth = 2.5; c.stroke();
+        rr(c, x - r * 1.05, y - r * 0.95, r * 2.1, r * 0.55, 4);
+        c.fillStyle = f ? '#fff' : '#f1c40f'; c.fill(); c.strokeStyle = '#b7950b'; c.lineWidth = 2; c.stroke();
+        c.fillStyle = '#fff8b8'; c.beginPath(); c.arc(x, y - r * 0.68, r * 0.14, 0, Math.PI * 2); c.fill();
+        rr(c, x - r * 0.14, y + r * 0.05, r * 0.28, r * 0.35, 2); c.fillStyle = '#f1c40f'; c.fill();
+    }
+    function drawElixStore(c, b) {
+        const r = b.r, x = b.x, y = b.y, f = b.hitFlash > 0;
+        shadow(c, x, y + r * 0.6, r * 1.1, r * 0.5);
+        c.beginPath(); c.ellipse(x, y + r * 0.55, r * 0.92, r * 0.36, 0, 0, Math.PI * 2);
+        c.fillStyle = f ? '#fff' : '#6c3483'; c.fill();
+        rr(c, x - r * 0.92, y - r * 0.65, r * 1.84, r * 1.2, 3);
+        c.fillStyle = f ? '#fff' : '#8e44ad'; c.fill(); c.strokeStyle = '#4a235a'; c.lineWidth = 2.5; c.stroke();
+        c.beginPath(); c.ellipse(x, y - r * 0.65, r * 0.92, r * 0.36, 0, 0, Math.PI * 2);
+        c.fillStyle = f ? '#fff' : '#c39bd3'; c.fill(); c.stroke();
+        c.fillStyle = 'rgba(255,255,255,0.28)'; c.fillRect(x - r * 0.6, y - r * 0.4, r * 0.22, r * 0.8);
+    }
+    function drawCamp(c, b) {
+        const r = b.r, x = b.x, y = b.y, f = b.hitFlash > 0;
+        shadow(c, x, y + r * 0.6, r * 1.1, r * 0.5);
+        c.beginPath(); c.arc(x, y, r, 0, Math.PI * 2); c.fillStyle = f ? '#fff' : '#7d6608'; c.fill();
+        c.strokeStyle = '#4d3c05'; c.lineWidth = 2.5; c.stroke();
+        [[-0.45, 0.15], [0.45, 0.15], [0, -0.35]].forEach((p, i) => {
+            const tx = x + p[0] * r, ty = y + p[1] * r;
+            c.beginPath(); c.moveTo(tx, ty - r * 0.5); c.lineTo(tx - r * 0.38, ty + r * 0.3); c.lineTo(tx + r * 0.38, ty + r * 0.3); c.closePath();
+            c.fillStyle = f ? '#fff' : (i === 2 ? '#c0392b' : '#e67e22'); c.fill(); c.strokeStyle = '#4d3c05'; c.lineWidth = 1.5; c.stroke();
+        });
+        c.fillStyle = 'rgba(255,140,0,' + (0.6 + Math.abs(Math.sin(Date.now() / 150 + x)) * 0.4) + ')';
+        c.beginPath(); c.arc(x, y + r * 0.55, r * 0.14, 0, Math.PI * 2); c.fill();
+    }
+    function drawBarracks(c, b) {
+        const r = b.r, x = b.x, y = b.y, f = b.hitFlash > 0;
+        shadow(c, x, y + r * 0.7, r * 1.15, r * 0.5);
+        rr(c, x - r, y - r * 0.5, r * 2, r * 1.4, 4); c.fillStyle = f ? '#fff' : '#95a5a6'; c.fill();
+        c.strokeStyle = '#566573'; c.lineWidth = 2.5; c.stroke();
+        c.beginPath(); c.moveTo(x - r * 1.1, y - r * 0.45); c.lineTo(x, y - r * 1.15); c.lineTo(x + r * 1.1, y - r * 0.45); c.closePath();
+        c.fillStyle = f ? '#fff' : '#c0392b'; c.fill(); c.strokeStyle = '#7b241c'; c.stroke();
+        c.strokeStyle = '#ecf0f1'; c.lineWidth = 2;
+        c.beginPath(); c.moveTo(x - r * 0.4, y - r * 0.1); c.lineTo(x + r * 0.4, y + r * 0.6); c.moveTo(x + r * 0.4, y - r * 0.1); c.lineTo(x - r * 0.4, y + r * 0.6); c.stroke();
+    }
+    function drawLab(c, b) {
+        const r = b.r, x = b.x, y = b.y, f = b.hitFlash > 0;
+        shadow(c, x, y + r * 0.7, r * 1.15, r * 0.5);
+        rr(c, x - r, y - r * 0.5, r * 2, r * 1.4, 4); c.fillStyle = f ? '#fff' : '#5d6d7e'; c.fill();
+        c.strokeStyle = '#2c3e50'; c.lineWidth = 2.5; c.stroke();
+        rr(c, x - r * 1.05, y - r * 0.85, r * 2.1, r * 0.4, 3); c.fillStyle = f ? '#fff' : '#2980b9'; c.fill();
+        c.beginPath(); c.moveTo(x - r * 0.12, y - r * 0.2); c.lineTo(x - r * 0.12, y + r * 0.1); c.lineTo(x - r * 0.45, y + r * 0.7);
+        c.lineTo(x + r * 0.45, y + r * 0.7); c.lineTo(x + r * 0.12, y + r * 0.1); c.lineTo(x + r * 0.12, y - r * 0.2); c.closePath();
+        c.fillStyle = f ? '#fff' : '#2ecc71'; c.fill(); c.strokeStyle = '#ecf0f1'; c.lineWidth = 1.5; c.stroke();
+    }
+    function drawSpellFac(c, b) {
+        const r = b.r, x = b.x, y = b.y, f = b.hitFlash > 0;
+        shadow(c, x, y + r * 0.7, r * 1.15, r * 0.5);
+        rr(c, x - r, y - r * 0.5, r * 2, r * 1.4, 4); c.fillStyle = f ? '#fff' : '#6c3483'; c.fill();
+        c.strokeStyle = '#4a235a'; c.lineWidth = 2.5; c.stroke();
+        c.beginPath(); c.moveTo(x - r * 1.1, y - r * 0.45); c.lineTo(x, y - r * 1.2); c.lineTo(x + r * 1.1, y - r * 0.45); c.closePath();
+        c.fillStyle = f ? '#fff' : '#8e44ad'; c.fill(); c.stroke();
+        c.fillStyle = '#f1c40f'; c.beginPath();
+        for (let i = 0; i < 10; i++) {
+            const a = -Math.PI / 2 + i * Math.PI / 5, rad = i % 2 === 0 ? r * 0.45 : r * 0.2;
+            const px = x + Math.cos(a) * rad, py = y + r * 0.2 + Math.sin(a) * rad;
+            if (i) c.lineTo(px, py); else c.moveTo(px, py);
+        }
+        c.closePath(); c.fill();
+    }
+    function drawCastle(c, b) {
+        const r = b.r, x = b.x, y = b.y, f = b.hitFlash > 0;
+        shadow(c, x, y + r * 0.7, r * 1.2, r * 0.5);
+        rr(c, x - r * 0.8, y - r * 0.5, r * 1.6, r * 1.4, 3); c.fillStyle = f ? '#fff' : '#aab7b8'; c.fill();
+        c.strokeStyle = '#566573'; c.lineWidth = 2.5; c.stroke();
+        [[-0.85, -0.3], [0.85, -0.3], [-0.85, 0.7], [0.85, 0.7]].forEach(p => {
+            c.beginPath(); c.arc(x + p[0] * r, y + p[1] * r, r * 0.34, 0, Math.PI * 2);
+            c.fillStyle = f ? '#fff' : '#7f8c8d'; c.fill(); c.stroke();
+        });
+        rr(c, x - r * 0.2, y + r * 0.2, r * 0.4, r * 0.7, 3); c.fillStyle = '#4e342e'; c.fill();
+        const wave = Math.sin(Date.now() / 250) * 3;
+        c.strokeStyle = '#3e2723'; c.lineWidth = 2;
+        c.beginPath(); c.moveTo(x, y - r * 0.5); c.lineTo(x, y - r * 1.2); c.stroke();
+        c.beginPath(); c.moveTo(x, y - r * 1.2); c.lineTo(x + r * 0.5, y - r * 1.05 + wave * 0.4); c.lineTo(x, y - r * 0.9); c.closePath();
+        c.fillStyle = '#3498db'; c.fill();
+    }
+
+    function drawDecor(c, d) {
+        if (d.type === 'hut') {
+            const r = d.r, x = d.x, y = d.y;
+            shadow(c, x, y + r * 0.6, r * 1.1, r * 0.5);
+            rr(c, x - r * 0.9, y - r * 0.3, r * 1.8, r * 1.2, 2); c.fillStyle = '#a0714a'; c.fill();
+            c.beginPath(); c.moveTo(x - r * 1.15, y - r * 0.25); c.lineTo(x, y - r * 1.15); c.lineTo(x + r * 1.15, y - r * 0.25); c.closePath();
+            c.fillStyle = '#6d4c41'; c.fill();
+        } else {
+            const r = d.r, x = d.x, y = d.y;
+            shadow(c, x, y + r * 0.7, r * 1.1, r * 0.5);
+            c.fillStyle = '#5d4037'; c.fillRect(x - r * 0.15, y, r * 0.3, r * 0.8);
+            c.fillStyle = '#1e8449'; c.beginPath(); c.arc(x, y - r * 0.15, r * 0.85, 0, Math.PI * 2); c.fill();
+            c.fillStyle = '#27ae60'; c.beginPath(); c.arc(x - r * 0.25, y - r * 0.4, r * 0.5, 0, Math.PI * 2); c.fill();
+        }
+    }
+
     function drawWall(c, w) {
         const r = w.r, f = w.hitFlash > 0;
         rr(c, w.x - r, w.y - r, r * 2, r * 2, 3);
@@ -1312,6 +1576,12 @@
     }
 
     function drawTroop(c, t) {
+        const rage = t.rageT > 0;
+        if (rage) {
+            c.save(); c.globalAlpha = 0.45;
+            c.beginPath(); c.arc(t.x, t.y, t.radius + 4, 0, Math.PI * 2);
+            c.strokeStyle = '#e74c3c'; c.lineWidth = 2.5; c.stroke(); c.restore();
+        }
         if (t.type === 'kenerk') {
             c.save();
             c.globalAlpha = 0.15 + Math.sin(Date.now() / 400) * 0.05;
@@ -1438,6 +1708,10 @@
             c.fillStyle = '#ecf0f1'; c.beginPath(); c.moveTo(10, 0); c.lineTo(5, -3); c.lineTo(5, 3); c.closePath(); c.fill();
         } else if (p.kind === 'ball') {
             c.fillStyle = '#2c3e50'; c.beginPath(); c.arc(0, 0, 6, 0, Math.PI * 2); c.fill();
+        } else if (p.kind === 'missile') {
+            c.fillStyle = 'rgba(236,240,241,0.5)'; c.beginPath(); c.arc(-7, 0, 4, 0, Math.PI * 2); c.fill();
+            c.fillStyle = '#ecf0f1'; rr(c, -5, -2.5, 11, 5, 2); c.fill();
+            c.fillStyle = '#e74c3c'; c.beginPath(); c.moveTo(10, 0); c.lineTo(5, -3); c.lineTo(5, 3); c.closePath(); c.fill();
         } else {
             c.fillStyle = '#9b59b6'; c.beginPath(); c.arc(0, 0, 5, 0, Math.PI * 2); c.fill();
             c.strokeStyle = '#fff'; c.lineWidth = 1.5; c.stroke();
@@ -1451,15 +1725,35 @@
         if (r.shake > 0.5) c.translate((Math.random() - 0.5) * r.shake, (Math.random() - 0.5) * r.shake);
         c.drawImage(r.bg, 0, 0);
 
-        if (!r.over && r.selected && r.army[r.selected] > 0) {
+        if (!r.over && r.selected && r.army[r.selected] > 0 && !SPELLS[r.selected]) {
             const m = DEPLOY_MARGIN * r.k;
             rr(c, r.cx - r.hw - m, r.cy - r.hh - m, (r.hw + m) * 2, (r.hh + m) * 2, 22);
             c.fillStyle = 'rgba(231,76,60,0.13)'; c.fill();
             c.strokeStyle = 'rgba(231,76,60,0.55)'; c.lineWidth = 2; c.setLineDash([10, 8]); c.stroke(); c.setLineDash([]);
         }
 
+        // gizli tuzaklar (isteğe bağlı silik gösterim)
+        if (SHOW_TRAPS) {
+            for (const tr of r.traps) {
+                c.globalAlpha = 0.35; c.fillStyle = tr.type === 'bomb' ? '#e67e22' : '#bdc3c7';
+                c.beginPath(); c.arc(tr.x, tr.y, 4 * r.k + 2, 0, Math.PI * 2); c.fill();
+            }
+            c.globalAlpha = 1;
+        }
+
         for (const b of r.buildings) if (b.destroyed) drawRubble(c, b);
         for (const w of r.walls) if (!w.destroyed) drawWall(c, w);
+
+        // büyü alanları
+        for (const z of r.zones) {
+            const pulse = 0.14 + Math.sin(Date.now() / 160) * 0.05;
+            c.save();
+            c.globalAlpha = clamp(z.life / 30, 0, 1);
+            c.beginPath(); c.arc(z.x, z.y, z.r, 0, Math.PI * 2);
+            c.fillStyle = z.type === 'rage' ? 'rgba(231,76,60,' + pulse + ')' : 'rgba(46,204,113,' + pulse + ')'; c.fill();
+            c.strokeStyle = z.type === 'rage' ? 'rgba(231,76,60,0.8)' : 'rgba(46,204,113,0.8)';
+            c.lineWidth = 2; c.setLineDash([8, 8]); c.stroke(); c.restore();
+        }
 
         // Cehennem beam — binaların üstünde, mermilerin altında
         for (const b of r.buildings) {
@@ -1482,10 +1776,12 @@
         }
 
         const list = [];
+        for (const d of r.decor) list.push({ y: d.y, d });
         for (const b of r.buildings) if (!b.destroyed) list.push({ y: b.y, b });
         for (const t of r.troops) if (!t.isDead) list.push({ y: t.y, t });
         list.sort((a, b) => a.y - b.y);
         for (const o of list) {
+            if (o.d) { drawDecor(c, o.d); continue; }
             if (o.b) {
                 const b = o.b;
                 if (b.type === 'hall') drawHall(c, b);
@@ -1499,6 +1795,14 @@
                 else if (b.type === 'cehennem') drawInferno(c, b);
                 else if (b.type === 'bomba') drawBomba(c, b);
                 else if (b.type === 'xyay') drawXyay(c, b);
+                else if (b.type === 'hava') drawHava(c, b);
+                else if (b.type === 'goldstore') drawGoldStore(c, b);
+                else if (b.type === 'elixstore') drawElixStore(c, b);
+                else if (b.type === 'camp') drawCamp(c, b);
+                else if (b.type === 'barracks') drawBarracks(c, b);
+                else if (b.type === 'lab') drawLab(c, b);
+                else if (b.type === 'spellfac') drawSpellFac(c, b);
+                else if (b.type === 'castle') drawCastle(c, b);
                 else drawDepot(c, b);
                 if (b.hp < b.maxHp) bar(c, b.x, b.y - b.r - (b.type === 'hall' ? r.k * 36 : 12), b.r * 1.6, b.hp / b.maxHp, b.hp / b.maxHp > 0.4 ? '#2ecc71' : '#e74c3c');
             } else {
@@ -1507,6 +1811,24 @@
         }
 
         for (const p of r.projs) drawProjectile(c, p);
+
+        // yıldırım çakmaları
+        for (const bo of r.bolts) {
+            const a = clamp(bo.life / bo.maxLife, 0, 1);
+            c.save(); c.globalAlpha = a;
+            c.strokeStyle = '#fff8b8'; c.lineWidth = 3; c.shadowColor = '#f1c40f'; c.shadowBlur = 14;
+            c.beginPath();
+            let sx = bo.x + (Math.random() - 0.5) * 30, sy = bo.y - 260;
+            c.moveTo(sx, sy);
+            for (let s = 1; s <= 7; s++) {
+                const tt = s / 7;
+                c.lineTo(sx + (bo.x - sx) * tt + (s < 7 ? (Math.random() - 0.5) * 26 : 0), sy + (bo.y - sy) * tt);
+            }
+            c.stroke();
+            c.beginPath(); c.arc(bo.x, bo.y, (SPELLS.lightning.radius * r.k) * (1 - a * 0.4), 0, Math.PI * 2);
+            c.fillStyle = 'rgba(255,248,184,0.35)'; c.fill();
+            c.restore();
+        }
 
         for (const p of r.parts) {
             c.globalAlpha = clamp(p.life / p.maxLife, 0, 1);
