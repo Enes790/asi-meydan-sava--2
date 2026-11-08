@@ -32,27 +32,27 @@
     const TROOP_SCALE = 0.75;
 
     const SLIME = [
-        { r: 18, hp: 620, dmg: 90, spd: 1.35 },
-        { r: 12, hp: 300, dmg: 60, spd: 1.55 },
-        { r: 7,  hp: 130, dmg: 36, spd: 1.85 }
+        { r: 18, hp: 1020, dmg: 180, spd: 1.35 },
+        { r: 12, hp: 400, dmg: 90, spd: 1.55 },
+        { r: 7,  hp: 230, dmg: 66, spd: 1.85 }
     ];
     const SLIME_ATK = 48;
-    const BOT = { r: 14, hp: 880, spd: 1.1, range: 90, dmg: 105, atk: 66 };
-    const NEST = { r: 22, hp: 1500, spawnEvery: 160, spawns: 4 };
+    const BOT = { r: 14, hp: 880, spd: 1.1, range: 90, dmg: 205, atk: 66 };
+    const NEST = { r: 22, hp: 1500, spawnEvery: 160, spawns: 6 };
     const BOMBER = { r: 8, hp: 170, spd: 2.35, wallDmg: 900, bldDmg: 380, radius: 34 };
-    const TANK = { r: 28, hp: 2400, spd: 0.85, dmg: 95, atk: 60 };
-    const BALON = { r: 11, hp: 400, spd: 0.9, aoeRadius: 55, aoeDmg: 500 };
+    const TANK = { r: 28, hp: 2400, spd: 1.05, dmg: 95, atk: 60 };
+    const BALON = { r: 11, hp: 400, spd: 0.9, aoeRadius: 55, aoeDmg: 800 };
     const SAHIN = {
         r: 10, hp: 650, spd: 1.0,
-        burstCount: 4, burstRange: 180, burstDmg: 180, burstAtk: 80,
-        fallbackRange: 55, fallbackDmg: 105, fallbackAtk: 55
+        burstCount: 8, burstRange: 180, burstDmg: 200, burstAtk: 80,
+        fallbackRange: 55, fallbackDmg: 135, fallbackAtk: 55
     };
     const KENERK = {
-        r: 22, hp: 3800, spd: 0.9, range: 100, dmg: 167, atk: 55,
-        passiveRegen: 5,
-        heroHeal: 500,
-        devArrowDmg: 250, devArrowMaxBld: 3,
-        slimeCount: 4, slimeDelay: 120, slimeInterval: 60
+        r: 22, hp: 3800, spd: 0.9, range: 90, dmg: 367, atk: 55,
+        passiveRegen: 15,
+        heroHeal: 1000,
+        devArrowDmg: 450, devArrowMaxBld: 9,
+        slimeCount: 8, slimeDelay: 120, slimeInterval: 30
     };
     const TRAP = { trigger: 14, bombR: 42, bombDmg: 220, springMaxHp: 1200, springDmg: 350 };
 
