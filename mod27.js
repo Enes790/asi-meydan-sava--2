@@ -37,7 +37,7 @@
         b1: { speed: PLAYER_BULLET_SPEED * 0.95, range: RANGE * 1.3, rMin: 6, rMax: 28, dmgMin: 350, dmgMax: 1300 },
         b2: { speed: PLAYER_BULLET_SPEED * 1.15, range: RANGE * 1.2, r: 8, dmg: 600, rootLimit: 20, rootFrames: 120 },
         b3: { speed: PLAYER_BULLET_SPEED, range: RANGE * 1.25, r: 9, dmg: 400, cost: 2, inv: 24 },
-        mark: { time: 240, mult: 1.25, turn: 0.07, maxAngle: 2.2, cd: 540 },
+        mark: { time: 3000, mult: 1.25, turn: 0.07, maxAngle: 2.2, cd: 540 },
         lock: { shots: 3, cd: 480 },
         fate: { speed: 4.6, life: 240, turn: 0.08, r0: 18, r1: 46, dmg0: 900, dmg1: 2400, expR: 130, splash: 0.6, rootFrames: 120, expireFactor: 0.6 },
         passive: 0.02, chargeDiv: 25
