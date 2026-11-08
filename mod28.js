@@ -1,22 +1,13 @@
 // ============================================================================
-// mod8.js — KÖY BASKINI (v6) — Kışla + 8 İksir + Detaylı Görseller
-// Ana dosyaya dokunmaz. index.html'de TÜM mod script'lerinden SONRA:
-//   <script src="mod8.js"></script>
-//
-// ÖZELLİKLER:
-//  - Kışla: her 3sn'de 1 defender çıkarır (maks 3 aktif)
-//  - 8 İksir Toplayıcı: 2 üst, 2 alt, 2 sol, 2 sağ (duvar dışı)
-//  - Attack binaları duvar içinde, non-attack dışarıda
-//  - Detaylı görseller (v4 çizim fonksiyonları)
+// mod8.js — KÖY BASKINI (v8) — Kenerk kahramanı + Mor Bot menzil 115
 // ============================================================================
 (function () {
     'use strict';
-    console.log('[MOD YÜKLENDİ] koy_baskini v6');
+    console.log('[MOD YÜKLENDİ] koy_baskini v8');
 
     const MOD_ID = 'koy_baskini';
-
     const RAID_TIME = 180;
-    const ARMY = { slime: 8, bot: 4, nest: 2, bomber: 4, tank: 2 };
+    const ARMY = { slime: 8, bot: 4, nest: 2, bomber: 4, tank: 2, sifaci: 3, suikastci: 3, balon: 2, kenerk: 1 };
     const VILLAGE_SCALE = 0.92;
     const TROOP_SCALE = 0.75;
     const SLIME = [
@@ -25,19 +16,23 @@
         { r: 10, hp: 130, dmg: 36, spd: 2.1 }
     ];
     const SLIME_ATK = 48;
-    const BOT = { r: 18, hp: 880, spd: 1.25, range: 135, dmg: 105, atk: 66 };
+    const BOT = { r: 18, hp: 880, spd: 1.25, range: 115, dmg: 105, atk: 66 };
     const NEST = { r: 30, hp: 1500, spawnEvery: 140, spawns: 4 };
     const BOMBER = { r: 11, hp: 170, spd: 2.7, wallDmg: 900, bldDmg: 380, radius: 34 };
     const TANK = { r: 22, hp: 2600, spd: 0.95, dmg: 95, atk: 60 };
-
-    // Kışla defender ayarları
-    const KISLA = {
-        spawnEvery: 180,
-        maxDefenders: 3,
-        defenderHp: 400,
-        defenderDmg: 80,
-        defenderSpd: 1.7,
-        defenderAtk: 55
+    const SIFACI = { r: 14, hp: 500, spd: 1.5, healRange: 100, healPerSec: 40 };
+    const SUIKASTCI = { r: 11, hp: 350, spd: 2.8, dmg: 200, atk: 40 };
+    const BALON = { r: 14, hp: 400, spd: 1.0, aoeRadius: 55, aoeDmg: 500 };
+    const KENERK = {
+        r: 20, hp: 3800, spd: 1.0, range: 125, dmg: 167, atk: 55,
+        passiveRegen: 5,   // HP/saniye
+        heroCd: 900,       // 15 saniye
+        heroHeal: 500,
+        devArrowDmg: 250,
+        devArrowMaxBld: 3,
+        slimeCount: 4,
+        slimeDelay: 120,   // 2 saniye sonra başlar
+        slimeInterval: 60  // her 1 saniyede 1
     };
 
     const DEF = {
@@ -49,11 +44,11 @@
     };
     const BUILDING_HP = {
         hall: 5200, archer: 1500, cannon: 1800, depot: 1100, tesla: 1400, wall: 520,
-        havan: 1600, buyucu: 1300, collector: 500, kisla: 2000
+        havan: 1600, buyucu: 1300, collector: 500
     };
     const LOOT = {
         hall: 900, depot: 450, archer: 150, cannon: 150, tesla: 200,
-        havan: 250, buyucu: 180, collector: 350, kisla: 300
+        havan: 250, buyucu: 180, collector: 350
     };
     const DEPLOY_MARGIN = 42;
 
@@ -62,14 +57,22 @@
         bot: { label: 'Mor Bot' },
         nest: { label: 'Yuva' },
         bomber: { label: 'Bombacı' },
-        tank: { label: 'Dev Bot' }
+        tank: { label: 'Dev Bot' },
+        sifaci: { label: 'Şifacı' },
+        suikastci: { label: 'Suikastçı' },
+        balon: { label: 'Baloncu' },
+        kenerk: { label: 'KENERK' }
     };
     const ICONS = {
         slime: '<svg viewBox="0 0 40 40"><circle cx="20" cy="20" r="16" fill="#2ecc71" stroke="#1e8449" stroke-width="3"/><circle cx="27" cy="20" r="4" fill="rgba(0,0,0,.45)"/></svg>',
         bot: '<svg viewBox="0 0 40 40"><circle cx="20" cy="20" r="16" fill="#9b59b6" stroke="#6c3483" stroke-width="3"/><circle cx="27" cy="20" r="4" fill="rgba(0,0,0,.45)"/></svg>',
         nest: '<svg viewBox="0 0 40 40"><circle cx="20" cy="20" r="17" fill="#27ae60" stroke="#145a32" stroke-width="3"/><circle cx="20" cy="20" r="11" fill="#1e8449"/><circle cx="20" cy="20" r="5" fill="#145a32"/></svg>',
         bomber: '<svg viewBox="0 0 40 40"><circle cx="20" cy="22" r="13" fill="#e67e22" stroke="#a04000" stroke-width="3"/><path d="M24 11 Q28 5 33 7" stroke="#f1c40f" stroke-width="3" fill="none"/><circle cx="26" cy="22" r="3.5" fill="rgba(0,0,0,.45)"/></svg>',
-        tank: '<svg viewBox="0 0 40 40"><circle cx="20" cy="20" r="18" fill="#d35400" stroke="#873600" stroke-width="4"/><circle cx="20" cy="20" r="11" fill="none" stroke="#873600" stroke-width="2"/><circle cx="28" cy="20" r="4.5" fill="rgba(0,0,0,.45)"/></svg>'
+        tank: '<svg viewBox="0 0 40 40"><circle cx="20" cy="20" r="18" fill="#d35400" stroke="#873600" stroke-width="4"/><circle cx="20" cy="20" r="11" fill="none" stroke="#873600" stroke-width="2"/><circle cx="28" cy="20" r="4.5" fill="rgba(0,0,0,.45)"/></svg>',
+        sifaci: '<svg viewBox="0 0 40 40"><circle cx="20" cy="20" r="16" fill="#2ecc71" stroke="#145a32" stroke-width="3"/><rect x="17" y="10" width="6" height="20" fill="#fff"/><rect x="10" y="17" width="20" height="6" fill="#fff"/></svg>',
+        suikastci: '<svg viewBox="0 0 40 40"><circle cx="20" cy="20" r="14" fill="#2c3e50" stroke="#000" stroke-width="3"/><path d="M12 20 L28 20 M24 14 L28 20 L24 26" stroke="#f1c40f" stroke-width="2.5" fill="none"/></svg>',
+        balon: '<svg viewBox="0 0 40 40"><ellipse cx="20" cy="15" rx="14" ry="12" fill="#e74c3c" stroke="#7b241c" stroke-width="3"/><path d="M14 26 L26 26 L23 32 L17 32 Z" fill="#7b241c"/><circle cx="20" cy="32" r="3" fill="#f1c40f"/></svg>',
+        kenerk: '<svg viewBox="0 0 40 40"><circle cx="20" cy="20" r="16" fill="#f39c12" stroke="#7e5109" stroke-width="3"/><path d="M12 12 L20 8 L28 12 L26 20 L20 24 L14 20 Z" fill="#f1c40f" stroke="#7e5109" stroke-width="1.5"/><circle cx="20" cy="16" r="2.5" fill="#fff"/></svg>'
     };
 
     let raid = null;
@@ -84,7 +87,7 @@
         .raid-mode #gadget-btn-2, .raid-mode #ulti-btn, .raid-mode #game-over-screen { display:none !important; }
         #raid-hud, #raid-bar, #raid-hint { display:none; position:absolute; z-index:30; }
         .raid-mode #raid-hud { display:flex; }
-        .raid-mode #raid-bar { display:flex; }
+        .raid-mode #raid-bar { display:flex; flex-wrap:wrap; justify-content:center; max-width:96vw; }
         .raid-mode #raid-hint.show { display:block; }
         #raid-hud { top:10px; left:50%; transform:translateX(-50%); align-items:center; gap:16px;
             background:rgba(15,25,35,.85); border:2px solid #f1c40f; border-radius:16px; padding:6px 18px;
@@ -95,15 +98,17 @@
         #raid-hud .rh-stars span.on { color:#f1c40f; text-shadow:0 0 8px #f1c40f; }
         #raid-hud .rh-pct { font-size:15px; color:#ecf0f1; }
         #raid-hud .rh-loot { font-size:16px; color:#f1c40f; min-width:54px; text-align:right; }
-        #raid-bar { bottom:14px; left:50%; transform:translateX(-50%); gap:6px; }
-        .raid-troop { width:64px; padding:5px 3px 4px; background:rgba(15,25,35,.88); border:3px solid #34495e;
-            border-radius:14px; text-align:center; color:#fff; font-size:10px; font-weight:700; position:relative;
+        #raid-bar { bottom:14px; left:50%; transform:translateX(-50%); gap:5px; }
+        .raid-troop { width:56px; padding:4px 2px 3px; background:rgba(15,25,35,.88); border:3px solid #34495e;
+            border-radius:12px; text-align:center; color:#fff; font-size:9px; font-weight:700; position:relative;
             transition:all .15s; cursor:pointer; }
-        .raid-troop svg { width:30px; height:30px; display:block; margin:0 auto 2px; }
+        .raid-troop svg { width:26px; height:26px; display:block; margin:0 auto 2px; }
         .raid-troop.sel { border-color:#2ecc71; box-shadow:0 0 14px rgba(46,204,113,.75); transform:translateY(-8px); }
         .raid-troop.empty { opacity:.3; }
-        .raid-troop .rt-count { position:absolute; top:-9px; right:-7px; background:#e74c3c; border-radius:11px;
-            padding:1px 6px; font-size:11px; border:2px solid #fff; }
+        .raid-troop.hero { border-color:#f1c40f; box-shadow:0 0 10px rgba(241,196,15,.5); }
+        .raid-troop.hero.empty { opacity:.3; box-shadow:none; }
+        .raid-troop .rt-count { position:absolute; top:-8px; right:-6px; background:#e74c3c; border-radius:11px;
+            padding:0 5px; font-size:10px; border:2px solid #fff; }
         #raid-hint { bottom:112px; left:50%; transform:translateX(-50%); background:rgba(15,25,35,.85);
             color:#ecf0f1; padding:8px 16px; border-radius:12px; font-size:13px; font-weight:700;
             pointer-events:none; text-align:center; max-width:86%; }
@@ -122,6 +127,15 @@
         .mode-pill { padding:10px 18px; border-radius:20px; background:rgba(0,0,0,.4); border:3px solid transparent;
             color:#fff; font-weight:700; cursor:pointer; font-size:14px; }
         .mode-pill.selected { border-color:#2ecc71; background:rgba(46,204,113,.15); }
+        #raid-hero-btn { display:none; position:absolute; top:80px; right:12px; width:70px; height:70px;
+            border-radius:50%; background:radial-gradient(circle, #f39c12, #7e5109);
+            border:3px solid #fff; color:#fff; font-weight:900; font-size:11px;
+            flex-direction:column; align-items:center; justify-content:center;
+            cursor:pointer; z-index:35; box-shadow:0 0 18px rgba(243,156,18,.7);
+            text-align:center; line-height:1.1; user-select:none; -webkit-user-select:none; }
+        .raid-mode #raid-hero-btn.show { display:flex; }
+        #raid-hero-btn .hero-cd { font-size:9px; opacity:.9; }
+        #raid-hero-btn.on-cd { filter:grayscale(1); opacity:.5; pointer-events:none; box-shadow:none; }
     `;
     document.head.appendChild(style);
 
@@ -143,6 +157,7 @@
         '<h1 id="rr-title"></h1><div class="rr-stars" id="rr-stars"><span>★</span><span>★</span><span>★</span></div>' +
         '<div class="rr-stats" id="rr-stats"></div>' +
         '<div><button id="rr-retry">Tekrar Dene</button><button class="alt" id="rr-menu">Ana Menü</button></div>');
+    const heroBtn = makeEl('div', 'raid-hero-btn', 'KENERK<br>ÖZEL<br><span class="hero-cd"></span>');
 
     const timeEl = document.getElementById('rh-time');
     const pctEl = document.getElementById('rh-pct');
@@ -151,7 +166,7 @@
 
     Object.keys(TROOP_INFO).forEach(type => {
         const b = document.createElement('div');
-        b.className = 'raid-troop';
+        b.className = 'raid-troop' + (type === 'kenerk' ? ' hero' : '');
         b.dataset.t = type;
         b.innerHTML = ICONS[type] + '<span>' + TROOP_INFO[type].label + '</span><span class="rt-count">0</span>';
         b.addEventListener('pointerdown', e => {
@@ -168,6 +183,12 @@
     document.getElementById('rr-menu').addEventListener('click', () => {
         resultEl.classList.remove('show');
         document.getElementById('restart-btn').click();
+    });
+
+    // Kahraman özel butonu
+    heroBtn.addEventListener('pointerdown', e => {
+        e.preventDefault(); e.stopPropagation();
+        triggerHeroAbility();
     });
 
     (function buildModePicker() {
@@ -208,15 +229,15 @@
         raid = {
             W, H, k, cx, cy, topUI, botUI,
             hw: 155 * k, hh: 125 * k,
-            walls: [], buildings: [], troops: [], projs: [], parts: [], nums: [], defenders: [],
+            walls: [], buildings: [], troops: [], projs: [], parts: [], nums: [],
             army: Object.assign({}, ARMY),
             selected: 'slime', time: RAID_TIME, started: false, over: false, idle: 0,
             destroyed: 0, total: 0, hallDown: false, loot: 0, shake: 0,
             defMult: 1,
-            bg: null, drag: false, lastDeploy: 0, lastPos: { x: 0, y: 0 }, hudCache: ''
+            bg: null, drag: false, lastDeploy: 0, lastPos: { x: 0, y: 0 }, hudCache: '',
+            heroCD: 0, hero: null, heroSlimeQueue: []
         };
 
-        // Duvarlar
         const wr = 10 * k, step = 13;
         const addWall = (x, y) => raid.walls.push({ type: 'wall', x: cx + x * k, y: cy + y * k, r: wr,
             hp: BUILDING_HP.wall, maxHp: BUILDING_HP.wall, destroyed: false, hitFlash: 0 });
@@ -228,11 +249,9 @@
             type, x: cx + x * k, y: cy + y * k, r: r * k,
             hp: BUILDING_HP[type], maxHp: BUILDING_HP[type],
             destroyed: false, hitFlash: 0,
-            aim: Math.random() * Math.PI * 2, reload: 30 + Math.random() * 30, recoil: 0,
-            spawnTimer: 0
+            aim: Math.random() * Math.PI * 2, reload: 30 + Math.random() * 30, recoil: 0
         });
 
-        // === ATTACK BİNALARI — DUVAR İÇİNDE ===
         addB('hall', 0, 0, 40);
         addB('archer', -105, -65, 18); addB('archer', 105, 65, 18);
         addB('cannon', 105, -65, 18); addB('cannon', -105, 65, 18);
@@ -241,16 +260,16 @@
         addB('buyucu', -55, -95, 18); addB('buyucu', 55, 95, 18);
         addB('depot', 0, 95, 20); addB('depot', -125, 55, 20); addB('depot', 125, -55, 20);
 
-        // === KIŞLA — DUVAR İÇİNDE (defender üretir) ===
-        addB('kisla', 55, 0, 22);
-
-        // === 8 İKSİR TOPLAYICI — DUVAR DIŞINDA (2 üst, 2 alt, 2 sol, 2 sağ) ===
-        addB('collector', -80, -180, 14); addB('collector', 80, -180, 14);   // üst
-        addB('collector', -80, 180, 14);  addB('collector', 80, 180, 14);    // alt
-        addB('collector', -210, -55, 14); addB('collector', -210, 55, 14);   // sol
-        addB('collector', 210, -55, 14);  addB('collector', 210, 55, 14);    // sağ
+        addB('collector', -80, -180, 14); addB('collector', 80, -180, 14);
+        addB('collector', -80, 180, 14);  addB('collector', 80, 180, 14);
+        addB('collector', -210, -55, 14); addB('collector', -210, 55, 14);
+        addB('collector', 210, -55, 14);  addB('collector', 210, 55, 14);
 
         raid.total = raid.buildings.length;
+        raid.hero = null;
+        raid.heroCD = 0;
+        raid.heroSlimeQueue = [];
+        heroBtn.classList.remove('show', 'on-cd');
         buildBackground();
         hintEl.classList.add('show');
         resultEl.classList.remove('show');
@@ -258,7 +277,6 @@
         updateHUD(true);
     }
 
-    // ===== ARKA PLAN =====
     function buildBackground() {
         const { W, H, cx, cy, hw, hh, k } = raid;
         const bg = document.createElement('canvas');
@@ -377,62 +395,10 @@
         }
         const idx = raid.troops.indexOf(t);
         if (idx > -1) raid.troops.splice(idx, 1);
-    }
-
-    // ===== KIŞLA DEFENDER =====
-    function spawnDefender(x, y) {
-        const kt = TROOP_SCALE * clamp(raid.k / VILLAGE_SCALE, 0.9, 1.25);
-        raid.defenders.push({
-            x, y, radius: 12 * kt,
-            hp: KISLA.defenderHp, maxHp: KISLA.defenderHp,
-            dmg: KISLA.defenderDmg, speed: KISLA.defenderSpd,
-            atk: 0, atkInt: KISLA.defenderAtk,
-            target: null, isDead: false, isDefender: true,
-            angle: 0, hitFlash: 0
-        });
-        addParts(x, y, '#e74c3c', 8, 2, 22, 3);
-        addRing(x, y, '#e74c3c', 25 * raid.k, 14);
-    }
-
-    function updateDefenders(ts) {
-        for (let i = raid.defenders.length - 1; i >= 0; i--) {
-            const d = raid.defenders[i];
-            if (d.isDead || d.hp <= 0) {
-                addParts(d.x, d.y, '#e74c3c', 10, 2.4, 26, 4);
-                raid.defenders.splice(i, 1);
-                continue;
-            }
-            if (d.hitFlash > 0) d.hitFlash -= ts;
-
-            let best = null, bd = Infinity;
-            raid.troops.forEach(t => {
-                if (t.isDead) return;
-                const dd = Math.hypot(t.x - d.x, t.y - d.y);
-                if (dd < bd) { bd = dd; best = t; }
-            });
-            if (!best) continue;
-
-            d.angle = Math.atan2(best.y - d.y, best.x - d.x);
-            d.atk -= ts;
-
-            const inRange = bd <= d.radius + best.radius + 5;
-            if (!inRange) {
-                d.x += Math.cos(d.angle) * d.speed * raid.k * ts;
-                d.y += Math.sin(d.angle) * d.speed * raid.k * ts;
-            } else if (d.atk <= 0) {
-                damageTroop(best, d.dmg);
-                d.atk = d.atkInt;
-                addParts(best.x, best.y, '#e74c3c', 3, 1.5, 12, 2);
-            }
+        if (t.type === 'kenerk' && raid.hero === t) {
+            raid.hero = null;
+            heroBtn.classList.remove('show', 'on-cd');
         }
-    }
-
-    function damageDefender(d, dmg) {
-        if (d.isDead) return;
-        d.hp -= dmg;
-        d.hitFlash = 4;
-        addNum(d.x, d.y - d.radius - 6, Math.round(dmg), '#e74c3c');
-        if (d.hp <= 0) d.isDead = true;
     }
 
     // ===== BİRLİKLER =====
@@ -450,6 +416,20 @@
             t = Object.assign(base, { radius: BOMBER.r * kt, hp: BOMBER.hp, maxHp: BOMBER.hp, speed: BOMBER.spd, dmg: 0, color: '#e67e22' });
         } else if (type === 'tank') {
             t = Object.assign(base, { radius: TANK.r * kt, hp: TANK.hp, maxHp: TANK.hp, speed: TANK.spd, dmg: TANK.dmg, color: '#d35400', atkInt: TANK.atk });
+        } else if (type === 'sifaci') {
+            t = Object.assign(base, { radius: SIFACI.r * kt, hp: SIFACI.hp, maxHp: SIFACI.hp, speed: SIFACI.spd, dmg: 0, color: '#2ecc71', isHealer: true });
+        } else if (type === 'suikastci') {
+            t = Object.assign(base, { radius: SUIKASTCI.r * kt, hp: SUIKASTCI.hp, maxHp: SUIKASTCI.hp, speed: SUIKASTCI.spd, dmg: SUIKASTCI.dmg, color: '#2c3e50', atkInt: SUIKASTCI.atk });
+        } else if (type === 'balon') {
+            t = Object.assign(base, { radius: BALON.r * kt, hp: BALON.hp, maxHp: BALON.hp, speed: BALON.spd, dmg: BALON.aoeDmg, color: '#e74c3c' });
+        } else if (type === 'kenerk') {
+            t = Object.assign(base, {
+                radius: KENERK.r * kt, hp: KENERK.hp, maxHp: KENERK.hp,
+                speed: KENERK.spd, dmg: KENERK.dmg, color: '#f39c12',
+                atkInt: KENERK.atk, isHero: true
+            });
+            raid.hero = t;
+            heroBtn.classList.add('show');
         } else {
             t = Object.assign(base, { radius: NEST.r * kt, hp: NEST.hp, maxHp: NEST.hp, speed: 0, dmg: 0,
                 color: '#27ae60', isNest: true, timer: 0, spawned: 0 });
@@ -487,6 +467,7 @@
     }
 
     function resolveWalls(t, dirx, diry) {
+        if (t.type === 'balon') return;
         for (const w of raid.walls) {
             if (w.destroyed) continue;
             const dx = t.x - w.x, dy = t.y - w.y;
@@ -524,23 +505,75 @@
         if (idx > -1) raid.troops.splice(idx, 1);
     }
 
+    function balonExplode(t) {
+        const R = BALON.aoeRadius * raid.k;
+        raid.buildings.forEach(b => { if (!b.destroyed && Math.hypot(b.x - t.x, b.y - t.y) < R + b.r) damageBuilding(b, BALON.aoeDmg); });
+        addParts(t.x, t.y, '#e74c3c', 18, 3.5, 30, 5);
+        addParts(t.x, t.y, '#f1c40f', 10, 2.5, 24, 4);
+        addRing(t.x, t.y, '#e74c3c', R, 18);
+        raid.shake = Math.max(raid.shake, 8);
+        t.isDead = true;
+        const idx = raid.troops.indexOf(t);
+        if (idx > -1) raid.troops.splice(idx, 1);
+    }
+
     function updateTroop(t, ts) {
         if (t.type === 'nest') { updateNest(t, ts); return; }
+
+        // KENERK pasif regen (5 HP/sn)
+        if (t.type === 'kenerk' && t.hp < t.maxHp) {
+            t.hp = Math.min(t.maxHp, t.hp + KENERK.passiveRegen / 60 * ts);
+            if (Math.random() < 0.1) addParts(t.x, t.y, '#2ecc71', 1, 0.5, 10, 1.5);
+        }
+
         if (t.blocked && t.blocked.destroyed) t.blocked = null;
+
+        // Şifacı özel
+        if (t.isHealer) {
+            let wounded = null, minRatio = 0.85;
+            raid.troops.forEach(o => {
+                if (o === t || o.isDead || o.isHealer) return;
+                const ratio = o.hp / o.maxHp;
+                if (ratio < minRatio) { minRatio = ratio; wounded = o; }
+            });
+            if (wounded) {
+                const d = Math.hypot(wounded.x - t.x, wounded.y - t.y);
+                if (d < SIFACI.healRange * raid.k) {
+                    wounded.hp = Math.min(wounded.maxHp, wounded.hp + SIFACI.healPerSec / 60 * ts);
+                    t.angle = Math.atan2(wounded.y - t.y, wounded.x - t.x);
+                    if (Math.random() < 0.3) addParts(wounded.x, wounded.y, '#2ecc71', 1, 0.8, 12, 2);
+                } else {
+                    const ang = Math.atan2(wounded.y - t.y, wounded.x - t.x);
+                    t.x += Math.cos(ang) * t.speed * raid.k * ts;
+                    t.y += Math.sin(ang) * t.speed * raid.k * ts;
+                    t.angle = ang;
+                    resolveWalls(t, Math.cos(ang), Math.sin(ang));
+                }
+            } else {
+                const nearDef = nearestDefense(t);
+                if (nearDef) {
+                    const d = Math.hypot(nearDef.x - t.x, nearDef.y - t.y);
+                    if (d < 120 * raid.k) {
+                        const ang = Math.atan2(t.y - nearDef.y, t.x - nearDef.x);
+                        t.x += Math.cos(ang) * t.speed * raid.k * ts;
+                        t.y += Math.sin(ang) * t.speed * raid.k * ts;
+                        t.angle = ang;
+                    }
+                }
+            }
+            t.x = clamp(t.x, t.radius + WALL_THICKNESS, canvas.width - t.radius - WALL_THICKNESS);
+            t.y = clamp(t.y, t.radius + WALL_THICKNESS, canvas.height - t.radius - WALL_THICKNESS);
+            return;
+        }
+
         let tgt;
         if (t.type === 'bomber') tgt = nearestWall(t) || nearestBuilding(t);
         else if (t.blocked) tgt = t.blocked;
         else if (t.type === 'tank') tgt = nearestDefense(t) || nearestBuilding(t);
+        else if (t.type === 'suikastci') tgt = nearestDefense(t) || nearestBuilding(t);
+        else if (t.type === 'balon') tgt = nearestDefense(t) || nearestBuilding(t);
+        else if (t.type === 'kenerk') tgt = nearestDefense(t) || nearestBuilding(t);
         else tgt = nearestBuilding(t);
-
-        // Yakın defender'a öncelik (tehdit)
-        let nearDefender = null, nd = Infinity;
-        raid.defenders.forEach(d => {
-            if (d.isDead) return;
-            const dd = Math.hypot(d.x - t.x, d.y - t.y);
-            if (dd < nd && dd < 70 * raid.k) { nd = dd; nearDefender = d; }
-        });
-        if (nearDefender) tgt = nearDefender;
 
         t.target = tgt;
         if (!tgt) return;
@@ -548,23 +581,26 @@
         t.angle = Math.atan2(dy, dx);
         t.atk -= ts;
         const isBot = t.type === 'bot';
-        const tgtR = tgt.r || tgt.radius || 0;
-        const inRange = isBot ? (d - tgtR <= BOT.range * raid.k) : (d <= t.radius + tgtR + 3);
+        const isHero = t.type === 'kenerk';
+        const isBalon = t.type === 'balon';
+        const inRange = isBot ? (d - tgt.r <= BOT.range * raid.k)
+                       : isHero ? (d - tgt.r <= KENERK.range * raid.k)
+                       : isBalon ? (d <= t.radius + tgt.r + 5)
+                       : (d <= t.radius + tgt.r + 3);
         if (!inRange) {
             const sp = t.speed * raid.k * ts;
             t.x += dx / d * sp; t.y += dy / d * sp;
             resolveWalls(t, dx / d, dy / d);
         } else if (t.atk <= 0) {
-            if (isBot) {
+            if (isBot || isHero) {
+                const dmg = isBot ? BOT.dmg : KENERK.dmg;
                 raid.projs.push({ kind: 'orb', from: 'troop', x: t.x, y: t.y, target: tgt, tx: tgt.x, ty: tgt.y,
-                    speed: 8 * raid.k, dmg: BOT.dmg, splash: 0, angle: t.angle });
-                t.atk = BOT.atk;
+                    speed: 8 * raid.k, dmg: dmg, splash: 0, angle: t.angle });
+                t.atk = isBot ? BOT.atk : KENERK.atk;
+            } else if (isBalon) {
+                balonExplode(t);
             } else if (t.type === 'bomber') {
                 bomberExplode(t);
-            } else if (tgt.isDefender) {
-                damageDefender(tgt, t.dmg);
-                addParts(tgt.x, tgt.y, t.color, 3, 1.6, 14, 2.5);
-                t.atk = t.atkInt;
             } else {
                 damageBuilding(tgt, t.dmg);
                 addParts(tgt.x, tgt.y, t.color, 3, 1.6, 14, 2.5);
@@ -573,22 +609,53 @@
         }
     }
 
+    // ===== KAHRAMAN ÖZEL YETENEĞİ =====
+    function triggerHeroAbility() {
+        if (!raid || raid.over) return;
+        if (!raid.hero || raid.hero.isDead) return;
+        if (raid.heroCD > 0) return;
+
+        const h = raid.hero;
+        raid.heroCD = KENERK.heroCd;
+        heroBtn.classList.add('on-cd');
+
+        // 1) Anlık heal
+        h.hp = Math.min(h.maxHp, h.hp + KENERK.heroHeal);
+        addNum(h.x, h.y - h.radius - 15, '+' + KENERK.heroHeal, '#2ecc71');
+        addRing(h.x, h.y, '#2ecc71', 40 * raid.k, 18);
+
+        // 2) Dev ok — savunma binalarına doğru
+        const targetDefs = raid.buildings.filter(b => !b.destroyed && DEF[b.type])
+            .map(b => ({ b, d: dist(h, b) }))
+            .sort((a, b) => a.d - b.d)
+            .slice(0, KENERK.devArrowMaxBld);
+
+        const angle = h.angle;
+        raid.projs.push({
+            kind: 'hero_arrow', from: 'troop',
+            x: h.x, y: h.y, tx: h.x + Math.cos(angle) * 800, ty: h.y + Math.sin(angle) * 800,
+            speed: 16 * raid.k, dmg: KENERK.devArrowDmg, splash: 0, angle: angle,
+            heroArrow: true, hitBlds: new Set(), hitCount: 0,
+            maxBldHits: KENERK.devArrowMaxBld
+        });
+
+        // Görsel patlama
+        addParts(h.x, h.y, '#f39c12', 20, 3, 30, 5);
+        addRing(h.x, h.y, '#f39c12', 60 * raid.k, 20);
+        raid.shake = Math.max(raid.shake, 10);
+
+        // 3) Slime queue — 2 saniye sonra başlar
+        raid.heroSlimeQueue = [];
+        let totalDelay = KENERK.slimeDelay;
+        for (let i = 0; i < KENERK.slimeCount; i++) {
+            raid.heroSlimeQueue.push({ timer: totalDelay, hx: h.x, hy: h.y });
+            totalDelay += KENERK.slimeInterval;
+        }
+    }
+
     // ===== SAVUNMA =====
     function updateDefense(b, ts) {
-        if (b.destroyed) return;
-
-        // KIŞLA — defender çıkarır (attack değil)
-        if (b.type === 'kisla') {
-            b.spawnTimer += ts;
-            if (b.spawnTimer >= KISLA.spawnEvery && raid.defenders.length < KISLA.maxDefenders) {
-                b.spawnTimer = 0;
-                const a = Math.random() * Math.PI * 2;
-                spawnDefender(b.x + Math.cos(a) * b.r * 1.5, b.y + Math.sin(a) * b.r * 1.5);
-            }
-            return;
-        }
-
-        if (!DEF[b.type]) return;
+        if (b.destroyed || !DEF[b.type]) return;
         const cfg = DEF[b.type];
         const range = cfg.range * raid.k;
         b.reload -= ts;
@@ -626,6 +693,33 @@
     function updateProjectiles(ts) {
         for (let i = raid.projs.length - 1; i >= 0; i--) {
             const p = raid.projs[i];
+
+            // Dev ok — özel
+            if (p.heroArrow) {
+                p.x += Math.cos(p.angle) * p.speed * ts;
+                p.y += Math.sin(p.angle) * p.speed * ts;
+
+                // Ekran dışına çıkınca kaybol
+                if (p.x < 0 || p.x > canvas.width || p.y < 0 || p.y > canvas.height) {
+                    raid.projs.splice(i, 1); continue;
+                }
+                // Savunma binası kontrolü
+                let hit = false;
+                for (const b of raid.buildings) {
+                    if (b.destroyed || !DEF[b.type]) continue;
+                    if (p.hitBlds.has(b)) continue;
+                    if (Math.hypot(b.x - p.x, b.y - p.y) < b.r + 15 * raid.k) {
+                        p.hitBlds.add(b);
+                        damageBuilding(b, p.dmg);
+                        addParts(b.x, b.y, '#f39c12', 10, 2.5, 24, 4);
+                        p.hitCount++;
+                        if (p.hitCount >= p.maxBldHits) { hit = true; break; }
+                    }
+                }
+                if (hit) { raid.projs.splice(i, 1); continue; }
+                continue;
+            }
+
             if (p.target && !p.target.isDead && !p.target.destroyed) { p.tx = p.target.x; p.ty = p.target.y; }
             const dx = p.tx - p.x, dy = p.ty - p.y, d = Math.hypot(dx, dy) || 1;
             const sp = p.speed * ts;
@@ -639,8 +733,6 @@
                     } else if (p.target && !p.target.isDead) {
                         damageTroop(p.target, p.dmg);
                     }
-                } else if (p.target && p.target.isDefender && !p.target.isDead) {
-                    damageDefender(p.target, p.dmg);
                 } else if (p.target && !p.target.destroyed) {
                     damageBuilding(p.target, p.dmg);
                     addParts(p.tx, p.ty, '#9b59b6', 4, 1.8, 16, 3);
@@ -722,18 +814,25 @@
     function updateHUD(force) {
         const secs = Math.max(0, Math.ceil(raid.time));
         const stars = currentStars();
-        const key = secs + '|' + raid.destroyed + '|' + raid.loot + '|' + stars.join('');
+        const key = secs + '|' + raid.destroyed + '|' + raid.loot + '|' + stars.join('') + '|' + raid.heroCD;
         if (!force && key === raid.hudCache) return;
         raid.hudCache = key;
         timeEl.textContent = Math.floor(secs / 60) + ':' + String(secs % 60).padStart(2, '0');
         pctEl.textContent = Math.round(raid.destroyed / raid.total * 100) + '%';
         lootEl.textContent = raid.loot;
         for (let i = 0; i < 3; i++) starEls[i].classList.toggle('on', stars[i]);
+        // Kahraman buton CD göstergesi
+        const cdEl = heroBtn.querySelector('.hero-cd');
+        if (cdEl) {
+            if (raid.heroCD > 0) cdEl.textContent = Math.ceil(raid.heroCD / 60) + 's';
+            else cdEl.textContent = '';
+        }
     }
 
     function endRaid(reason) {
         if (raid.over) return;
         raid.over = true;
+        heroBtn.classList.remove('show', 'on-cd');
         const stars = currentStars();
         const n = stars.filter(Boolean).length;
         const pct = Math.round(raid.destroyed / raid.total * 100);
@@ -771,11 +870,26 @@
         raid.buildings.forEach(b => { if (b.hitFlash > 0) b.hitFlash -= ts; });
         raid.walls.forEach(w => { if (w.hitFlash > 0) w.hitFlash -= ts; });
 
+        // Kahraman CD
+        if (raid.heroCD > 0) {
+            raid.heroCD = Math.max(0, raid.heroCD - ts);
+            if (raid.heroCD === 0) heroBtn.classList.remove('on-cd');
+        }
+        // Kahraman slime queue
+        for (let i = raid.heroSlimeQueue.length - 1; i >= 0; i--) {
+            const s = raid.heroSlimeQueue[i];
+            s.timer -= ts;
+            if (s.timer <= 0) {
+                spawnTroop('slime', s.hx + (Math.random() - 0.5) * 40, s.hy + (Math.random() - 0.5) * 40, 2);
+                addParts(s.hx, s.hy, '#2ecc71', 6, 2, 20, 3);
+                raid.heroSlimeQueue.splice(i, 1);
+            }
+        }
+
         if (raid.over) return;
         if (raid.started) raid.time -= ts / 60;
 
         raid.buildings.forEach(b => updateDefense(b, ts));
-        updateDefenders(ts);
         raid.troops.slice().forEach(t => { if (!t.isDead) updateTroop(t, ts); });
         updateProjectiles(ts);
 
@@ -792,7 +906,7 @@
 
     window.GAME_EXT.modes[MOD_ID] = {
         label: 'Köy Baskını',
-        onStart() { raid = null; player.isDead = true; },
+        onStart() { raid = null; player.isDead = true; heroBtn.classList.remove('show', 'on-cd'); },
         onUpdate(ts) { raidUpdate(ts); }
     };
 
@@ -803,6 +917,7 @@
         document.body.classList.remove('raid-mode');
         resultEl.classList.remove('show');
         hintEl.classList.remove('show');
+        heroBtn.classList.remove('show', 'on-cd');
     };
 
     // ===== ÇİZİM =====
@@ -821,17 +936,10 @@
         rr(c, x - r, y - r * 0.55, r * 2, r * 1.45, 6);
         c.fillStyle = f ? '#fff' : '#a07f5f'; c.fill();
         c.strokeStyle = '#5d4037'; c.lineWidth = 3; c.stroke();
-        c.strokeStyle = 'rgba(60,40,25,0.35)'; c.lineWidth = 1;
-        for (let i = 1; i < 4; i++) { c.beginPath(); c.moveTo(x - r, y - r * 0.55 + i * r * 0.36); c.lineTo(x + r, y - r * 0.55 + i * r * 0.36); c.stroke(); }
         c.beginPath(); c.moveTo(x - r * 1.12, y - r * 0.5); c.lineTo(x, y - r * 1.3); c.lineTo(x + r * 1.12, y - r * 0.5); c.closePath();
         c.fillStyle = f ? '#fff' : '#cf3a2b'; c.fill();
         c.strokeStyle = '#7b241c'; c.lineWidth = 2; c.stroke();
-        c.beginPath(); c.moveTo(x, y - r * 1.3); c.lineTo(x + r * 1.12, y - r * 0.5); c.lineTo(x, y - r * 0.5); c.closePath();
-        c.fillStyle = f ? '#fff' : '#a93226'; c.fill();
         rr(c, x - r * 0.2, y + r * 0.22, r * 0.4, r * 0.68, 4); c.fillStyle = '#4e342e'; c.fill();
-        c.fillStyle = '#f9e79f';
-        rr(c, x - r * 0.72, y - r * 0.15, r * 0.3, r * 0.3, 3); c.fill();
-        rr(c, x + r * 0.42, y - r * 0.15, r * 0.3, r * 0.3, 3); c.fill();
         const wave = Math.sin(Date.now() / 220) * 4;
         c.strokeStyle = '#3e2723'; c.lineWidth = 2;
         c.beginPath(); c.moveTo(x, y - r * 1.3); c.lineTo(x, y - r * 1.75); c.stroke();
@@ -851,15 +959,11 @@
             c.beginPath(); c.arc(x + Math.cos(a) * r * 0.9, y + Math.sin(a) * r * 0.9, r * 0.17, 0, Math.PI * 2); c.fill();
         }
         c.beginPath(); c.arc(x, y, r * 0.68, 0, Math.PI * 2); c.fillStyle = '#a0714a'; c.fill();
-        c.strokeStyle = '#6d4c41'; c.lineWidth = 2; c.stroke();
         c.beginPath(); c.arc(x, y, r * 0.3, 0, Math.PI * 2); c.fillStyle = '#f5cba7'; c.fill();
         c.beginPath(); c.arc(x, y - r * 0.08, r * 0.32, Math.PI, Math.PI * 2); c.fillStyle = '#27ae60'; c.fill();
         c.save(); c.translate(x, y); c.rotate(b.aim);
         c.strokeStyle = '#6d4c41'; c.lineWidth = 3;
         c.beginPath(); c.arc(r * 0.5, 0, r * 0.4, -1.15, 1.15); c.stroke();
-        c.strokeStyle = '#ecf0f1'; c.lineWidth = 1;
-        c.beginPath(); c.moveTo(r * 0.5 + Math.cos(-1.15) * r * 0.4, Math.sin(-1.15) * r * 0.4);
-        c.lineTo(r * 0.5 + Math.cos(1.15) * r * 0.4, Math.sin(1.15) * r * 0.4); c.stroke();
         c.restore();
     }
 
@@ -904,7 +1008,6 @@
         c.strokeStyle = '#3e2723'; c.lineWidth = 3; c.stroke();
         c.beginPath(); c.arc(x, y, r * 0.72, 0, Math.PI * 2);
         c.fillStyle = f ? '#fff' : '#2c3e50'; c.fill();
-        c.strokeStyle = '#1a1a1a'; c.lineWidth = 2; c.stroke();
         c.save(); c.translate(x, y); c.rotate(b.aim + Math.PI / 6);
         const back = b.recoil > 0 ? -b.recoil * 0.6 : 0;
         rr(c, -r * 0.25 + back, -r * 0.22, r * 1.15, r * 0.44, 4);
@@ -913,15 +1016,6 @@
         c.beginPath(); c.arc(r * 0.9 + back, 0, r * 0.22, 0, Math.PI * 2);
         c.fillStyle = '#000'; c.fill();
         c.restore();
-        if (b.recoil > 0) {
-            c.save();
-            c.globalAlpha = b.recoil / 8;
-            c.fillStyle = '#f39c12';
-            c.beginPath();
-            c.arc(x + Math.cos(b.aim + Math.PI / 6) * r * 0.9, y + Math.sin(b.aim + Math.PI / 6) * r * 0.9, r * 0.5, 0, Math.PI * 2);
-            c.fill();
-            c.restore();
-        }
     }
 
     function drawBuyucu(c, b) {
@@ -932,17 +1026,12 @@
         c.strokeStyle = '#4834d4'; c.lineWidth = 3; c.stroke();
         c.beginPath(); c.arc(x, y, r * 0.68, 0, Math.PI * 2);
         c.fillStyle = f ? '#fff' : '#2c3e50'; c.fill();
-        c.strokeStyle = '#1a1a1a'; c.lineWidth = 1.5; c.stroke();
         const pulse = 0.75 + Math.sin(Date.now() / 250 + x * 0.01) * 0.25;
         c.save();
         c.shadowColor = '#a29bfe'; c.shadowBlur = 12 * pulse;
         c.beginPath(); c.arc(x, y, r * 0.38 * pulse, 0, Math.PI * 2);
         c.fillStyle = f ? '#fff' : '#a29bfe'; c.fill();
         c.strokeStyle = '#fff'; c.lineWidth = 2; c.stroke();
-        c.restore();
-        c.save(); c.translate(x, y); c.rotate(b.aim);
-        c.fillStyle = 'rgba(162, 155, 254, 0.5)';
-        c.beginPath(); c.moveTo(r * 0.55, 0); c.lineTo(r * 0.75, -r * 0.15); c.lineTo(r * 0.75, r * 0.15); c.closePath(); c.fill();
         c.restore();
     }
 
@@ -952,9 +1041,6 @@
         rr(c, x - r * 0.9, y - r * 0.9, r * 1.8, r * 1.8, r * 0.35);
         c.fillStyle = f ? '#fff' : '#8d6e63'; c.fill();
         c.strokeStyle = '#4e342e'; c.lineWidth = 2.5; c.stroke();
-        c.strokeStyle = '#3e2723'; c.lineWidth = 2;
-        c.beginPath(); c.moveTo(x - r * 0.9, y - r * 0.35); c.lineTo(x + r * 0.9, y - r * 0.35); c.stroke();
-        c.beginPath(); c.moveTo(x - r * 0.9, y + r * 0.35); c.lineTo(x + r * 0.9, y + r * 0.35); c.stroke();
         c.beginPath(); c.arc(x, y - r * 0.25, r * 0.6, 0, Math.PI * 2);
         c.fillStyle = f ? '#fff' : 'rgba(155, 89, 182, 0.85)'; c.fill();
         c.strokeStyle = '#8e44ad'; c.lineWidth = 1.5; c.stroke();
@@ -964,60 +1050,17 @@
         c.fillText('+', x + r * 0.7, y - r * 0.7);
     }
 
-    function drawKisla(c, b) {
-        const r = b.r, x = b.x, y = b.y, f = b.hitFlash > 0;
-        shadow(c, x, y + r * 0.7, r * 1.15, r * 0.55);
-        rr(c, x - r, y - r * 0.6, r * 2, r * 1.5, 5);
-        c.fillStyle = f ? '#fff' : '#4a5568'; c.fill();
-        c.strokeStyle = '#1a202c'; c.lineWidth = 3; c.stroke();
-        c.beginPath(); c.moveTo(x - r * 1.1, y - r * 0.55);
-        c.lineTo(x, y - r * 1.35); c.lineTo(x + r * 1.1, y - r * 0.55); c.closePath();
-        c.fillStyle = f ? '#fff' : '#c0392b'; c.fill();
-        c.strokeStyle = '#7b241c'; c.lineWidth = 2; c.stroke();
-        rr(c, x - r * 0.28, y + r * 0.15, r * 0.56, r * 0.72, 3);
-        c.fillStyle = '#1a202c'; c.fill();
-        c.strokeStyle = '#f1c40f'; c.lineWidth = 3;
-        c.beginPath(); c.moveTo(x - r * 0.4, y - r * 0.15); c.lineTo(x + r * 0.4, y + r * 0.15); c.stroke();
-        c.beginPath(); c.moveTo(x + r * 0.4, y - r * 0.15); c.lineTo(x - r * 0.4, y + r * 0.15); c.stroke();
-        if (raid.defenders && raid.defenders.length < KISLA.maxDefenders) {
-            const prog = b.spawnTimer / KISLA.spawnEvery;
-            c.strokeStyle = 'rgba(241,196,15,0.8)'; c.lineWidth = 2;
-            c.beginPath(); c.arc(x, y, r + 6, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * prog); c.stroke();
-        }
-    }
-
-    function drawDefender(c, d) {
-        const r = d.radius, x = d.x, y = d.y, f = d.hitFlash > 0;
-        c.save();
-        c.translate(x, y);
-        c.fillStyle = 'rgba(0,0,0,0.3)';
-        c.beginPath(); c.ellipse(0, r * 0.4, r * 0.9, r * 0.35, 0, 0, Math.PI * 2); c.fill();
-        c.rotate(d.angle);
-        c.fillStyle = f ? '#fff' : '#e74c3c';
-        c.beginPath(); c.arc(0, 0, r, 0, Math.PI * 2); c.fill();
-        c.strokeStyle = '#7b241c'; c.lineWidth = 2; c.stroke();
-        c.beginPath(); c.arc(r - 3, 0, 3, 0, Math.PI * 2);
-        c.fillStyle = '#fff'; c.fill();
-        c.restore();
-        c.fillStyle = '#444'; c.fillRect(x - 10, y - r - 6, 20, 2);
-        c.fillStyle = '#e74c3c'; c.fillRect(x - 10, y - r - 6, 20 * clamp(d.hp / d.maxHp, 0, 1), 2);
-    }
-
     function drawDepot(c, b) {
         const r = b.r, x = b.x, y = b.y, f = b.hitFlash > 0;
         shadow(c, x, y + r * 0.7, r * 1.15, r * 0.55);
         rr(c, x - r, y - r * 0.6, r * 2, r * 1.5, 5);
         c.fillStyle = f ? '#fff' : '#8d5a2b'; c.fill();
         c.strokeStyle = '#4e2f12'; c.lineWidth = 3; c.stroke();
-        c.strokeStyle = 'rgba(40,20,5,0.45)'; c.lineWidth = 1.5;
-        for (let i = 1; i < 4; i++) { c.beginPath(); c.moveTo(x - r, y - r * 0.6 + i * r * 0.37); c.lineTo(x + r, y - r * 0.6 + i * r * 0.37); c.stroke(); }
         rr(c, x - r * 1.05, y - r * 0.85, r * 2.1, r * 0.4, 4); c.fillStyle = f ? '#fff' : '#b07a3c'; c.fill();
-        c.strokeStyle = '#4e2f12'; c.lineWidth = 2; c.stroke();
-        c.fillStyle = '#f1c40f'; c.strokeStyle = '#b7950b'; c.lineWidth = 1;
-        [[-0.45, -0.95], [-0.1, -1.05], [0.3, -0.95], [0.05, -0.8], [-0.3, -0.8]].forEach(p => {
-            c.beginPath(); c.arc(x + p[0] * r, y + p[1] * r, r * 0.17, 0, Math.PI * 2); c.fill(); c.stroke();
+        c.fillStyle = '#f1c40f';
+        [[-0.45, -0.95], [-0.1, -1.05], [0.3, -0.95]].forEach(p => {
+            c.beginPath(); c.arc(x + p[0] * r, y + p[1] * r, r * 0.17, 0, Math.PI * 2); c.fill();
         });
-        rr(c, x - r * 0.14, y + r * 0.05, r * 0.28, r * 0.32, 3); c.fillStyle = '#f1c40f'; c.fill();
     }
 
     function drawWall(c, w) {
@@ -1025,7 +1068,6 @@
         rr(c, w.x - r, w.y - r, r * 2, r * 2, 3);
         c.fillStyle = f ? '#fff' : '#a5b0b4'; c.fill();
         c.strokeStyle = '#6b7780'; c.lineWidth = 1.5; c.stroke();
-        c.fillStyle = 'rgba(255,255,255,0.28)'; c.fillRect(w.x - r + 2, w.y - r + 2, r * 2 - 4, r * 0.55);
     }
 
     function drawRubble(c, b) {
@@ -1036,11 +1078,134 @@
             const a = i * 1.05 + b.x;
             c.beginPath(); c.arc(b.x + Math.cos(a) * b.r * 0.5, b.y + Math.sin(a) * b.r * 0.5, b.r * 0.22, 0, Math.PI * 2); c.fill();
         }
-        c.fillStyle = 'rgba(230,126,34,' + (0.25 + Math.sin(Date.now() / 300 + b.x) * 0.15) + ')';
-        c.beginPath(); c.arc(b.x, b.y, b.r * 0.3, 0, Math.PI * 2); c.fill();
     }
 
     function drawTroop(c, t) {
+        // KENERK — büyük, altın çerçeveli, taç
+        if (t.type === 'kenerk') {
+            c.save();
+            // Aura (kahraman)
+            c.globalAlpha = 0.15 + Math.sin(Date.now() / 400) * 0.05;
+            c.beginPath(); c.arc(t.x, t.y, t.radius * 1.8, 0, Math.PI * 2);
+            c.fillStyle = '#f39c12'; c.fill();
+            c.globalAlpha = 1;
+            // Gölge
+            c.fillStyle = 'rgba(0,0,0,0.35)';
+            c.beginPath(); c.ellipse(t.x, t.y + t.radius * 0.4, t.radius * 0.95, t.radius * 0.35, 0, 0, Math.PI * 2); c.fill();
+            // Gövde
+            c.beginPath(); c.arc(t.x, t.y, t.radius, 0, Math.PI * 2);
+            c.fillStyle = '#f39c12'; c.fill();
+            c.strokeStyle = '#7e5109'; c.lineWidth = 3.5; c.stroke();
+            // Göğüs zırhı
+            c.beginPath(); c.arc(t.x, t.y, t.radius * 0.6, 0, Math.PI * 2);
+            c.fillStyle = 'rgba(126,81,9,0.5)'; c.fill();
+            // Yön göstergesi (ok)
+            c.save(); c.translate(t.x, t.y); c.rotate(t.angle);
+            c.beginPath();
+            c.moveTo(t.radius * 0.9, 0);
+            c.lineTo(t.radius * 0.3, -t.radius * 0.4);
+            c.lineTo(t.radius * 0.3, t.radius * 0.4);
+            c.closePath();
+            c.fillStyle = '#fff'; c.fill();
+            c.restore();
+            // Taç
+            c.fillStyle = '#f1c40f';
+            c.beginPath();
+            c.moveTo(t.x - t.radius * 0.5, t.y - t.radius * 1.05);
+            c.lineTo(t.x - t.radius * 0.25, t.y - t.radius * 1.35);
+            c.lineTo(t.x, t.y - t.radius * 1.1);
+            c.lineTo(t.x + t.radius * 0.25, t.y - t.radius * 1.35);
+            c.lineTo(t.x + t.radius * 0.5, t.y - t.radius * 1.05);
+            c.closePath();
+            c.fill();
+            c.strokeStyle = '#7e5109'; c.lineWidth = 1.5; c.stroke();
+            c.restore();
+            // HP bar (uzun)
+            c.fillStyle = 'rgba(0,0,0,0.6)'; c.fillRect(t.x - 22, t.y - t.radius - 22, 44, 5);
+            c.fillStyle = '#e74c3c'; c.fillRect(t.x - 22, t.y - t.radius - 22, 44 * clamp(t.hp / t.maxHp, 0, 1), 5);
+            c.strokeStyle = '#f1c40f'; c.lineWidth = 1;
+            c.strokeRect(t.x - 22, t.y - t.radius - 22, 44, 5);
+            return;
+        }
+
+        // Şifacı
+        if (t.isHealer) {
+            c.save();
+            c.globalAlpha = 0.15;
+            c.beginPath(); c.arc(t.x, t.y, SIFACI.healRange * raid.k, 0, Math.PI * 2);
+            c.fillStyle = '#2ecc71'; c.fill();
+            c.globalAlpha = 1;
+            c.fillStyle = 'rgba(0,0,0,0.3)';
+            c.beginPath(); c.ellipse(t.x, t.y + t.radius * 0.4, t.radius * 0.9, t.radius * 0.35, 0, 0, Math.PI * 2); c.fill();
+            c.beginPath(); c.arc(t.x, t.y, t.radius, 0, Math.PI * 2);
+            c.fillStyle = '#2ecc71'; c.fill();
+            c.strokeStyle = '#145a32'; c.lineWidth = 2.5; c.stroke();
+            c.fillStyle = '#fff';
+            c.fillRect(t.x - 2, t.y - t.radius * 0.55, 4, t.radius * 1.1);
+            c.fillRect(t.x - t.radius * 0.55, t.y - 2, t.radius * 1.1, 4);
+            c.restore();
+            c.fillStyle = 'rgba(0,0,0,0.5)'; c.fillRect(t.x - 12, t.y - t.radius - 8, 24, 3);
+            c.fillStyle = '#2ecc71'; c.fillRect(t.x - 12, t.y - t.radius - 8, 24 * clamp(t.hp / t.maxHp, 0, 1), 3);
+            return;
+        }
+
+        // Suikastçı
+        if (t.type === 'suikastci') {
+            c.save();
+            c.globalAlpha = 0.4;
+            c.strokeStyle = '#f1c40f';
+            c.lineWidth = 3;
+            c.beginPath();
+            c.moveTo(t.x - Math.cos(t.angle) * t.radius * 1.2, t.y - Math.sin(t.angle) * t.radius * 1.2);
+            c.lineTo(t.x - Math.cos(t.angle) * t.radius * 2.5, t.y - Math.sin(t.angle) * t.radius * 2.5);
+            c.stroke();
+            c.globalAlpha = 1;
+            c.fillStyle = 'rgba(0,0,0,0.35)';
+            c.beginPath(); c.ellipse(t.x, t.y + t.radius * 0.4, t.radius * 0.85, t.radius * 0.3, 0, 0, Math.PI * 2); c.fill();
+            c.translate(t.x, t.y);
+            c.rotate(t.angle);
+            c.fillStyle = '#2c3e50';
+            c.beginPath();
+            c.moveTo(t.radius, 0);
+            c.lineTo(-t.radius * 0.7, -t.radius * 0.7);
+            c.lineTo(-t.radius * 0.4, 0);
+            c.lineTo(-t.radius * 0.7, t.radius * 0.7);
+            c.closePath();
+            c.fill();
+            c.strokeStyle = '#000'; c.lineWidth = 2; c.stroke();
+            c.beginPath(); c.arc(t.radius * 0.3, 0, 3, 0, Math.PI * 2);
+            c.fillStyle = '#e74c3c'; c.fill();
+            c.restore();
+            c.fillStyle = 'rgba(0,0,0,0.5)'; c.fillRect(t.x - 12, t.y - t.radius - 8, 24, 3);
+            c.fillStyle = '#f1c40f'; c.fillRect(t.x - 12, t.y - t.radius - 8, 24 * clamp(t.hp / t.maxHp, 0, 1), 3);
+            return;
+        }
+
+        // Baloncu
+        if (t.type === 'balon') {
+            c.save();
+            c.fillStyle = 'rgba(0,0,0,0.3)';
+            c.beginPath(); c.ellipse(t.x, t.y + t.radius * 0.6, t.radius * 0.9, t.radius * 0.35, 0, 0, Math.PI * 2); c.fill();
+            const h = 30;
+            const bob = Math.sin(Date.now() / 400 + t.x * 0.01) * 3;
+            c.translate(t.x, t.y - h + bob);
+            c.beginPath(); c.ellipse(0, 0, t.radius * 1.1, t.radius * 0.95, 0, 0, Math.PI * 2);
+            c.fillStyle = t.color; c.fill();
+            c.strokeStyle = '#7b241c'; c.lineWidth = 2.5; c.stroke();
+            c.beginPath();
+            c.moveTo(-t.radius * 0.4, t.radius * 0.75);
+            c.lineTo(t.radius * 0.4, t.radius * 0.75);
+            c.lineTo(t.radius * 0.3, t.radius * 1.2);
+            c.lineTo(-t.radius * 0.3, t.radius * 1.2);
+            c.closePath();
+            c.fillStyle = '#7b241c'; c.fill();
+            c.restore();
+            c.fillStyle = 'rgba(0,0,0,0.5)'; c.fillRect(t.x - 12, t.y - t.radius - h - 10, 24, 3);
+            c.fillStyle = '#2ecc71'; c.fillRect(t.x - 12, t.y - t.radius - h - 10, 24 * clamp(t.hp / t.maxHp, 0, 1), 3);
+            return;
+        }
+
+        // Normal birlikler
         c.save();
         c.translate(t.x, t.y);
         c.fillStyle = 'rgba(0,0,0,0.3)';
@@ -1058,13 +1223,26 @@
 
     function drawProjectile(c, p) {
         c.save(); c.translate(p.x, p.y); c.rotate(p.angle);
-        if (p.kind === 'arrow') {
+        if (p.heroArrow) {
+            // Dev ok — büyük, altın, iz bırakan
+            c.globalAlpha = 0.4;
+            c.strokeStyle = '#f39c12';
+            c.lineWidth = 10;
+            c.beginPath(); c.moveTo(-30, 0); c.lineTo(0, 0); c.stroke();
+            c.globalAlpha = 1;
+            c.fillStyle = '#f39c12';
+            c.beginPath();
+            c.moveTo(25, 0); c.lineTo(5, -8); c.lineTo(-15, 0); c.lineTo(5, 8);
+            c.closePath(); c.fill();
+            c.strokeStyle = '#fff'; c.lineWidth = 2; c.stroke();
+            c.fillStyle = '#f1c40f';
+            c.beginPath(); c.arc(-10, 0, 4, 0, Math.PI * 2); c.fill();
+        } else if (p.kind === 'arrow') {
             c.strokeStyle = '#5d4037'; c.lineWidth = 2;
             c.beginPath(); c.moveTo(-9, 0); c.lineTo(7, 0); c.stroke();
             c.fillStyle = '#ecf0f1'; c.beginPath(); c.moveTo(10, 0); c.lineTo(5, -3); c.lineTo(5, 3); c.closePath(); c.fill();
         } else if (p.kind === 'ball') {
             c.fillStyle = '#2c3e50'; c.beginPath(); c.arc(0, 0, 6, 0, Math.PI * 2); c.fill();
-            c.fillStyle = 'rgba(255,255,255,0.4)'; c.beginPath(); c.arc(-2, -2, 2, 0, Math.PI * 2); c.fill();
         } else {
             c.fillStyle = '#9b59b6'; c.beginPath(); c.arc(0, 0, 5, 0, Math.PI * 2); c.fill();
             c.strokeStyle = '#fff'; c.lineWidth = 1.5; c.stroke();
@@ -1091,7 +1269,6 @@
         const list = [];
         r.buildings.forEach(b => { if (!b.destroyed) list.push({ y: b.y, b }); });
         r.troops.forEach(t => { if (!t.isDead) list.push({ y: t.y, t }); });
-        r.defenders.forEach(d => { if (!d.isDead) list.push({ y: d.y, d }); });
         list.sort((a, b) => a.y - b.y);
         list.forEach(o => {
             if (o.b) {
@@ -1103,11 +1280,8 @@
                 else if (b.type === 'havan') drawHavan(c, b);
                 else if (b.type === 'buyucu') drawBuyucu(c, b);
                 else if (b.type === 'collector') drawCollector(c, b);
-                else if (b.type === 'kisla') drawKisla(c, b);
                 else drawDepot(c, b);
                 if (b.hp < b.maxHp) bar(c, b.x, b.y - b.r - (b.type === 'hall' ? r.k * 36 : 12), b.r * 1.6, b.hp / b.maxHp, b.hp / b.maxHp > 0.4 ? '#2ecc71' : '#e74c3c');
-            } else if (o.d) {
-                drawDefender(c, o.d);
             } else {
                 drawTroop(c, o.t);
             }
