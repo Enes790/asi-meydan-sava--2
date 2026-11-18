@@ -180,7 +180,7 @@
             x: this.x + Math.cos(a) * this.radius, y: this.y + Math.sin(a) * this.radius,
             sx: this.x, sy: this.y,
             vx: Math.cos(a) * sp, vy: Math.sin(a) * sp,
-            dmg: u ? 800 : 800, rot: 0
+            dmg: u ? 1000 : 1000, rot: 0
         });
         this.angle = a;
         this.consumeAmmo();
@@ -247,10 +247,10 @@
         const ang = a !== undefined ? a : this.angle;
         this.angle = ang;
         this.isDashing = true; this.dashAngle = ang; this.dashHitTargets = [];
-        this.dashTimer = 18;
+        this.dashTimer = 50;
         fxBurst(this.x, this.y, '#7ef9ff', 14, 'star');
         addFloatingNumber(this.x, this.y - 30, 'RÜYA ATILIMI!', '#7ef9ff');
-        this.gadgetReady = false; this.gadgetCooldown = 600;
+        this.gadgetReady = false; this.gadgetCooldown = 900;
         gadgetBtn.classList.remove('active'); gadgetBtn.classList.add('cooldown');
         charge(10);
     }
@@ -290,7 +290,7 @@
     function meteorImpact(m) {
         getActiveEnemies().forEach(e => {
             if (dist(e, m) < 70 + e.radius) {
-                hurt(e, 450, '#7ef9ff');
+                hurt(e, 700, '#7ef9ff');
                 const an = angleTo(m, e);
                 e.x = clampRange(e.x + Math.cos(an) * 18, WALL_THICKNESS + e.radius, canvas.width - WALL_THICKNESS - e.radius);
                 e.y = clampRange(e.y + Math.sin(an) * 18, WALL_THICKNESS + e.radius, canvas.height - WALL_THICKNESS - e.radius);
