@@ -26,8 +26,8 @@
     const EXT = window.GAME_EXT;
 
     // ---------------------------------------------------------------- KAYIT
-    EXT.characters[UYKU] = { color: '#5f4bb7', hp: 3400, speed: 3.0 };
-    EXT.characters[RUYA] = { color: '#16a085', hp: 3000, speed: 3.5 };
+    EXT.characters[UYKU] = { color: '#5f4bb7', hp: 3800, speed: 3.0 };
+    EXT.characters[RUYA] = { color: '#16a085', hp: 3500, speed: 3.5 };
 
     // ---------------------------------------------------------- KARAKTER KARTLARI
     function addCard(id, name, grad, desc) {
@@ -180,7 +180,7 @@
             x: this.x + Math.cos(a) * this.radius, y: this.y + Math.sin(a) * this.radius,
             sx: this.x, sy: this.y,
             vx: Math.cos(a) * sp, vy: Math.sin(a) * sp,
-            dmg: u ? 650 : 620, rot: 0
+            dmg: u ? 800 : 800, rot: 0
         });
         this.angle = a;
         this.consumeAmmo();
