@@ -1,27 +1,32 @@
 /* ==========================================================================
-   mod8.js  -  YENİ KARAKTER: "KANAL AVCISI"  (Televizyon temalı, yüksek hasar)
+   mod6.js  -  YENİ KARAKTER: "HAZİNEDAR"  (Hazine temalı)
    --------------------------------------------------------------------------
    mod9.js ile AYNI yapıyı kullanır: window.GAME_EXT kaydı + kendi rAF döngüsü
    + oyuncu metotlarını (sadece bu karakter seçiliyken) sarmalama.
    Ana oyun koduna DOKUNMAZ.
 
    KİT:
-   * Ana atak   - STATİK MERMİSİ  : Hızlı, yüksek hasarlı ekran mermisi.
-   * Aksesuar 1 - SİNYAL IŞINI    : Nişan yönünde delici lazer, geçtiği herkese hasar.
-   * Aksesuar 2 - BOMBA KANALI    : Hedefe mini TV bombası bırakır, 1.25 sn sonra patlar.
-   * ULTİ       - KESİNTİSİZ YAYIN: 3 sn boyunca en yakın düşmana sürekli şimşek.
+   * Pasif      - ALTIN AVI      : Ölen düşmanlar altın bırakır. Altınlar sana uçar,
+                                   toplayınca can ve güç verir.
+   * Ana atak   - ALTIN PARA     : Hızlı para mermisi, çarpınca altın düşürür.
+   * Aksesuar 1 - MİMİK KAPANI   : Sandık kapanı kurar; düşman yaklaşınca kapanır,
+                                   alana hasar verir ve altın saçar.
+   * Aksesuar 2 - ALTIN SAÇMASI  : Nişan yönüne 5 altın parçası fırlatır.
+   * ULTİ       - KRAL HAZİNESİ  : Anında 200 can, 4 sn etrafında dönen altınlar
+                                   yakındaki düşmanlara sürekli hasar verir.
    ========================================================================== */
 (function () {
     'use strict';
 
     if (typeof window === 'undefined' || !window.GAME_EXT) return;
 
-    const ID = 'kanal_avcisi';
+    const ID = 'hazinedar';
     const EXT = window.GAME_EXT;
-    const PINK = '#ff2e63';
+    const GOLD = '#ffca28';
+    const COIN_LIFE = 600, COIN_PICK = 20, COIN_PULL = 140, COIN_CAP = 80;
 
     // ---------------------------------------------------------------- KAYIT
-    EXT.characters[ID] = { color: PINK, hp: 2800, speed: 3.1 };
+    EXT.characters[ID] = { color: '#c79a2b', hp: 3300, speed: 2.8 };
 
     // ---------------------------------------------------------- KARAKTER KARTI
     (function addCard() {
@@ -31,8 +36,8 @@
         card.className = 'char-card';
         card.id = 'char-' + ID;
         card.innerHTML =
-            '<div class="char-color-preview" style="background:radial-gradient(circle at 35% 30%,#ffb3c6,#ff2e63 55%,#7a0f2e)"></div>' +
-            '<span>Kanal Avcısı</span><small>Yetenek: Sinyal Işını / Bomba Kanalı<br>Güç: Kesintisiz Yayın</small>';
+            '<div class="char-color-preview" style="background:radial-gradient(circle at 35% 30%,#ffe9a0,#c79a2b 55%,#5a3b0a)"></div>' +
+            '<span>Hazinedar</span><small>Pasif: Altın Avı<br>Yetenek: Mimik Kapanı / Altın Saçması<br>Güç: Kral Hazinesi</small>';
         card.addEventListener('click', () => {
             selectedCharacter = ID;
             document.querySelectorAll('.char-card').forEach(e => e.classList.remove('selected'));
@@ -42,13 +47,13 @@
     })();
 
     // ------------------------------------------------------------------ DURUM
-    let beams = [], bombs = [], blasts = [], bolts = [], shots = [];
-    const ult = { t: 0, acc: 0 };
-    let flick = 0, wasActive = false, last = 0, warned = false, needReset = false;
+    let traps = [], coins = [], fx = [], shots = [], seen = [];
+    const king = { t: 0 };
+    let wasActive = false, last = 0, warned = false, needReset = false;
 
     function resetState() {
-        beams = []; bombs = []; blasts = []; bolts = []; shots = [];
-        ult.t = 0; ult.acc = 0; flick = 0;
+        traps = []; coins = []; fx = []; shots = []; seen = [];
+        king.t = 0;
     }
 
     // ---------------------------------------------------------------- YARDIMCI
@@ -60,11 +65,11 @@
         const p = aim.pull;
         return (p === undefined || p < 0.05) ? 1 : p;
     }
-    function segDist(px, py, x1, y1, x2, y2) {
-        const dx = x2 - x1, dy = y2 - y1, len2 = dx * dx + dy * dy;
-        let t = len2 ? ((px - x1) * dx + (py - y1) * dy) / len2 : 0;
-        t = Math.max(0, Math.min(1, t));
-        return Math.hypot(px - (x1 + dx * t), py - (y1 + dy * t));
+    function angleDiff(a, b) {
+        let d = a - b;
+        while (d > Math.PI) d -= Math.PI * 2;
+        while (d < -Math.PI) d += Math.PI * 2;
+        return Math.abs(d);
     }
     function rr(x, y, w, h, r) {
         ctx.beginPath();
@@ -78,7 +83,7 @@
         ctx.quadraticCurveTo(x, y, x + r, y);
         ctx.closePath();
     }
-    function hurt(e, dmg, col) { e.hp -= dmg; addFloatingNumber(e.x, e.y, Math.floor(dmg), col || PINK); }
+    function hurt(e, dmg, col) { e.hp -= dmg; addFloatingNumber(e.x, e.y, Math.floor(dmg), col || GOLD); }
     function allObstacles() {
         const extra = (typeof cactusWalls !== 'undefined' && cactusWalls) ? cactusWalls : [];
         return obstacles.concat(extra);
@@ -90,15 +95,15 @@
         if (player.ultCharge >= 100) {
             player.ultReady = true;
             ultiBtn.classList.add('ready');
-            addFloatingNumber(player.x, player.y - 40, 'YAYIN HAZIR!', '#f1c40f');
+            addFloatingNumber(player.x, player.y - 40, 'HAZİNE HAZIR!', '#f1c40f');
         }
     }
 
     // ------------------------------------------------- OYUNCU METOTLARI (SARMALAMA)
     // mod9 gibi: player NESNESİNİN üstüne sarılır (prototype'a değil).
     function install(p) {
-        if (p.__m8) return;
-        p.__m8 = true;
+        if (p.__m6) return;
+        p.__m6 = true;
         const orig = { fire: p.fire, g1: p.activateGadget, g2: p.activateGadget2, ult: p.fireUlti };
 
         p.fire = function (a, pull) {
@@ -107,94 +112,140 @@
         };
         p.activateGadget = function (a, pull) {
             if (!isMine(this)) return orig.g1.call(this, a, pull);
-            return sinyalIsini.call(this, a, pull);
+            return mimikKapani.call(this, a, pull);
         };
         p.activateGadget2 = function (a, pull) {
             if (!isMine(this)) return orig.g2.call(this, a, pull);
-            return bombaKanali.call(this, a, pull);
+            return altinSacmasi.call(this, a, pull);
         };
         p.fireUlti = function (a, pull) {
             if (!isMine(this)) return orig.ult.call(this, a, pull);
-            return kesintisizYayin.call(this, a, pull);
+            return kralHazinesi.call(this, a, pull);
         };
     }
 
     // ------------------------------------------------------------ ANA SALDIRI
     function myFire(a) {
         if (this.isDead || this.ammo < 1) return;
-        const sp = 11;
+        const sp = 10;
         shots.push({
             x: this.x + Math.cos(a) * this.radius, y: this.y + Math.sin(a) * this.radius,
             sx: this.x, sy: this.y,
             vx: Math.cos(a) * sp, vy: Math.sin(a) * sp,
-            dmg: 700, ang: a
+            dmg: 650, t: 0
         });
         this.angle = a;
         this.consumeAmmo();
     }
 
+    // ------------------------------------------------------------- PASİF: ALTIN AVI
+    function dropCoins(x, y, n) {
+        for (let i = 0; i < n; i++) {
+            coins.push({ x, y, vx: (Math.random() * 2 - 1) * 3, vy: -1 - Math.random() * 2.5, life: COIN_LIFE, t: 0 });
+        }
+        if (coins.length > COIN_CAP) coins.splice(0, coins.length - COIN_CAP);
+    }
+
+    // Ölüm tespiti: (1) listeden çıkan ve canı 0 olan, (2) listede kalıp canı 0'a düşen düşman
+    function killWatch(en) {
+        en.forEach(e => {
+            if (e.hp <= 0) {
+                if (!e._m6dead) { e._m6dead = true; dropCoins(e.x, e.y, 2); }
+            } else if (e._m6dead) {
+                e._m6dead = false; // yeniden doğdu
+            }
+        });
+        seen.forEach(e => {
+            if (en.indexOf(e) < 0 && e.hp <= 0 && !e._m6dead) { e._m6dead = true; dropCoins(e.x, e.y, 2); }
+        });
+        seen = en.slice();
+    }
+
+    function coinUpdate(dt) {
+        const P = player;
+        for (let i = coins.length - 1; i >= 0; i--) {
+            const c = coins[i];
+            c.t += dt;
+            c.x += c.vx * dt; c.y += c.vy * dt;
+            const fr = Math.pow(0.9, dt);
+            c.vx *= fr; c.vy *= fr;
+            c.life -= dt;
+            if (c.life <= 0) { coins.splice(i, 1); continue; }
+            if (P.isDead) continue;
+            const d = dist(P, c);
+            if (d > COIN_PULL) continue;
+            if (d <= COIN_PICK) {
+                P.hp = Math.min(P.maxHp, P.hp + 25);
+                charge(2);
+                fx.push({ kind: 'txt', x: P.x, y: P.y - 50, text: '+25', life: 20, max: 20 });
+                coins.splice(i, 1);
+            } else {
+                c.x += (P.x - c.x) / d * 6 * dt;
+                c.y += (P.y - c.y) / d * 6 * dt;
+            }
+        }
+    }
+
     // ---------------------------------------------------------------- YETENEKLER
-    // Q: Sinyal Işını - nişan yönünde delici lazer
-    function sinyalIsini(a) {
+    // Q: Mimik Kapanı
+    function mimikKapani(a, pull) {
         if (!this.gadgetReady || this.isDead || this.isDashing) return;
         const ang = a !== undefined ? a : this.angle;
-        this.angle = ang;
-        const L = 480;
-        const x2 = this.x + Math.cos(ang) * L, y2 = this.y + Math.sin(ang) * L;
-        let n = 0;
-        getActiveEnemies().forEach(e => {
-            if (segDist(e.x, e.y, this.x, this.y, x2, y2) <= 22 + e.radius) { hurt(e, 380, PINK); n++; }
-        });
-        beams.push({ x1: this.x, y1: this.y, x2, y2, life: 14, max: 14 });
-        addFloatingNumber(this.x, this.y - 30, 'SİNYAL IŞINI!', PINK);
-        this.gadgetReady = false; this.gadgetCooldown = 480;
-        gadgetBtn.classList.remove('active'); gadgetBtn.classList.add('cooldown');
-        charge(8 + n * 6);
-    }
-
-    // E: Bomba Kanalı - hedefe bomba bırakır, 75 karede patlar
-    function bombaKanali(a, pull) {
-        if (!this.gadget2Ready || this.isDead) return;
-        const ang = a !== undefined ? a : this.angle;
         const pl = pull !== undefined ? Math.max(0, Math.min(1, pull)) : 1;
-        const d = 70 + pl * 190;
+        const d = 70 + pl * 150;
         const x = clampRange(this.x + Math.cos(ang) * d, WALL_THICKNESS + 20, canvas.width - WALL_THICKNESS - 20);
         const y = clampRange(this.y + Math.sin(ang) * d, WALL_THICKNESS + 20, canvas.height - WALL_THICKNESS - 20);
-        bombs.push({ x, y, t: 0, life: 75, max: 75 });
-        addFloatingNumber(x, y - 25, 'BOMBA KANALI!', '#ffca28');
-        this.gadget2Ready = false; this.gadget2Cooldown = 900;
-        gadgetBtn2.classList.add('cooldown');
-        charge(8);
+        traps.push({ x, y, t: 0, life: 360, max: 360 });
+        addFloatingNumber(x, y - 25, 'MİMİK KAPANI!', GOLD);
+        this.gadgetReady = false; this.gadgetCooldown = 600;
+        gadgetBtn.classList.remove('active'); gadgetBtn.classList.add('cooldown');
     }
 
-    // R: Kesintisiz Yayın - 3 sn boyunca en yakın düşmana sürekli şimşek
-    function kesintisizYayin() {
-        if (!this.ultReady || this.isDead || ult.t > 0) return;
-        ult.t = 180; ult.acc = 0;
-        blasts.push({ x: this.x, y: this.y, r: 160, life: 30, max: 30, col: PINK });
-        addFloatingNumber(this.x, this.y - 40, 'KESİNTİSİZ YAYIN!', PINK);
+    // E: Altın Saçması - 5 parça, her biri önündeki ilk düşmana 150 hasar
+    function altinSacmasi(a) {
+        if (!this.gadget2Ready || this.isDead) return;
+        const ang = a !== undefined ? a : this.angle;
+        this.angle = ang;
+        const R = 330;
+        const en = getActiveEnemies();
+        let n = 0;
+        for (let k = 0; k < 5; k++) {
+            const pa = ang - 0.25 + k * 0.125;
+            let best = null, bd = R;
+            en.forEach(e => {
+                const d = dist(e, this);
+                if (d < bd && angleDiff(Math.atan2(e.y - this.y, e.x - this.x), pa) < 0.12) { bd = d; best = e; }
+            });
+            const len = best ? bd : R;
+            if (best) { hurt(best, 150, GOLD); n++; }
+            fx.push({ kind: 'shot', x1: this.x, y1: this.y, x2: this.x + Math.cos(pa) * len, y2: this.y + Math.sin(pa) * len, life: 10, max: 10 });
+        }
+        addFloatingNumber(this.x, this.y - 30, 'ALTIN SAÇMASI!', GOLD);
+        this.gadget2Ready = false; this.gadget2Cooldown = 720;
+        gadgetBtn2.classList.add('cooldown');
+        charge(4 + n * 2);
+    }
+
+    // R: Kral Hazinesi
+    function kralHazinesi() {
+        if (!this.ultReady || this.isDead || king.t > 0) return;
+        king.t = 240;
+        const heal = Math.min(this.maxHp - this.hp, 200);
+        this.hp += heal;
+        if (heal > 0) addFloatingNumber(this.x, this.y, '+' + Math.floor(heal), '#2ecc71');
+        fx.push({ kind: 'ring', x: this.x, y: this.y, r: 150, life: 30, max: 30, col: GOLD });
+        addFloatingNumber(this.x, this.y - 40, 'KRAL HAZİNESİ!', GOLD);
         this.ultReady = false; this.ultCharge = 0;
         ultFill.style.width = '0%'; ultiBtn.classList.remove('ready');
-    }
-
-    function explodeBomb(b) {
-        let n = 0;
-        getActiveEnemies().forEach(e => {
-            if (dist(e, b) <= 220) { hurt(e, 520, '#ffca28'); n++; }
-        });
-        allObstacles().forEach(o => { if (dist(o, b) <= 220) o.hp -= 200; });
-        blasts.push({ x: b.x, y: b.y, r: 220, life: 28, max: 28, col: '#ffca28' });
-        screenShake = Math.max(typeof screenShake === 'number' ? screenShake : 0, 8);
-        if (n > 0) charge(8 + n * 6);
     }
 
     // ------------------------------------------------------------- ARAYÜZ
     function ensureUI() {
         [ultiBtn, gadgetBtn, gadgetBtn2].forEach(el => { if (el.style.display !== 'flex') el.style.display = 'flex'; });
-        if (gadgetBtn.dataset.m8 !== '1') {
-            gadgetBtn.innerHTML = 'SİNYAL<br>IŞINI<br><span id="gadget-timer"></span>';
-            gadgetBtn2.innerHTML = 'BOMBA<br>KANALI<br><span id="gadget-timer-2"></span>';
-            gadgetBtn.dataset.m8 = '1';
+        if (gadgetBtn.dataset.m6 !== '1') {
+            gadgetBtn.innerHTML = 'MİMİK<br>KAPANI<br><span id="gadget-timer"></span>';
+            gadgetBtn2.innerHTML = 'ALTIN<br>SAÇMASI<br><span id="gadget-timer-2"></span>';
+            gadgetBtn.dataset.m6 = '1';
             gadgetTimerText = document.getElementById('gadget-timer');
             gadgetTimerText2 = document.getElementById('gadget-timer-2');
         }
@@ -206,38 +257,47 @@
         const en = getActiveEnemies();
 
         if (!P.isDead) charge(100 * dt / 3600); // pasif şarj: ~60 sn
-        else ult.t = 0;
+        else king.t = 0;
 
-        // Bombalar
-        for (let i = bombs.length - 1; i >= 0; i--) {
-            const b = bombs[i];
-            b.t += dt; b.life -= dt;
-            if (b.life <= 0) { bombs.splice(i, 1); explodeBomb(b); }
+        killWatch(en);
+
+        // Mimik kapanları: 20 kare sonra aktif, düşman yaklaşınca kapanır
+        for (let i = traps.length - 1; i >= 0; i--) {
+            const tr = traps[i];
+            tr.t += dt; tr.life -= dt;
+            if (tr.life <= 0) { traps.splice(i, 1); continue; }
+            if (tr.t < 20) continue;
+            const near = en.some(e => dist(e, tr) <= 40 + e.radius);
+            if (!near) continue;
+            traps.splice(i, 1);
+            fx.push({ kind: 'ring', x: tr.x, y: tr.y, r: 90, life: 24, max: 24, col: GOLD });
+            let n = 0;
+            en.forEach(e => { if (dist(e, tr) <= 90 + e.radius * 0.5) { hurt(e, 450, GOLD); n++; } });
+            dropCoins(tr.x, tr.y, 5);
+            if (n > 0) charge(8 + n * 4);
+            screenShake = Math.max(typeof screenShake === 'number' ? screenShake : 0, 6);
         }
 
-        // Kesintisiz Yayın: her 9 karede en yakın düşmana 110 hasar
-        if (ult.t > 0) {
-            ult.t -= dt; ult.acc += dt;
-            while (ult.acc >= 9) {
-                ult.acc -= 9;
-                let best = null, bd = 650;
-                en.forEach(e => { const d = dist(e, P); if (d < bd) { bd = d; best = e; } });
-                if (best) {
-                    hurt(best, 110, '#7df9ff');
-                    bolts.push({ x1: P.x, y1: P.y, x2: best.x, y2: best.y, life: 8, max: 8 });
-                }
+        coinUpdate(dt);
+
+        // Kral Hazinesi: her 15 karede 80 yarıçaptaki düşmanlara 80 hasar
+        if (king.t > 0) {
+            const before = king.t;
+            king.t -= dt;
+            if (Math.floor(before / 15) !== Math.floor(king.t / 15)) {
+                en.forEach(e => { if (dist(e, P) <= 80 + e.radius) hurt(e, 80, GOLD); });
             }
         }
 
-        // Mermiler (Statik Mermisi)
+        // Mermiler (Altın Para)
         for (let i = shots.length - 1; i >= 0; i--) {
             const s = shots[i];
-            s.x += s.vx * dt; s.y += s.vy * dt;
+            s.x += s.vx * dt; s.y += s.vy * dt; s.t += dt;
             let hit = null;
             for (const e of en) { if (dist(s, e) < e.radius + 9) { hit = e; break; } }
             if (hit) {
-                hurt(hit, s.dmg, PINK);
-                blasts.push({ x: s.x, y: s.y, r: 40, life: 10, max: 10, col: PINK });
+                hurt(hit, s.dmg, GOLD);
+                dropCoins(hit.x, hit.y, 1);
                 charge(9);
                 shots.splice(i, 1);
                 continue;
@@ -249,254 +309,225 @@
             const out = s.x < WALL_THICKNESS + 6 || s.x > canvas.width - WALL_THICKNESS - 6 ||
                         s.y < WALL_THICKNESS + 6 || s.y > canvas.height - WALL_THICKNESS - 6;
             const far = Math.hypot(s.x - s.sx, s.y - s.sy) > RANGE;
-            if (blocked || out || far) {
-                blasts.push({ x: s.x, y: s.y, r: 28, life: 8, max: 8, col: PINK });
-                shots.splice(i, 1);
-            }
+            if (blocked || out || far) shots.splice(i, 1);
         }
 
-        [beams, blasts, bolts].forEach(arr => {
-            for (let k = arr.length - 1; k >= 0; k--) { arr[k].life -= dt; if (arr[k].life <= 0) arr.splice(k, 1); }
-        });
-        flick = (flick + dt) % 60;
+        for (let i = fx.length - 1; i >= 0; i--) { fx[i].life -= dt; if (fx[i].life <= 0) fx.splice(i, 1); }
     }
 
     // ------------------------------------------------------------------- ÇİZİM
-    const BARS = ['#ffffff', '#ffff00', '#00ffff', '#00ff00', '#ff00ff', '#ff0000', '#0000ff'];
-
-    function drawTv() {
-        const p = player;
-        if (p.isDead) return;
-        const x = p.x, y = p.y;
-        const charged = !!p.ultReady;
-        const aim = p.angle || 0;
+    function drawCoin(c) {
+        const sq = Math.abs(Math.cos(c.t * 0.12)) * 0.8 + 0.2; // dönme efekti
         ctx.save();
-        if (p.isInvisible) ctx.globalAlpha = 0.4;
+        ctx.globalAlpha = Math.max(0, Math.min(1, c.life / 60));
+        ctx.translate(c.x, c.y);
+        ctx.scale(sq, 1);
+        ctx.fillStyle = '#ffd54f'; ctx.strokeStyle = '#b8860b'; ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.arc(0, 0, 5, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+        ctx.fillStyle = '#fff8e1';
+        ctx.beginPath(); ctx.arc(-1.5, -1.5, 1.4, 0, Math.PI * 2); ctx.fill();
+        ctx.restore();
+    }
 
-        // Dolu güçte nabız gibi atan aura
-        if (charged) {
-            const pulse = 0.5 + 0.5 * Math.sin(Date.now() / 150);
-            ctx.save();
-            ctx.globalAlpha = 0.25 + 0.25 * pulse;
-            ctx.strokeStyle = PINK; ctx.lineWidth = 3;
-            ctx.beginPath(); ctx.arc(x, y - 16, 34 + pulse * 4, 0, Math.PI * 2); ctx.stroke();
-            ctx.restore();
+    function drawTrap(tr) {
+        const armed = tr.t >= 20;
+        const pulse = 0.5 + 0.5 * Math.sin(Date.now() / 120);
+        ctx.save();
+        ctx.globalAlpha = armed ? 0.5 + 0.5 * pulse : 0.45;
+        ctx.fillStyle = '#6d4c41';
+        rr(tr.x - 12, tr.y - 7, 24, 14, 2); ctx.fill();
+        ctx.fillStyle = armed ? GOLD : '#8d6e63';
+        ctx.fillRect(tr.x - 2, tr.y - 4, 4, 6);
+        if (armed) {
+            ctx.globalAlpha = 0.25 * pulse;
+            ctx.strokeStyle = GOLD; ctx.lineWidth = 1.5;
+            ctx.beginPath(); ctx.arc(tr.x, tr.y, 40, 0, Math.PI * 2); ctx.stroke();
         }
-
-        // Anten
-        ctx.strokeStyle = '#b0bec5'; ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.moveTo(x - 4, y - 36); ctx.lineTo(x - 14, y - 56);
-        ctx.moveTo(x + 4, y - 36); ctx.lineTo(x + 14, y - 56);
-        ctx.stroke();
-        ctx.fillStyle = charged ? PINK : '#eceff1';
-        ctx.shadowColor = PINK; ctx.shadowBlur = charged ? 12 : 0;
-        ctx.beginPath();
-        ctx.arc(x - 14, y - 56, 3, 0, Math.PI * 2);
-        ctx.arc(x + 14, y - 56, 3, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.shadowBlur = 0;
-
-        // Ayaklar
-        ctx.fillStyle = '#263238';
-        ctx.fillRect(x - 14, y + 2, 6, 6);
-        ctx.fillRect(x + 8, y + 2, 6, 6);
-
-        // Gövde
-        const g = ctx.createLinearGradient(x, y - 38, x, y + 4);
-        g.addColorStop(0, '#546e7a'); g.addColorStop(1, '#1c262b');
-        ctx.fillStyle = g;
-        rr(x - 26, y - 38, 52, 42, 7); ctx.fill();
-        ctx.strokeStyle = '#90a4ae'; ctx.lineWidth = 1; ctx.stroke();
-
-        // Yan düğmeler
-        ctx.fillStyle = '#ffca28';
-        ctx.beginPath(); ctx.arc(x + 19, y - 26, 2.5, 0, Math.PI * 2); ctx.fill();
-        ctx.fillStyle = charged ? PINK : '#00e676';
-        ctx.beginPath(); ctx.arc(x + 19, y - 17, 2, 0, Math.PI * 2); ctx.fill();
-
-        // Ekran
-        const sx = x - 20, sy = y - 34, sw = 40, sh = 30;
-        ctx.fillStyle = '#050505';
-        rr(sx, sy, sw, sh, 4); ctx.fill();
-        ctx.save();
-        rr(sx, sy, sw, sh, 4); ctx.clip();
-
-        // Renk çubukları (hafif titreşimli)
-        const bw = sw / BARS.length;
-        for (let i = 0; i < BARS.length; i++) {
-            ctx.globalAlpha = 0.75;
-            ctx.fillStyle = BARS[i];
-            const jit = (Math.random() < 0.08) ? (Math.random() * 3 - 1.5) : 0;
-            ctx.fillRect(sx + i * bw, sy + jit, bw + 0.5, sh);
-        }
-        ctx.globalAlpha = 1;
-
-        // Gözler ve kaşlar (nişana bakar)
-        const px = Math.cos(aim) * 1.5, py = Math.sin(aim) * 1.5;
-        ctx.fillStyle = '#ffffff';
-        ctx.beginPath();
-        ctx.ellipse(sx + 12, sy + 14, 4.5, 5.5, 0, 0, Math.PI * 2);
-        ctx.ellipse(sx + 28, sy + 14, 4.5, 5.5, 0, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.fillStyle = '#0d0d0d';
-        ctx.beginPath();
-        ctx.arc(sx + 12 + px, sy + 14 + py, 2, 0, Math.PI * 2);
-        ctx.arc(sx + 28 + px, sy + 14 + py, 2, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.strokeStyle = PINK; ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.moveTo(sx + 7, sy + 7); ctx.lineTo(sx + 16, sy + 10);
-        ctx.moveTo(sx + 33, sy + 7); ctx.lineTo(sx + 24, sy + 10);
-        ctx.stroke();
-
-        // Cam parlaması
-        const gl = ctx.createLinearGradient(sx, sy, sx + sw, sy + sh);
-        gl.addColorStop(0, 'rgba(255,255,255,0.22)');
-        gl.addColorStop(0.5, 'rgba(255,255,255,0)');
-        ctx.fillStyle = gl;
-        ctx.fillRect(sx, sy, sw, sh);
-
-        // Tarama çizgileri
-        ctx.fillStyle = 'rgba(0,0,0,0.35)';
-        for (let yy = sy; yy < sy + sh; yy += 3) ctx.fillRect(sx, yy, sw, 1);
-        ctx.restore();
         ctx.restore();
     }
 
-    function drawBeamLine(b) {
-        const a = Math.max(0, b.life / b.max);
-        ctx.save();
-        ctx.globalAlpha = a; ctx.lineCap = 'round';
-        ctx.shadowColor = PINK; ctx.shadowBlur = 18;
-        ctx.strokeStyle = PINK; ctx.lineWidth = 22 * a + 4;
-        ctx.beginPath(); ctx.moveTo(b.x1, b.y1); ctx.lineTo(b.x2, b.y2); ctx.stroke();
-        ctx.shadowBlur = 0;
-        ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 6 * a + 1;
-        ctx.stroke();
-        ctx.restore();
-    }
-
-    function drawBolt(b) {
-        const a = Math.max(0, b.life / b.max), segs = 6;
-        ctx.save();
-        ctx.globalAlpha = a;
-        ctx.strokeStyle = '#7df9ff'; ctx.lineWidth = 2;
-        ctx.shadowColor = '#7df9ff'; ctx.shadowBlur = 10;
-        ctx.beginPath(); ctx.moveTo(b.x1, b.y1);
-        for (let s = 1; s < segs; s++) {
-            const f = s / segs;
-            ctx.lineTo(b.x1 + (b.x2 - b.x1) * f + (Math.random() * 2 - 1) * 10,
-                       b.y1 + (b.y2 - b.y1) * f + (Math.random() * 2 - 1) * 10);
-        }
-        ctx.lineTo(b.x2, b.y2); ctx.stroke();
-        ctx.restore();
-    }
-
-    function drawBomb(b) {
-        const k = Math.max(0, b.life / b.max);
-        const blink = (Math.floor(b.t) % 12) < 6;
-        ctx.save();
-        ctx.globalAlpha = 0.6;
-        ctx.strokeStyle = '#ffca28'; ctx.lineWidth = 2;
-        ctx.beginPath(); ctx.arc(b.x, b.y, 20 + 200 * (1 - k), 0, Math.PI * 2); ctx.stroke();
-        ctx.globalAlpha = 1;
-        ctx.fillStyle = '#263238';
-        rr(b.x - 11, b.y - 9, 22, 17, 3); ctx.fill();
-        ctx.fillStyle = blink ? PINK : '#ffca28';
-        ctx.fillRect(b.x - 8, b.y - 6, 16, 11);
-        ctx.restore();
-    }
-
-    function drawBlast(f) {
+    function drawFx(f) {
         const a = Math.max(0, f.life / f.max);
         ctx.save();
-        ctx.globalAlpha = a * 0.3; ctx.fillStyle = f.col;
-        ctx.beginPath(); ctx.arc(f.x, f.y, f.r * (1 - a * 0.4), 0, Math.PI * 2); ctx.fill();
-        ctx.globalAlpha = a; ctx.strokeStyle = f.col; ctx.lineWidth = 4;
-        ctx.beginPath(); ctx.arc(f.x, f.y, f.r * (1 - a * 0.4), 0, Math.PI * 2); ctx.stroke();
-        ctx.fillStyle = '#ffffff';
-        for (let s = 0; s < 10; s++) {
-            ctx.fillRect(f.x + (Math.random() * 2 - 1) * f.r, f.y + (Math.random() * 2 - 1) * f.r, 2 + Math.random() * 6, 2);
+        if (f.kind === 'ring') {
+            ctx.globalAlpha = a; ctx.strokeStyle = f.col; ctx.lineWidth = 4;
+            ctx.beginPath(); ctx.arc(f.x, f.y, f.r * (1 - a * 0.3), 0, Math.PI * 2); ctx.stroke();
+        } else if (f.kind === 'shot') {
+            ctx.globalAlpha = a; ctx.lineCap = 'round';
+            ctx.strokeStyle = '#ffd54f'; ctx.lineWidth = 3 * a + 1;
+            ctx.shadowColor = GOLD; ctx.shadowBlur = 10;
+            ctx.beginPath(); ctx.moveTo(f.x1, f.y1); ctx.lineTo(f.x2, f.y2); ctx.stroke();
+        } else if (f.kind === 'txt') {
+            ctx.globalAlpha = a; ctx.fillStyle = '#ffd54f';
+            ctx.font = 'bold 14px monospace'; ctx.textAlign = 'center';
+            ctx.fillText(f.text, f.x, f.y - (1 - a) * 20);
         }
         ctx.restore();
     }
 
     function drawShot(s) {
         ctx.save();
-        ctx.lineCap = 'round';
-        const tx = s.x - s.vx * 1.8, ty = s.y - s.vy * 1.8;
-        for (let i = 0; i < BARS.length; i++) {
-            const off = (i - 3) * 1.6;
-            ctx.globalAlpha = 0.45;
-            ctx.strokeStyle = BARS[i]; ctx.lineWidth = 2;
-            ctx.beginPath();
-            ctx.moveTo(tx - Math.sin(s.ang) * off, ty + Math.cos(s.ang) * off);
-            ctx.lineTo(s.x - Math.sin(s.ang) * off, s.y + Math.cos(s.ang) * off);
-            ctx.stroke();
+        ctx.strokeStyle = 'rgba(255,213,79,.45)'; ctx.lineWidth = 7; ctx.lineCap = 'round';
+        ctx.beginPath(); ctx.moveTo(s.x - s.vx * 1.6, s.y - s.vy * 1.6); ctx.lineTo(s.x, s.y); ctx.stroke();
+        drawCoin({ x: s.x, y: s.y, t: s.t * 2, life: 999 });
+        ctx.restore();
+    }
+
+    function drawHazinedar() {
+        const p = player;
+        if (p.isDead) return;
+        const x = p.x, y = p.y, t = Date.now();
+        const active = king.t > 0;
+        const charged = !!p.ultReady;
+        const aim = p.angle || 0;
+        const lift = active ? 7 : (charged ? 3 : 0); // kapak ne kadar açık
+        const lb = y - 22 - lift;                    // kapağın alt kenarı
+        const px = Math.cos(aim) * 1.5, py = Math.sin(aim) * 1.5;
+        ctx.save();
+        if (p.isInvisible) ctx.globalAlpha = 0.4;
+
+        // Dolu güçte nabız gibi atan altın halka
+        if (charged) {
+            const pulse = 0.5 + 0.5 * Math.sin(t / 150);
+            ctx.save();
+            ctx.globalAlpha = 0.25 + 0.25 * pulse;
+            ctx.strokeStyle = GOLD; ctx.lineWidth = 3;
+            ctx.beginPath(); ctx.arc(x, y - 12, 38 + pulse * 4, 0, Math.PI * 2); ctx.stroke();
+            ctx.restore();
         }
-        ctx.globalAlpha = 1;
-        ctx.shadowColor = PINK; ctx.shadowBlur = 12;
-        ctx.fillStyle = PINK;
-        ctx.beginPath(); ctx.arc(s.x, s.y, 8, 0, Math.PI * 2); ctx.fill();
+
+        // Gölge
+        ctx.save();
+        ctx.globalAlpha = 0.3; ctx.fillStyle = '#000';
+        ctx.beginPath(); ctx.ellipse(x, y + 9, 24, 5, 0, 0, Math.PI * 2); ctx.fill();
+        ctx.restore();
+
+        // Bacaklar
+        ctx.fillStyle = '#3e2415';
+        ctx.fillRect(x - 17, y + 2, 7, 7);
+        ctx.fillRect(x + 10, y + 2, 7, 7);
+
+        // Gövde (ahşap)
+        const g = ctx.createLinearGradient(0, y - 22, 0, y + 6);
+        g.addColorStop(0, '#a0662b'); g.addColorStop(1, '#4e2c12');
+        ctx.fillStyle = g;
+        rr(x - 24, y - 22, 48, 28, 4); ctx.fill();
+        ctx.strokeStyle = '#2b1709'; ctx.lineWidth = 1.5; ctx.stroke();
+
+        // Ağız: kapak kalkınca içeride karanlık boşluk ve dişler
+        if (lift > 0) {
+            ctx.fillStyle = '#1a0a00';
+            ctx.fillRect(x - 22, lb, 44, lift + 1);
+            ctx.fillStyle = '#ffffff';
+            for (let i = 0; i < 5; i++) {
+                const tx = x - 18 + i * 9;
+                ctx.beginPath();
+                ctx.moveTo(tx, y - 21); ctx.lineTo(tx + 4, y - 21); ctx.lineTo(tx + 2, y - 22 - lift * 0.8);
+                ctx.closePath(); ctx.fill();
+            }
+        }
+
+        // Gövde bantları ve kilit
+        ctx.fillStyle = '#ffc107';
+        ctx.fillRect(x - 17, y - 22, 3, 28);
+        ctx.fillRect(x + 14, y - 22, 3, 28);
+        ctx.fillStyle = GOLD;
+        rr(x - 5, y - 10, 10, 10, 2); ctx.fill();
+        ctx.fillStyle = '#3e2415';
+        ctx.fillRect(x - 1, y - 7, 2, 4);
+
+        // Kapak
+        const lg = ctx.createLinearGradient(0, lb - 44, 0, lb);
+        lg.addColorStop(0, '#c58a3c'); lg.addColorStop(1, '#7a4a1c');
+        ctx.fillStyle = lg;
+        ctx.beginPath();
+        ctx.moveTo(x - 24, lb); ctx.quadraticCurveTo(x, lb - 44, x + 24, lb);
+        ctx.closePath(); ctx.fill();
+        ctx.strokeStyle = '#2b1709'; ctx.lineWidth = 1.5; ctx.stroke();
+        ctx.fillStyle = '#ffc107';
+        ctx.fillRect(x - 24, lb - 3, 48, 3);
+
+        // Değerli taş gözler (nişana bakar)
+        ctx.fillStyle = charged ? '#ff4081' : '#e040fb';
+        if (charged) { ctx.shadowColor = '#ff4081'; ctx.shadowBlur = 8; }
+        ctx.beginPath(); ctx.arc(x - 9 + px, y - 16 + py, 3.2, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath(); ctx.arc(x + 9 + px, y - 16 + py, 3.2, 0, Math.PI * 2); ctx.fill();
         ctx.shadowBlur = 0;
-        ctx.fillStyle = '#fff';
-        ctx.beginPath(); ctx.arc(s.x, s.y, 3.5, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = '#ffffff';
+        ctx.beginPath(); ctx.arc(x - 10 + px, y - 17 + py, 1, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath(); ctx.arc(x + 8 + px, y - 17 + py, 1, 0, Math.PI * 2); ctx.fill();
         ctx.restore();
     }
 
     function drawPreviews() {
         if (player.isDead) return;
         if (gadAim.active && player.gadgetReady) {
-            ctx.save();
-            ctx.setLineDash([10, 8]); ctx.strokeStyle = 'rgba(255,46,99,.7)'; ctx.lineWidth = 4; ctx.lineCap = 'round';
-            ctx.beginPath(); ctx.moveTo(player.x, player.y);
-            ctx.lineTo(player.x + Math.cos(gadAim.angle) * 480, player.y + Math.sin(gadAim.angle) * 480);
-            ctx.stroke();
-            ctx.restore();
-        }
-        if (gadAim2.active && player.gadget2Ready) {
-            const pl = pullOf(gadAim2, RANGE * 0.8);
-            const d = 70 + pl * 190;
-            const tx = clampRange(player.x + Math.cos(gadAim2.angle) * d, WALL_THICKNESS + 20, canvas.width - WALL_THICKNESS - 20);
-            const ty = clampRange(player.y + Math.sin(gadAim2.angle) * d, WALL_THICKNESS + 20, canvas.height - WALL_THICKNESS - 20);
+            const pl = pullOf(gadAim, RANGE * 0.8);
+            const d = 70 + pl * 150;
+            const tx = clampRange(player.x + Math.cos(gadAim.angle) * d, WALL_THICKNESS + 20, canvas.width - WALL_THICKNESS - 20);
+            const ty = clampRange(player.y + Math.sin(gadAim.angle) * d, WALL_THICKNESS + 20, canvas.height - WALL_THICKNESS - 20);
             ctx.save();
             ctx.setLineDash([6, 6]); ctx.strokeStyle = 'rgba(255,202,40,.7)'; ctx.lineWidth = 2;
             ctx.beginPath(); ctx.moveTo(player.x, player.y); ctx.lineTo(tx, ty); ctx.stroke();
-            ctx.beginPath(); ctx.arc(tx, ty, 220, 0, Math.PI * 2); ctx.stroke();
+            ctx.beginPath(); ctx.arc(tx, ty, 90, 0, Math.PI * 2); ctx.stroke();
             ctx.fillStyle = 'rgba(255,202,40,.12)'; ctx.fill();
+            ctx.restore();
+        }
+        if (gadAim2.active && player.gadget2Ready) {
+            ctx.save();
+            ctx.setLineDash([8, 6]); ctx.strokeStyle = 'rgba(255,213,79,.7)'; ctx.lineWidth = 2;
+            for (let k = 0; k < 5; k += 4) {
+                const pa = gadAim2.angle - 0.25 + k * 0.125;
+                ctx.beginPath(); ctx.moveTo(player.x, player.y);
+                ctx.lineTo(player.x + Math.cos(pa) * 330, player.y + Math.sin(pa) * 330);
+                ctx.stroke();
+            }
             ctx.restore();
         }
         if (ultAim.active && player.ultReady) {
             ctx.save();
-            ctx.setLineDash([10, 10]); ctx.strokeStyle = 'rgba(125,249,255,.7)'; ctx.lineWidth = 2;
-            ctx.beginPath(); ctx.arc(player.x, player.y, 650, 0, Math.PI * 2); ctx.stroke();
+            ctx.setLineDash([10, 8]); ctx.strokeStyle = 'rgba(255,202,40,.8)'; ctx.lineWidth = 2;
+            ctx.beginPath(); ctx.arc(player.x, player.y, 80, 0, Math.PI * 2); ctx.stroke();
             ctx.restore();
         }
     }
 
     function drawWorld() {
-        beams.forEach(drawBeamLine);
-        bolts.forEach(drawBolt);
-        bombs.forEach(drawBomb);
+        traps.forEach(drawTrap);
+        coins.forEach(drawCoin);
         shots.forEach(drawShot);
-        blasts.forEach(drawBlast);
+        fx.forEach(drawFx);
         drawPreviews();
 
-        if (ult.t > 0) {
+        if (king.t > 0 && !player.isDead) {
+            const o = player;
             ctx.save();
-            ctx.globalAlpha = 0.6 + 0.4 * (flick < 30 ? 1 : 0.4);
-            ctx.fillStyle = (flick < 30) ? PINK : '#ffffff';
-            ctx.font = 'bold 26px monospace'; ctx.textAlign = 'center';
-            ctx.fillText('◉ KESİNTİSİZ YAYIN ◉', canvas.width / 2, 60);
+            ctx.globalAlpha = 0.35; ctx.strokeStyle = GOLD; ctx.lineWidth = 2;
+            ctx.setLineDash([8, 6]); ctx.lineDashOffset = -king.t;
+            ctx.beginPath(); ctx.arc(o.x, o.y, 80, 0, Math.PI * 2); ctx.stroke();
+            ctx.setLineDash([]);
+            ctx.restore();
+
+            // Etrafında dönen 4 altın
+            for (let i = 0; i < 4; i++) {
+                const ang = king.t * 0.1 + i * Math.PI / 2;
+                drawCoin({ x: o.x + Math.cos(ang) * 56, y: o.y - 12 + Math.sin(ang) * 20, t: king.t * 3 + i * 9, life: 999 });
+            }
+
+            // Üstte geri sayım barı
+            ctx.save();
+            ctx.globalAlpha = 0.6 + 0.4 * ((king.t % 20) < 10 ? 1 : 0.4);
+            ctx.fillStyle = '#ffd54f'; ctx.font = 'bold 26px monospace'; ctx.textAlign = 'center';
+            ctx.fillText('★ KRAL HAZİNESİ ★', canvas.width / 2, 60);
+            ctx.globalAlpha = 1;
             ctx.fillStyle = 'rgba(255,255,255,0.2)';
             ctx.fillRect(canvas.width / 2 - 120, 72, 240, 6);
-            ctx.fillStyle = PINK;
-            ctx.fillRect(canvas.width / 2 - 120, 72, 240 * Math.max(0, ult.t / 180), 6);
+            ctx.fillStyle = GOLD;
+            ctx.fillRect(canvas.width / 2 - 120, 72, 240 * Math.max(0, king.t / 240), 6);
             ctx.restore();
         }
 
-        drawTv();
+        drawHazinedar();
     }
 
     // ----------------------------------------------------- HOOK'LAR (varsa)
@@ -505,7 +536,10 @@
         const prevKilled = H.onEnemyKilled, prevReset = H.onReset;
         H.onEnemyKilled = function (enemy) {
             if (prevKilled) prevKilled.apply(this, arguments);
-            if (typeof player !== 'undefined' && isMine(player)) charge(25);
+            if (typeof player !== 'undefined' && isMine(player)) {
+                charge(25);
+                if (enemy && typeof enemy.x === 'number' && !enemy._m6dead) { enemy._m6dead = true; dropCoins(enemy.x, enemy.y, 2); }
+            }
         };
         H.onReset = function () {
             needReset = true;
@@ -526,7 +560,7 @@
         const mine = gameStarted && isMine(player);
         if (!mine) {
             if (wasActive) { resetState(); wasActive = false; }
-            if (gameStarted && gadgetBtn.dataset.m8) delete gadgetBtn.dataset.m8;
+            if (gameStarted && gadgetBtn.dataset.m6) delete gadgetBtn.dataset.m6;
             return;
         }
         try {
@@ -535,7 +569,7 @@
             tick(dt);
             drawWorld();
         } catch (err) {
-            if (!warned) { warned = true; console.warn('[mod8] hata:', err); }
+            if (!warned) { warned = true; console.warn('[mod6] hata:', err); }
         }
     }
     requestAnimationFrame(loop);
