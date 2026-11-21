@@ -1,1004 +1,1033 @@
-// ========== mod32.js (AĞIR SIKLETLER) - HARDCORE MOD ==========
-// 4 ağır bot: Havan, Teker Tıraşı, Çavuş, Buz Boğası
-// Sıra: Havan(10s) → Tıraşı(25s) → Çavuş(45s) → Boğa(80s)
-// Her türden maksimum 1 tane, ölünce kendi süresiyle respawn
-// Siperlerden buz slime çıkar, Çavuş ile 3 ciritçi gelir
-
+/*
+ * mod32.js — SERBEST HESAPLAŞMA | Meydan Savaşçıları
+ * Ana oyun ve varsa diğer modlardan sonra yükle: <script src="mod32.js"></script>
+ * Tek koşu, herkes herkese rakip. Tur, ganimet ve enerji küpü yok.
+ * Ters Köşe’yi, klasik arenayı ve oyuncu karakterlerini değiştirmez.
+ * Süreler, çekirdeğin nominal 60 FPS birimlerindedir.
+ */
 (function () {
     'use strict';
-
-    const MOD_ID = 'agirsikletler';
-
-    // ===== HAVAN =====
-    const HAVAN_HP = 5000, HAVAN_RADIUS = 26;
-    const HAVAN_SHOOT_INTERVAL = 180;
-    const HAVAN_MERMI_HASAR = 400, HAVAN_MERMI_AOE = 100;
-    const HAVAN_SIPER_HASAR = 150, HAVAN_MERMI_FLIGHT = 90;
-
-    // ===== TIRASI =====
-    const TIRASI_HP = 1300, TIRASI_RADIUS = 18, TIRASI_SPEED = 0.5;
-    const TIRASI_MENZIL = 140, TIRASI_HASAR = 150;
-    const TIRASI_INSAA_SURESI = 280;
-
-    // ===== HEYKEL =====
-    const HEYKEL_HP = 9500, HEYKEL_RADIUS = 30, HEYKEL_SPEED = 0.6;
-    const HEYKEL_SALDIRI_HASAR = 30, HEYKEL_SALDIRI_ARALIK = 90;
-    const HEYKEL_PASIF_CAN_KAYBI = 200, HEYKEL_PASIF_KAYIP_ARALIK = 180;
-
-    // ===== ÇAVUŞ =====
-    const CAVUS_HP = 6500, CAVUS_RADIUS = 24, CAVUS_SPEED = 0.7;
-    const CAVUS_SHOOT_INTERVAL = 120;
-    const CAVUS_AURA_RADIUS = 140;
-    const CAVUS_AURA_DURATION = 300, CAVUS_AURA_COOLDOWN = 300;
-    const CAVUS_HEAL_PER_TICK = 450, CAVUS_HEAL_BOTS = 100;
-    const CAVUS_DMG_REDIRECT = 0.30, CAVUS_STOP_DIST = 150;
-
-    // ===== CİRİTÇİ =====
-    const CIRITCI_HP = 2000, CIRITCI_RADIUS = 18, CIRITCI_SPEED = 0.8;
-    const CIRITCI_SHOOT_RANGE = 220, CIRITCI_SHOOT_INTERVAL = 1200;
-    const CIRITCI_DAMAGE = 450;
-    const CIRITCI_MERMI_HIZ = BOT_BULLET_SPEED * 1.16;
-
-    // ===== BOĞA =====
-    const BOGA_HP = 10000, BOGA_NORMAL_HIZ = 0.5, BOGA_KOSMA_HIZ = 10.8;
-    const BOGA_BEKLEME_SURE = 80, BOGA_SARJ_SURE = 80, BOGA_OFKE_SURE = 90;
-    const BOGA_TEMAS_HASAR = 700, BOGA_SERSEMLE_SURE = 60;
-    const BOGA_RADIUS = 28, BOGA_ITME_MESAFE = 25;
-
-    // ===== BUZ BOTU =====
-    const BUZ_BOT_HP = 4000, BUZ_BOT_RADIUS = 22, BUZ_BOT_SPEED = 0.9;
-    const BUZ_BOT_TEMAS_HASAR = 450, BUZ_BOT_ITME_MESAFE = 40;
-    const BUZ_BOT_PATLAMA_YARICAP = 68, BUZ_BOT_PATLAMA_HASAR = 150;
-    const BUZ_BOT_SALDIRI_ARALIK = 1800;
-
-    // ===== SPAWN TIMERS =====
-    const HAVAN_INITIAL = 600;       // 10s
-    const TIRASI_INITIAL = 1500;     // 25s
-    const CAVUS_INITIAL = 2700;      // 45s
-    const BOGA_INITIAL = 4800;       // 80s
-
-    const HAVAN_RESPAWN = 600;       // 10s after death
-    const TIRASI_RESPAWN = 900;      // 15s
-    const CAVUS_RESPAWN = 1200;      // 20s
-    const BOGA_RESPAWN = 2100;       // 35s
-
-    const SPAWN_WARN = 180;
-
-    // ===== STATE =====
-    let havanBot = null, havanSpawnTimer = HAVAN_INITIAL, havanShootTimer = 0, havanMuzzleFlash = 0;
-    let havanMermiler = [];
-
-    let tirasiBot = null, tirasiSpawnTimer = TIRASI_INITIAL;
-    let heykeller = [];
-
-    let cavusBot = null, cavusSpawnTimer = CAVUS_INITIAL, cavusShootTimer = 0;
-    let cavusAuraTimer = 0, cavusAuraCooldown = 0, cavusAuraActive = false, cavusAuraTick = 0;
-    let ciritciBotlari = [];
-
-    let bogaBot = null, bogaSpawnTimer = BOGA_INITIAL;
-    let buzBotlari = [];
-
-    let spawnUyarilar = [];
-    let obstacleSnapshot = new Map();
-    let botPrevHp = new Map();
-    let rageActive = false, rageTimer = 0;
-
-    function chainHook(name, fn) {
-        const prev = window.GAME_EXT.hooks[name];
-        window.GAME_EXT.hooks[name] = function (...args) {
-            let pr; if (typeof prev === 'function') pr = prev.apply(this, args);
-            const or = fn.apply(this, args);
-            if (typeof pr === 'boolean' || typeof or === 'boolean') return !!pr || !!or;
-            return or !== undefined ? or : pr;
-        };
+    const EXT = window.GAME_EXT, ID = 'serbest_hesaplasma';
+    if (!EXT?.modes || !EXT.hooks || typeof player === 'undefined' ||
+        typeof bot === 'undefined' || typeof canvas === 'undefined' ||
+        typeof window.startGame !== 'function' || typeof window.updateBulletLogic !== 'function' ||
+        typeof window.drawBullet !== 'function') {
+        console.warn('[mod32] Meydan Savaşçıları ana betiğinden sonra yüklenmeli.');
+        return;
     }
+    if (EXT.modes[ID]) return;
 
-    function safe(v, fb) { return Number.isFinite(v) ? v : (fb !== undefined ? fb : 0); }
-
-    function rawDamageText(x, y, val, color) {
-        floatingNumbers.push({
-            x: x + (Math.random() - .5) * 20, y: y - 20, val: val,
-            color: color || "#e74c3c", life: 60, opacity: 1
-        });
-    }
-
-    function findSpawnPos() {
-        for (let attempt = 0; attempt < 10; attempt++) {
-            const x = Math.random() * (canvas.width - 300) + 150;
-            const y = Math.random() * (canvas.height - 300) + 150;
-            if (getDist({ x, y }, player) > 250) return { x, y };
+    const H = EXT.hooks, previous = {
+        draw:H.onDraw, reset:H.onReset, target:H.getBotTarget, enemies:H.getExtraEnemies, projectiles:window.updateBulletLogic
+    };
+    const TAU = Math.PI*2, FPS = 60;
+    const GAS_WAIT = 15*FPS, GAS_MIN = 145, GAS_STEP = 30;
+    const RETURN_WAIT = 7*FPS, RETURN_WARNING = 1.2*FPS, SPAWN_GUARD = 48;
+    const ULT_GAP = 8*FPS;
+    const GOLD = '#ffd177', LIME = '#8afa81';
+    const TYPES = {
+        keskin: {name:'Keskin', color:'#5ba9dc', hp:2650, speed:1.90, range:417, ideal:290, vision:480, fire:94, wind:19, damage:530, gadget:'Kalkan', ulti:'Üçlü Hat'},
+        baskinci: {name:'Baskıncı', color:'#e8a14d', hp:2900, speed:2.31, range:218, ideal:108, vision:390, fire:79, wind:13, damage:232, gadget:'Turbo', ulti:'Çifte Saçma'},
+        muhafiz: {name:'Muhafız', color:'#df727c', hp:4050, speed:2.02, range:93, ideal:71, vision:365, fire:79, wind:16, damage:750, gadget:'Onarım', ulti:'Yer Sarsıntısı'},
+        bombaci: {name:'Bombacı', color:'#5eb5a1', hp:2750, speed:2.04, range:362, ideal:221, vision:430, fire:108, wind:13, damage:610, gadget:'Mayın', ulti:'Üçlü Bomba'}
+    };
+    const $ = id => document.getElementById(id);
+    const pt = (x,y) => ({x,y});
+    const dist = (a,b) => Math.hypot(a.x-b.x,a.y-b.y);
+    const bearing = (a,b) => Math.atan2(b.y-a.y,b.x-a.x);
+    const off = (p,a,r) => pt(p.x+Math.cos(a)*r,p.y+Math.sin(a)*r);
+    const clamp = (x,a,b) => a>b ? (a+b)*.5 : Math.max(a,Math.min(b,x));
+    const radDiff = (a,b) => Math.atan2(Math.sin(b-a),Math.cos(b-a));
+    const alive = e => !!e && e.hp>0 && !e.isDead;
+    const easy = () => window.GAME_DIFFICULTY === 'easy';
+    const rand = (a,b) => a+Math.random()*(b-a);
+    let run = null, returnMode='arena';
+    const active = () => !!run && window.GAME_MODE === ID;
+    const guard = e => e!==player && e.guardUntil>run.t;
+    const onField = () => run.slots.map(s=>s.body).filter(alive);
+    const fighters = () => [player,...onField()].filter(alive);
+    // Yalnızca Mod Seç'e bir giriş; aşağıdaki küçük paneller yalnız modda görünür.
+    const style = document.createElement('style');
+    style.textContent = `
+        #difficulty-screen #m32-start{display:flex;align-items:center;justify-content:center;flex-direction:column;gap:3px;width:min(76vw,300px);min-height:46px;flex:none;margin:8px auto 0;padding:6px 10px;border:1px solid #8bee847d;border-radius:10px;background:#203527;color:#fff;cursor:pointer;font:inherit;text-align:center;touch-action:manipulation}
+        #m32-start strong{color:#a6f5a0;font-size:14px}#m32-start small{color:#e3eee0;font-size:10px}#m32-start:focus-visible{outline:2px solid #a6f5a0;outline-offset:2px}
+        #gameCanvas.m32-world{position:fixed;inset:0 auto auto 0;width:var(--m32-w);height:var(--m32-h);max-width:none;max-height:none;transform:translate3d(var(--m32-x,0px),var(--m32-y,0px),0);transform-origin:top left;touch-action:none}
+        body.m32-playing #controls-hint,body.m32-playing #arena-back,body.m32-playing #game-over-screen{display:none!important}
+        #m32-hud[hidden],#m32-leave[hidden],#m32-result[hidden],#m32-map[hidden]{display:none!important}
+        #m32-hud,#m32-leave,#m32-result{font-family:system-ui,sans-serif}
+        #m32-hud{position:absolute;z-index:12;pointer-events:none;top:max(8px,env(safe-area-inset-top));left:50%;transform:translateX(-50%);width:min(395px,calc(100% - 108px));padding:6px 9px;border:1px solid #a8ff974d;border-radius:8px;background:#18252de9;color:#fff}
+        #m32-hud-header{display:flex;gap:6px;align-items:center;justify-content:space-between;color:#a6f5a0;font-size:10px;font-weight:850;letter-spacing:.07em;white-space:nowrap}
+        #m32-hud-line{display:flex;gap:5px;flex-wrap:wrap;line-height:1.2;margin-top:3px;color:#edf6f0;font-size:11px;font-weight:750}
+        #m32-hud-notice{display:block;line-height:1.15;margin-top:3px;color:#dce8c4;font-size:10px}
+        #m32-hud[data-danger] #m32-hud-notice{color:#dfff9b;font-weight:800}
+        #m32-map{position:absolute;z-index:12;pointer-events:none;top:max(8px,env(safe-area-inset-top));right:max(7px,env(safe-area-inset-right));width:92px;height:auto;border:1px solid #a8ff974d;border-radius:8px;background:#18252de9}
+        @media(max-width:625px){#m32-map{width:70px;top:calc(max(8px,env(safe-area-inset-top)) + 61px)}}
+        @media (max-height:500px) and (orientation:landscape){
+            #m32-map{width:75px}
+            #difficulty-screen:has(> #m32-start){padding-block:8px}
+            #difficulty-screen:has(> #m32-start)>h1{font-size:24px;margin:0 0 5px}
+            #difficulty-screen:has(> #m32-start)>p{margin:0 0 5px}
+            #difficulty-screen:has(> #m32-start)>.difficulty-track{max-height:38vh;padding-block:4vh}
         }
-        return { x: canvas.width / 2, y: canvas.height / 2 };
+        #m32-leave{position:absolute;z-index:17;left:max(6px,env(safe-area-inset-left));top:max(8px,env(safe-area-inset-top));min-width:43px;min-height:42px;border:1px solid #b4d2bb75;border-radius:8px;background:#1a2a29;color:#fff;font-size:17px;font-weight:800;cursor:pointer;touch-action:manipulation}
+        #m32-result{position:absolute;inset:0;z-index:25;display:grid;place-items:center;background:#0e191edc;color:#fff;padding:14px}
+        #m32-result>div{width:min(100%,360px);padding:18px;border:1px solid #a6f5a066;border-radius:13px;background:#203030;text-align:center}
+        #m32-result h2{color:#a6f5a0;margin:0 0 9px;font-size:23px}#m32-result p{color:#e3f1e4;margin:0 0 13px;font-size:14px;line-height:1.45}
+        #m32-result button{min-height:42px;padding:6px 12px;margin:3px;border:1px solid #a8ff9766;border-radius:8px;background:#2f453c;color:#fff;font-weight:800;cursor:pointer;touch-action:manipulation}
+        #m32-result #m32-again{background:#a6f5a0;color:#182518}
+    `;
+    document.head.appendChild(style);
+    const difficulty=$('difficulty-screen'), start=$('difficulty-start-btn');
+    if (difficulty) {
+        const b=document.createElement('button');b.id='m32-start';b.type='button';
+        b.innerHTML='<strong>Serbest Hesaplaşma’yı Başlat</strong><small>Kesintisiz hayatta kalma · Herkes herkese karşı</small>';
+        const anchor=$('m31-start') || start;
+        if (anchor && difficulty.contains(anchor)) anchor.after(b);else difficulty.append(b);
+        b.addEventListener('click',enter);
+    }
+    const hud=document.createElement('aside');hud.id='m32-hud';hud.hidden=true;
+    hud.innerHTML='<div id="m32-hud-header"><span>HESAPLAŞMA</span><time id="m32-time"></time></div><div id="m32-hud-line"></div><small id="m32-hud-notice"></small>';
+    const leave=document.createElement('button');leave.id='m32-leave';leave.type='button';leave.hidden=true;
+    leave.textContent='←';leave.title='Savaşçı seçimine dön';leave.setAttribute('aria-label',leave.title);
+    const result=document.createElement('section');result.id='m32-result';result.hidden=true;
+    result.setAttribute('role','dialog');result.setAttribute('aria-modal','true');result.setAttribute('aria-labelledby','m32-result-title');
+    result.innerHTML='<div><h2 id="m32-result-title">Elendin</h2><p id="m32-result-info"></p><button id="m32-again" type="button">Tekrar Oyna</button><button id="m32-characters" type="button">Savaşçılar</button></div>';
+    document.body.append(hud,leave,result);
+    const ui={time:$('m32-time'),line:$('m32-hud-line'),notice:$('m32-hud-notice')};
+    function back() { $('restart-btn')?.click(); }
+    leave.addEventListener('click',back);
+    $('m32-characters').addEventListener('click',back);
+    $('m32-again').addEventListener('click',()=>{back();enter();});
+    function enter() {
+        if (gameStarted && !player.isDead) return;
+        if (window.GAME_MODE!==ID) returnMode=window.GAME_MODE||'arena';
+        window.GAME_MODE=ID;
+        if (typeof selectedDifficulty!=='undefined') window.GAME_DIFFICULTY=selectedDifficulty;
+        if (difficulty) difficulty.style.display='none';
+        window.startGame();
+    }
+    const clock = t => {const s=Math.floor(t/FPS);return Math.floor(s/60)+':'+String(s%60).padStart(2,'0');};
+    function text(el,value) {if (el.textContent!==value) el.textContent=value;}
+    function hudTick() {
+        const s=run,danger=outside(player);
+        text(ui.time,clock(s.t));
+        text(ui.line,`Eleme ${s.kills}  ·  Bot ${onField().length}/${s.slots.length}`);
+        text(ui.notice,s.t<GAS_WAIT ? `Gaz ${Math.ceil((GAS_WAIT-s.t)/FPS)} sn sonra daralır.` : danger ? 'GAZ! Yeşil sınırın içine dön.' : s.radius<=GAS_MIN ? 'Son çember · Hayatta kal!' : 'Çember daralıyor · Herkes rakip.');
+        hud.toggleAttribute('data-danger',danger && s.t>=GAS_WAIT);
     }
 
-    // ===== SPAWN =====
-    function startSpawnWarning(type) {
-        const pos = findSpawnPos();
-        spawnUyarilar.push({ x: pos.x, y: pos.y, timer: SPAWN_WARN, type });
+    // Yaşam döngüsü ve arena alanları. Normal oyun kendi kontrol/karakter kodunu kullanır.
+    function startRun() {
+        const w=Math.round(clamp(innerWidth+270,1420,1800)),h=Math.round(clamp(innerHeight+230,1060,1350));
+        const center=pt(w*.5,h*.5),radius=Math.min(w,h)*.46;
+        run={w,h,phase:'start',t:0,gasAt:GAS_WAIT+GAS_STEP,center,radius,startRadius:radius,slots:[],kills:0,
+            grass:[],mines:[],queued:[],rings:[],solids:[],mesh:null,meshKey:0,mouse:null,
+            view:{x:0,y:0,w:innerWidth,h:innerHeight},drag:pt(0,0),miniAt:0,ground:null,
+            lead:!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches};
+        result.hidden=true;
     }
-
-    function spawnHavan(x, y) {
-        havanBot = {
-            x, y, radius: HAVAN_RADIUS,
-            hp: HAVAN_HP, maxHp: HAVAN_HP,
-            angle: 0, isDead: false,
-            color: '#7f1d1d', type: 'havan'
-        };
-        havanShootTimer = 0; havanMuzzleFlash = 0;
-        spawnParticles(x, y, '#7f1d1d', 'smoke');
-        explosions.push({ x, y, radius: 10, maxRadius: 80, life: 15, maxLife: 15 });
+    function sizeWorld() {
+        if (canvas.width!==run.w) canvas.width=run.w;
+        if (canvas.height!==run.h) canvas.height=run.h;
     }
-
-    function spawnTirasi(x, y) {
-        tirasiBot = {
-            x, y, radius: TIRASI_RADIUS,
-            hp: TIRASI_HP, maxHp: TIRASI_HP,
-            speed: TIRASI_SPEED, angle: 0,
-            isDead: false, color: '#8e44ad',
-            insaatSure: -1, ilkInsa: true, lastShot: 0,
-            type: 'tirasi'
-        };
-        spawnParticles(x, y, '#8e44ad', 'smoke');
+    function oldRoundRect(x,y,w,h,r) {
+        r=Math.max(0,Math.min(typeof r==='number'?r:0,w*.5,h*.5));
+        this.moveTo(x+r,y);this.arcTo(x+w,y,x+w,y+h,r);this.arcTo(x+w,y+h,x,y+h,r);
+        this.arcTo(x,y+h,x,y,r);this.arcTo(x,y,x+w,y,r);this.closePath();
     }
-
-    function spawnCavus(x, y) {
-        cavusBot = {
-            x, y, radius: CAVUS_RADIUS,
-            hp: CAVUS_HP, maxHp: CAVUS_HP, shield: 0,
-            speed: CAVUS_SPEED, angle: 0,
-            isDead: false, color: '#b8860b',
-            lastShot: 0, type: 'cavus'
-        };
-        cavusShootTimer = 0; cavusAuraTimer = 0;
-        cavusAuraCooldown = 0; cavusAuraActive = false; cavusAuraTick = 0;
-        spawnParticles(x, y, '#b8860b', 'smoke');
-        explosions.push({ x, y, radius: 10, maxRadius: 80, life: 15, maxLife: 15 });
-
-        // 3 ciritçi de spawn et
-        for (let i = 0; i < 3; i++) {
-            const ang = (i / 3) * Math.PI * 2;
-            const cx = x + Math.cos(ang) * 60;
-            const cy = y + Math.sin(ang) * 60;
-            ciritciBotlari.push({
-                x: cx, y: cy, radius: CIRITCI_RADIUS,
-                hp: CIRITCI_HP, maxHp: CIRITCI_HP,
-                speed: CIRITCI_SPEED, angle: 0,
-                isDead: false, color: '#5dade2',
-                lastShot: 0, type: 'ciritci'
-            });
-            spawnParticles(cx, cy, '#5dade2', 'smoke');
+    function suppressCoreSpawns() {
+        bot.isActive=bot2.isActive=false;
+        slimeTimer=stationaryTimer=boomerangTimer=fogBotTimer=0;
+        lastObstacleTime=Date.now();
+    }
+    function stockMap() {
+        const s=run;
+        const covers=[ [.50,.72,44],[.33,.57,42],[.67,.57,42],[.39,.39,39],[.62,.40,38],[.49,.27,36],
+            [.26,.43,39],[.74,.44,37],[.36,.70,36],[.63,.70,37],[.435,.53,27],[.57,.53,28],[.46,.35,26],[.54,.64,27] ];
+        const grass=[ [.39,.58,144,84],[.60,.51,143,90],[.31,.35,160,90],[.69,.34,158,88],[.50,.41,164,74],[.30,.77,160,77],[.70,.76,156,82],[.50,.20,160,88] ];
+        s.grass=grass.map(([x,y,w,h])=>({x:x*s.w-w/2,y:y*s.h-h/2,w,h}));
+        obstacles=covers.map(([x,y,r])=>({x:x*s.w,y:y*s.h,radius:r,hp:1450,maxHp:1450}));
+        rebuildSolids();
+    }
+    function initField() {
+        const s=run;
+        canvas.classList.add('m32-world');document.body.classList.add('m32-playing');
+        canvas.style.setProperty('--m32-w',s.w+'px');canvas.style.setProperty('--m32-h',s.h+'px');
+        if (typeof ctx.roundRect!=='function') {
+            s.oldRoundRect=Object.getOwnPropertyDescriptor(ctx,'roundRect');ctx.roundRect=oldRoundRect;
         }
+        sizeWorld();clearControls();
+        bullets=[];botBullets=[];floatingNumbers=[];particles=[];explosions=[];spawnIndicators=[];
+        slimeBots=[];stationaryBots=[];boomerangBots=[];fogBots=[];nests=[];fogAreas=[];
+        ghostZones=[];cactusWalls=[];spikeFields=[];samGloves=[];souls=[];specialSouls=[];
+        screenShake=0;botsKilled=0;suppressCoreSpawns();stockMap();s.ground=terrain();
+        const candidates=[pt(s.center.x,s.center.y+s.startRadius*.33),pt(s.center.x-63,s.center.y+s.startRadius*.37),s.center];
+        const spawn=candidates.find(p=>free(p,player.radius)) || findSpawn(true,player.radius) || s.center;
+        player.x=spawn.x;player.y=spawn.y;player.angle=-Math.PI/2;player.isDead=false;player.lastShotTime=0;player.lastHitTime=Date.now();
+        const order=['keskin','baskinci','muhafiz','bombaci','baskinci','bombaci','keskin','muhafiz'];
+        for (let i=0;i<order.length;i++) {
+            const slot={index:i,type:order[i],body:null,warning:null,due:0,lives:0};
+            s.slots.push(slot);
+            spawnBody(slot,findSpawn(true,bot.radius) || off(s.center,i*TAU/order.length,s.startRadius*.68),true);
+        }
+        s.phase='play';hud.hidden=leave.hidden=map.hidden=false;follow(0,true);hudTick();mapTick();
+    }
+    function endRun() {
+        const s=run;
+        if (!s || s.phase==='over') return;
+        s.phase='over';player.isDead=true;player.ultiHazirlik=false;clearControls();
+        bullets.length=botBullets.length=0;hud.hidden=leave.hidden=map.hidden=true;
+        text($('m32-result-info'),`${clock(s.t)} hayatta kaldın · ${s.kills} eleme`);
+        result.hidden=false;$('m32-again').focus({preventScroll:true});
+    }
+    function resetRun() {
+        if (!run) return;
+        const s=run;
+        clearControls();
+        lastMouseX=s.mouse?.x??innerWidth/2;lastMouseY=s.mouse?.y??innerHeight/2;
+        if (ctx.roundRect===oldRoundRect) {
+            if (s.oldRoundRect) Object.defineProperty(ctx,'roundRect',s.oldRoundRect);
+            else delete ctx.roundRect;
+        }
+        run=null;
+        canvas.classList.remove('m32-world');document.body.classList.remove('m32-playing');
+        for (const key of ['--m32-w','--m32-h','--m32-x','--m32-y']) canvas.style.removeProperty(key);
+        resize();
+        if (bot.isActive && !gameStarted) bot.x=canvas.width-150;
+        hud.hidden=leave.hidden=result.hidden=map.hidden=true;
+        if (window.GAME_MODE===ID) window.GAME_MODE=returnMode;
+        returnMode='arena';
     }
 
-    function spawnBoga(x, y) {
-        bogaBot = {
-            x, y, radius: BOGA_RADIUS,
-            hp: BOGA_HP, maxHp: BOGA_HP,
-            speed: BOGA_NORMAL_HIZ, angle: 0,
-            isDead: false, color: '#5dade2',
-            durum: 'takip', beklemeSure: BOGA_BEKLEME_SURE,
-            sarjSure: 0, ofkeSure: 0, ofkeAci: 0,
-            sonVurusZamani: 0, sersemleSure: 0,
-            type: 'boga'
-        };
-        spawnParticles(x, y, '#5dade2', 'smoke');
-        explosions.push({ x, y, radius: 10, maxRadius: 100, life: 15, maxLife: 15 });
+    // Geometri ve yol bulma: aynı 20 px taban gövdesi, siperlerin çevresinden rota.
+    function impact(a,b,q,r) {
+        const dx=b.x-a.x,dy=b.y-a.y,fx=a.x-q.x,fy=a.y-q.y;
+        const c=fx*fx+fy*fy-r*r;if (c<=0) return 0;
+        const aa=dx*dx+dy*dy,bb=fx*dx+fy*dy;
+        if (!aa || bb>=0) return Infinity;
+        const disc=bb*bb-aa*c;if (disc<0) return Infinity;
+        const t=(-bb-Math.sqrt(disc))/aa;
+        return t>=0&&t<=1 ? t : Infinity;
+    }
+    function clear(a,b,pad=0,ignore=null) {
+        for (const o of run.solids) if (o!==ignore && o.hp>0 && impact(a,b,o,o.radius+pad)!==Infinity) return false;
+        return true;
+    }
+    function inside(p,r=0) {
+        const m=WALL_THICKNESS+r;
+        return p.x>=m && p.x<=run.w-m && p.y>=m && p.y<=run.h-m;
+    }
+    function bound(p,r=0) {
+        const m=WALL_THICKNESS+r;
+        return pt(clamp(p.x,m,run.w-m),clamp(p.y,m,run.h-m));
+    }
+    function free(p,r) {return inside(p,r) && clear(p,p,r+2);}
+    function outside(p) {return dist(p,run.center)>run.radius;}
+    function rebuildSolids() {
+        const list=obstacles.concat(cactusWalls).filter(o=>o.hp>0);
+        if (list.length===run.solids.length && list.every((o,i)=>o===run.solids[i])) return;
+        run.solids=list;run.mesh=null;run.meshKey++;
+    }
+    function makeMesh() {
+        const r=bot.radius,m=WALL_THICKNESS+r+5,w=run.w-2*m,h=run.h-2*m;
+        const nx=Math.ceil(w/53)+1,ny=Math.ceil(h/53)+1,nodes=[];
+        for (let y=0;y<ny;y++) for (let x=0;x<nx;x++) {
+            const p=pt(m+x*w/(nx-1),m+y*h/(ny-1));
+            nodes.push({...p,i:y*nx+x,open:free(p,r),edges:[]});
+        }
+        for (let y=0;y<ny;y++) for (let x=0;x<nx;x++) {
+            const u=nodes[y*nx+x];if (!u.open) continue;
+            for (const [dx,dy] of [[1,0],[0,1],[1,1],[-1,1]]) {
+                if (x+dx<0 || x+dx>=nx || y+dy>=ny) continue;
+                const v=nodes[(y+dy)*nx+x+dx];
+                if (!v.open || !clear(u,v,r+2)) continue;
+                const d=dist(u,v);u.edges.push({to:v,d});v.edges.push({to:u,d});
+            }
+        }
+        return nodes;
+    }
+    function nearestNode(nodes,p,r,trace) {
+        let best=null,d2=Infinity;
+        for (const n of nodes) if (n.open) {
+            const d=(n.x-p.x)**2+(n.y-p.y)**2;
+            if (d<d2 && (!trace || clear(p,n,r+1))) {d2=d;best=n;}
+        }
+        return best;
+    }
+    function getPath(e,desired) {
+        const r=e.radius,goal=bound(desired,r+2);
+        if (free(goal,r) && clear(e,goal,r+2)) return [goal];
+        const nodes=run.mesh || (run.mesh=makeMesh());
+        const a=nearestNode(nodes,e,r,true),b=nearestNode(nodes,goal,r,free(goal,r));
+        if (!a || !b) return [];
+        const distances=new Float64Array(nodes.length),seen=new Uint8Array(nodes.length),parents=new Int16Array(nodes.length);
+        distances.fill(Infinity);distances[a.i]=0;parents.fill(-1);
+        const open=[{node:a,f:dist(a,b)}];let last=a,best=dist(a,b);
+        while (open.length) {
+            let i=0;
+            for (let j=1;j<open.length;j++) if (open[j].f<open[i].f) i=j;
+            const {node}=open[i];open[i]=open[open.length-1];open.pop();
+            if (seen[node.i]) continue;
+            seen[node.i]=1;
+            const remaining=dist(node,b);if (remaining<best) {best=remaining;last=node;}
+            if (node===b) break;
+            for (const edge of node.edges) if (!seen[edge.to.i]) {
+                const cost=distances[node.i]+edge.d;
+                if (cost>=distances[edge.to.i]-1e-6) continue;
+                distances[edge.to.i]=cost;parents[edge.to.i]=node.i;
+                open.push({node:edge.to,f:cost+dist(edge.to,b)});
+            }
+        }
+        const path=[];
+        for (let i=last.i;i>=0;i=parents[i]) path.unshift(nodes[i]);
+        if (last===b && free(goal,r) && clear(b,goal,r+2)) path.push(goal);
+        return path;
+    }
+    const turn = (e,a,dt) => {e.angle+=clamp(radDiff(e.angle,a),-.165*dt,.165*dt);};
+    function locomotion(e,dt,roster) {
+        if (!Number.isFinite(e.x+e.y)) Object.assign(e,e.safe);
+        if (Math.hypot(e.kbX||0,e.kbY||0)>1.3) return;
+        // Çekirdeğin geri itmesi siper sınırında biterse, bir piksel dışarı alıp yeniden rota kur.
+        if (!free(e,e.radius)) for (const o of run.solids) {
+            if (o.hp<=0 || dist(o,e)>o.radius+e.radius+2) continue;
+            const p=bound(off(o,dist(o,e)>.25?bearing(o,e):e.angle,o.radius+e.radius+4),e.radius+2);
+            if (free(p,e.radius)) {Object.assign(e,p);e.pathAt=0;break;}
+        }
+        if (run.t>=e.pathAt || e.meshKey!==run.meshKey || !e.pathGoal || dist(e.pathGoal,e.goal)>60) {
+            e.path=getPath(e,e.goal);e.pathAt=run.t+rand(22,35);e.meshKey=run.meshKey;e.pathGoal=e.goal;
+        }
+        while (e.path.length && dist(e,e.path[0])<4) e.path.shift();
+        while (e.path.length>1 && clear(e,e.path[1],e.radius+2)) e.path.shift();
+        if (!e.path.length) return;
+        const speed=e.speed*(e.turboUntil>run.t ? 1.37 : 1)*(e.wind?.kind==='ulti' ? .58 : e.wind ? .80 : 1);
+        const a=bearing(e,e.path[0]),length=Math.min(dist(e,e.path[0]),speed*dt);
+        const step=off(e,a,length);
+        for (const other of roster) if (other!==e && alive(other)) {
+            const d=dist(e,other),m=e.radius+other.radius+8;
+            if (d<.01 || d>=m) continue;
+            const push=Math.min(length*.85,(m-d)*.105);
+            step.x+=(e.x-other.x)/d*push;step.y+=(e.y-other.y)/d*push;
+        }
+        const before=pt(e.x,e.y);
+        for (const p of [bound(step,e.radius),pt(step.x,e.y),pt(e.x,step.y)]) if (free(p,e.radius)) {
+            e.x=p.x;e.y=p.y;e.safe=pt(e.x,e.y);break;
+        }
+        if (dist(before,e)<.12 && length>.22) {
+            e.stuck+=dt;
+            if (e.stuck>19) {e.thinkAt=e.pathAt=0;e.side*=-1;e.stuck=0;}
+        } else e.stuck=0;
     }
 
-    function spawnHeykel(x, y) {
-        heykeller.push({
-            x, y, radius: HEYKEL_RADIUS,
-            hp: HEYKEL_HP, maxHp: HEYKEL_HP,
-            speed: HEYKEL_SPEED, angle: 0,
-            isDead: false, color: '#85c1e9',
-            pasifKayipTimer: 0, lastShot: 0,
-            type: 'heykel'
-        });
-        spawnParticles(x, y, '#85c1e9', 'smoke');
+    // Her yuva aynı bot tipini, çember içinde ve uyarı süresinden sonra geri getirir.
+    function findSpawn(initial,r) {
+        const s=run,roster=fighters(),warnings=s.slots.map(x=>x.warning).filter(Boolean);
+        let best=null,bestScore=-Infinity;
+        const startAngle=rand(0,TAU);
+        for (let i=0;i<72;i++) {
+            const f=i/71;
+            const frac=initial ? .57+f*.33 : .33+f*.58;
+            const p=off(s.center,startAngle+i*2.399963,Math.max(10,s.radius-24)*frac);
+            if (!free(p,r) || outside(p)) continue;
+            let near=Infinity;
+            for (const q of roster) near=Math.min(near,dist(q,p));
+            for (const q of warnings) near=Math.min(near,dist(q,p));
+            const fromPlayer=dist(p,player),safe=inside(p,r+12);
+            const score=Math.min(500,near)+(initial?Math.min(fromPlayer,300)*.16:Math.min(fromPlayer,250)*.10)+(safe?3:0);
+            if (score>bestScore) {best=p;bestScore=score;}
+        }
+        return best;
     }
-
-    function spawnBuzBotu(x, y) {
-        buzBotlari.push({
-            x, y, radius: BUZ_BOT_RADIUS,
-            hp: BUZ_BOT_HP, maxHp: BUZ_BOT_HP,
-            speed: BUZ_BOT_SPEED, angle: 0,
-            isDead: false, color: '#2e86c1',
-            vurusAnimasyon: 0, lastAttack: 0,
-            type: 'buzbotu'
-        });
-        spawnParticles(x, y, '#2e86c1', 'smoke');
+    function spawnBody(slot,p,initial=false) {
+        const profile=TYPES[slot.type],maxHp=Math.round(profile.hp*(easy() ? .88 : 1));
+        const e={x:p.x,y:p.y,radius:bot.radius,color:profile.color,angle:bearing(p,run.center),speed:profile.speed*(easy() ? .85 : 1),
+            maxHp,life:maxHp,isActive:true,isDead:false,_m32:true,slot,type:slot.type,profile,charge:rand(8,30),
+            guardUntil:run.t+(initial?34:SPAWN_GUARD),kbX:0,kbY:0,bombaBulasti:false,bombaSayaci:0,ghostRingDebounce:0,
+            target:null,intel:null,goal:p,pathGoal:null,path:[],meshKey:-1,pathAt:0,thinkAt:run.t+rand(0,8),
+            side:Math.random()<.5?-1:1,stuck:0,safe:pt(p.x,p.y),task:'dolaşıyor',roam:null,roamAt:0,
+            fireAt:run.t+rand(48,111),wind:null,ultiAt:run.t+rand(250,393),revealUntil:0,lastImpact:0,attacker:null,
+            gadgetAt:run.t+rand(285,580),shieldUntil:0,turboUntil:0,healAt:0,killer:null,
+            lastShot:Date.now(),shootInterval:Math.round(profile.fire*1000/FPS)};
+        // Var olan oyuncu mermileri/alan yetenekleri `hp` azaltmaya devam eder.
+        // Botların kendi vuruşlarında saldıran tarafı hurt() açıkça belirtir.
+        Object.defineProperty(e,'hp',{enumerable:true,get(){return this.life;},set(v){
+            if (!Number.isFinite(v)) return;
+            if (active() && v<this.life) hurt(this,this.life-v,player,{silent:true});
+            else this.life=v;
+        }});
+        slot.body=e;slot.warning=null;slot.lives++;return e;
     }
-
-    function spawnBuzSlime(x, y) {
-        slimeBots.push({
-            x: x + (Math.random() - 0.5) * 20,
-            y: y + (Math.random() - 0.5) * 20,
-            radius: 12, hp: 300, maxHp: 300,
-            speed: 2.0, angle: Math.random() * Math.PI * 2,
-            isDead: false, color: '#aed6f1',
-            kbX: 0, kbY: 0, stage: 2,
-            bombaBulasti: false, bombaSayaci: 0,
-            ghostRingDebounce: 0, evolveTimer: 0
-        });
-    }
-
-    function heavyBotHasarAl(b, dmg) {
-        if (b.shield > 0) {
-            let kalan = dmg - b.shield;
-            b.shield -= dmg;
-            if (b.shield < 0) b.shield = 0;
-            if (kalan > 0) b.hp -= kalan;
+    function hurt(target,base,source,opts={}) {
+        if (!alive(target) || source===target || !(base>0)) return false;
+        if (!opts.gas && (target===player ? target.isDashing||target.jumpInvulnerable : guard(target))) return false;
+        let value=base;
+        if (source?._m32) value*=easy() ? .78 : .92;
+        if (!opts.gas && target===player && target.charType==='sam' && target.samRageActive) value*=.6;
+        if (!opts.gas && target._m32 && target.shieldUntil>run.t) value*=.45;
+        if (target===player) {
+            player.hp-=value;player.lastHitTime=Date.now();
+            if (!opts.gas && player.isInvisible) {player.isInvisible=false;player.invisTimer=0;}
         } else {
-            b.hp -= dmg;
+            target.life-=value;
+            if (!opts.gas && source) {
+                target.lastImpact=run.t;target.attacker=source;
+                if (value>=170 && source!==target.target) target.thinkAt=Math.min(target.thinkAt,run.t+6);
+            }
+            if (target.life<=0) target.killer=source;
+        }
+        if (!opts.silent) addFloatingNumber(target.x,target.y,Math.round(value),'#e74c3c');
+        if (opts.basic && source?._m32 && alive(source)) source.charge=Math.min(100,source.charge+Math.min(value,base*1.2)*.052);
+        return true;
+    }
+    function settleDeaths() {
+        const s=run;
+        for (const slot of s.slots) {
+            const e=slot.body;
+            if (!e || e.hp>0) continue;
+            e.isDead=true;slot.body=null;slot.warning=null;slot.due=s.t+RETURN_WAIT+slot.index*5;
+            spawnParticles(e.x,e.y,e.color);
+            if (e.killer===player) {
+                s.kills++;botsKilled=s.kills;
+                if (typeof H.onEnemyKilled==='function') H.onEnemyKilled(e);
+            } else if (e.killer?._m32 && alive(e.killer)) {
+                const other=e.killer;other.charge=Math.min(100,other.charge+16);
+            }
         }
     }
-
-    function triggerRage() {
-        const allBots = [...slimeBots, ...buzBotlari, ...ciritciBotlari].filter(b => b && !b.isDead);
-        allBots.forEach(b => {
-            if (!b._rageActive) {
-                b._rageActive = true;
-                b._rageOrigSpeed = b.speed;
-                b.speed = b._rageOrigSpeed * 3;
+    function respawnTick() {
+        for (const slot of run.slots) if (!slot.body && run.t>=slot.due-RETURN_WARNING) {
+            const warn=slot.warning;
+            if (!warn || !free(warn,bot.radius) || dist(warn,run.center)>run.radius-9) {
+                slot.warning=findSpawn(false,bot.radius);
+                if (slot.warning) slot.due=Math.max(slot.due,run.t+RETURN_WARNING);
+                continue;
             }
-        });
-        rageActive = true; rageTimer = 180;
-        screenShake = 15;
-        rawDamageText(player.x, player.y - 40, "ÖFKE!", "#ff0000");
+            if (run.t<slot.due) continue;
+            if (fighters().some(e=>dist(e,warn)<e.radius+bot.radius+7)) {
+                slot.warning=null;slot.due=run.t+RETURN_WARNING;continue;
+            }
+            spawnBody(slot,warn);
+        }
+    }
+    function gasTick() {
+        const s=run;
+        const progress=clamp((s.t-GAS_WAIT)/(127*FPS),0,1);
+        s.radius=s.startRadius-(s.startRadius-GAS_MIN)*progress;
+        if (s.t<s.gasAt) return;
+        s.gasAt=s.t+GAS_STEP;
+        const damage=(easy()?133:170)+Math.min(120,Math.floor(progress*120));
+        for (const actor of fighters()) if (outside(actor)) hurt(actor,damage,null,{gas:true});
     }
 
-    // ===== MODE =====
-    window.GAME_EXT.registerMode(MOD_ID, {
-        label: 'Ağır Sıkletler',
-        onStart: function () {
-            havanBot = null; havanSpawnTimer = HAVAN_INITIAL; havanShootTimer = 0; havanMuzzleFlash = 0; havanMermiler = [];
-            tirasiBot = null; tirasiSpawnTimer = TIRASI_INITIAL; heykeller = [];
-            cavusBot = null; cavusSpawnTimer = CAVUS_INITIAL; cavusShootTimer = 0;
-            cavusAuraTimer = 0; cavusAuraCooldown = 0; cavusAuraActive = false; cavusAuraTick = 0;
-            ciritciBotlari = [];
-            bogaBot = null; bogaSpawnTimer = BOGA_INITIAL; buzBotlari = [];
-            spawnUyarilar = []; obstacleSnapshot.clear(); botPrevHp.clear();
-            rageActive = false; rageTimer = 0;
-
-            bot.isActive = false; bot.isDead = true; bot.x = -9999; bot.y = -9999;
-            bot2.isActive = false; bot2.isDead = true; bot2.x = -9999; bot2.y = -9999;
-            slimeBots = []; stationaryBots = []; boomerangBots = []; fogBots = [];
-            spawnIndicators = [];
-
-            // 1 slime yuvası başlangıçta
-            nests = [{
-                x: canvas.width / 2, y: canvas.height / 2,
-                radius: 40, color: '#27ae60', isNest: true, speed: 0,
-                hp: 3000, maxHp: 3000, isDead: false, kbX: 0, kbY: 0,
-                alerted: false, lastSpawn: Date.now(), spawnCount: 0,
-                bombaBulasti: false, bombaSayaci: 0
-            }];
-
-            // Buz slime için spawnSlimeBot rengini değiştir
-            if (!window._origSpawnSlime) {
-                window._origSpawnSlime = window.spawnSlimeBot;
-                window.spawnSlimeBot = function (x, y, stage) {
-                    window._origSpawnSlime(x, y, stage);
-                    if (window.GAME_MODE === MOD_ID) {
-                        const s = slimeBots[slimeBots.length - 1];
-                        if (s) s.color = '#aed6f1';
-                    }
-                };
-            }
-        },
-
-        onUpdate: function (ts) {
-            // Base timer'ları sıfırla
-            slimeTimer = 0; stationaryTimer = 0; boomerangTimer = 0; fogBotTimer = 0;
-            spawnIndicators = [];
-            bot.isActive = false; bot.isDead = true;
-            bot2.isActive = false; bot2.isDead = true; bot2.hp = 0; bot2.x = -9999; bot2.y = -9999;
-
-            // Nest limitini 1 tut (base her 10 kill'de 1 ekliyor)
-            lastNestKillCount = botsKilled;
-
-            const safePlayerX = Number.isFinite(player.x) ? player.x : 0;
-            const safePlayerY = Number.isFinite(player.y) ? player.y : 0;
-
-            // ===== ÖFKE TIMER =====
-            if (rageActive) {
-                rageTimer -= ts;
-                if (rageTimer <= 0) {
-                    rageActive = false;
-                    [...slimeBots, ...buzBotlari, ...ciritciBotlari].forEach(b => {
-                        if (b._rageActive) { b.speed = b._rageOrigSpeed; b._rageActive = false; }
-                    });
-                }
-            }
-
-            // ===== SİPER YIKIMI → SLIME =====
-            const currentAll = new Set(obstacles.concat(cactusWalls || []));
-            const toDelete = [];
-            obstacleSnapshot.forEach((info, obs) => {
-                if (!currentAll.has(obs)) {
-                    spawnBuzSlime(info.x, info.y);
-                    spawnBuzSlime(info.x, info.y);
-                    toDelete.push(obs);
-                }
-            });
-            toDelete.forEach(obs => obstacleSnapshot.delete(obs));
-            currentAll.forEach(obs => obstacleSnapshot.set(obs, { x: obs.x, y: obs.y }));
-
-            // ===== ÇAVUŞ HASAR YÖNLENDİRME =====
-            const redirectBots = [...slimeBots, ...buzBotlari, ...ciritciBotlari].filter(b => b && !b.isDead);
-            redirectBots.forEach(b => {
-                if (botPrevHp.has(b)) {
-                    const prev = botPrevHp.get(b);
-                    if (b.hp < prev && cavusBot && !cavusBot.isDead && cavusAuraActive && getDist(b, cavusBot) < CAVUS_AURA_RADIUS) {
-                        let dmg = prev - b.hp;
-                        let transfer = dmg * CAVUS_DMG_REDIRECT;
-                        b.hp += transfer;
-                        heavyBotHasarAl(cavusBot, transfer);
-                    }
-                }
-                botPrevHp.set(b, b.hp);
-            });
-            botPrevHp.forEach((v, k) => { if (!k || k.isDead || !redirectBots.includes(k)) botPrevHp.delete(k); });
-
-            // ===== SPAWN UYARILARI =====
-            for (let i = spawnUyarilar.length - 1; i >= 0; i--) {
-                const u = spawnUyarilar[i];
-                u.timer -= ts;
-                if (u.timer <= 0) {
-                    if (u.type === 'havan' && !havanBot) spawnHavan(u.x, u.y);
-                    else if (u.type === 'tirasi' && !tirasiBot) spawnTirasi(u.x, u.y);
-                    else if (u.type === 'cavus' && !cavusBot) spawnCavus(u.x, u.y);
-                    else if (u.type === 'boga' && !bogaBot) spawnBoga(u.x, u.y);
-                    spawnUyarilar.splice(i, 1);
-                }
-            }
-
-            // ===== HAVAN SPAWN =====
-            if (!havanBot && havanSpawnTimer > 0) {
-                havanSpawnTimer -= ts;
-                if (havanSpawnTimer <= 0) { startSpawnWarning('havan'); havanSpawnTimer = 999999; }
-            }
-            if (!havanBot && havanSpawnTimer === 999999) { /* waiting for warning to complete */ }
-            if (havanBot && havanBot.hp <= 0) {
-                havanBot.isDead = true; spawnParticles(havanBot.x, havanBot.y, havanBot.color, 'smoke');
-                triggerBotKill(havanBot.x, havanBot);
-                havanBot = null; havanSpawnTimer = HAVAN_RESPAWN;
-            }
-
-            // ===== TIRASI SPAWN =====
-            if (!tirasiBot && tirasiSpawnTimer > 0) {
-                tirasiSpawnTimer -= ts;
-                if (tirasiSpawnTimer <= 0) { startSpawnWarning('tirasi'); tirasiSpawnTimer = 999999; }
-            }
-            if (tirasiBot && tirasiBot.hp <= 0) {
-                tirasiBot.isDead = true; spawnParticles(tirasiBot.x, tirasiBot.y, tirasiBot.color, 'smoke');
-                triggerBotKill(tirasiBot.x, tirasiBot);
-                tirasiBot = null; tirasiSpawnTimer = TIRASI_RESPAWN;
-            }
-
-            // ===== ÇAVUŞ SPAWN =====
-            if (!cavusBot && cavusSpawnTimer > 0) {
-                cavusSpawnTimer -= ts;
-                if (cavusSpawnTimer <= 0) { startSpawnWarning('cavus'); cavusSpawnTimer = 999999; }
-            }
-            if (cavusBot && cavusBot.hp <= 0) {
-                cavusBot.isDead = true; spawnParticles(cavusBot.x, cavusBot.y, cavusBot.color, 'smoke');
-                triggerBotKill(cavusBot.x, cavusBot);
-                triggerRage();
-                cavusBot = null; cavusSpawnTimer = CAVUS_RESPAWN;
-            }
-
-            // ===== BOĞA SPAWN =====
-            if (!bogaBot && bogaSpawnTimer > 0) {
-                bogaSpawnTimer -= ts;
-                if (bogaSpawnTimer <= 0) { startSpawnWarning('boga'); bogaSpawnTimer = 999999; }
-            }
-            if (bogaBot && bogaBot.hp <= 0) {
-                bogaBot.isDead = true; spawnParticles(bogaBot.x, bogaBot.y, '#5dade2', 'smoke');
-                triggerBotKill(bogaBot.x, bogaBot);
-                spawnBuzBotu(bogaBot.x, bogaBot.y);
-                addFloatingNumber(bogaBot.x, bogaBot.y - 30, "BUZ BOTU!", "#2e86c1");
-                bogaBot = null; bogaSpawnTimer = BOGA_RESPAWN;
-            }
-
-            // ===== HAVAN UPDATE =====
-            if (havanBot && !havanBot.isDead) {
-                havanShootTimer += ts;
-                if (havanMuzzleFlash > 0) havanMuzzleFlash -= ts;
-                if (havanShootTimer >= HAVAN_SHOOT_INTERVAL && !player.isDead) {
-                    havanShootTimer = 0;
-                    havanMermiler.push({
-                        x: player.x, y: player.y,
-                        startX: havanBot.x, startY: havanBot.y,
-                        flightTimer: HAVAN_MERMI_FLIGHT, maxFlight: HAVAN_MERMI_FLIGHT,
-                        isDead: false
-                    });
-                    havanMuzzleFlash = 15;
-                }
-            }
-
-            // Havan mermileri
-            for (let i = havanMermiler.length - 1; i >= 0; i--) {
-                const m = havanMermiler[i];
-                if (m.isDead) { havanMermiler.splice(i, 1); continue; }
-                m.flightTimer -= ts;
-                if (m.flightTimer <= 0) {
-                    explosions.push({ x: m.x, y: m.y, radius: 5, maxRadius: HAVAN_MERMI_AOE, life: 15, maxLife: 15 });
-                    screenShake = 10;
-                    if (!player.isDead && !player.jumpInvulnerable && getDist(m, player) < HAVAN_MERMI_AOE + player.radius) {
-                        player.hp -= HAVAN_MERMI_HASAR;
-                        rawDamageText(player.x, player.y, HAVAN_MERMI_HASAR, "#e74c3c");
-                        player.lastHitTime = Date.now();
-                    }
-                    for (const o of obstacles) if (getDist(m, o) < HAVAN_MERMI_AOE + o.radius) o.hp -= HAVAN_SIPER_HASAR;
-                    m.isDead = true;
-                }
-            }
-
-            // ===== TIRASI UPDATE =====
-            if (tirasiBot && !tirasiBot.isDead) {
-                const canSee = !player.isDead && !player.isInvisible;
-                if (tirasiBot.insaatSure === -1 && heykeller.length === 0 && canSee) {
-                    tirasiBot.insaatSure = TIRASI_INSAA_SURESI;
-                    tirasiBot.ilkInsa = false;
-                }
-                if (tirasiBot.insaatSure > 0) {
-                    tirasiBot.insaatSure -= ts;
-                    if (Math.random() < 0.2) spawnParticles(tirasiBot.x + (Math.random() - 0.5) * 15, tirasiBot.y + (Math.random() - 0.5) * 15, '#aed6f1', 'smoke');
-                    if (tirasiBot.insaatSure <= 0) {
-                        spawnHeykel(tirasiBot.x, tirasiBot.y);
-                        addFloatingNumber(tirasiBot.x, tirasiBot.y - 40, "HEYKEL!", "#85c1e9");
-                        tirasiBot.insaatSure = -1;
-                    }
-                } else {
-                    if (canSee) {
-                        tirasiBot.angle = Math.atan2(safePlayerY - tirasiBot.y, safePlayerX - tirasiBot.x);
-                        if (getDist(tirasiBot, player) < TIRASI_MENZIL + player.radius) {
-                            if (Date.now() - tirasiBot.lastShot > 1500) {
-                                tirasiBot.lastShot = Date.now();
-                                botBullets.push({
-                                    x: tirasiBot.x, y: tirasiBot.y, sx: tirasiBot.x, sy: tirasiBot.y,
-                                    vx: Math.cos(tirasiBot.angle) * BOT_BULLET_SPEED * 0.8,
-                                    vy: Math.sin(tirasiBot.angle) * BOT_BULLET_SPEED * 0.8,
-                                    dmgMod: 0, type: 'stationary_bot_bullet', owner: tirasiBot,
-                                    _customDmg: TIRASI_HASAR
-                                });
-                            }
-                        }
-                    }
-                }
-                tirasiBot.x = clampPos(tirasiBot.x, tirasiBot.radius + WALL_THICKNESS, canvas.width - tirasiBot.radius - WALL_THICKNESS);
-                tirasiBot.y = clampPos(tirasiBot.y, tirasiBot.radius + WALL_THICKNESS, canvas.height - tirasiBot.radius - WALL_THICKNESS);
-            }
-
-            // ===== HEYKEL UPDATE =====
-            for (let i = heykeller.length - 1; i >= 0; i--) {
-                const h = heykeller[i];
-                if (h.hp <= 0) {
-                    h.isDead = true;
-                    spawnParticles(h.x, h.y, '#85c1e9', 'smoke');
-                    triggerBotKill(h.x, h);
-                    heykeller.splice(i, 1);
-                    continue;
-                }
-                h.pasifKayipTimer += ts;
-                if (h.pasifKayipTimer >= HEYKEL_PASIF_KAYIP_ARALIK) {
-                    h.pasifKayipTimer = 0;
-                    h.hp -= HEYKEL_PASIF_CAN_KAYBI;
-                    addFloatingNumber(h.x, h.y, HEYKEL_PASIF_CAN_KAYBI, "#85c1e9");
-                }
-                const canSee = !player.isDead && !player.isInvisible;
-                if (canSee) {
-                    h.angle = Math.atan2(safePlayerY - h.y, safePlayerX - h.x);
-                    const dP = getDist(h, player);
-                    if (dP > h.radius + player.radius + 5) {
-                        h.x += Math.cos(h.angle) * h.speed * ts;
-                        h.y += Math.sin(h.angle) * h.speed * ts;
-                    } else if (Date.now() - h.lastShot > HEYKEL_SALDIRI_ARALIK && !player.jumpInvulnerable) {
-                        h.lastShot = Date.now();
-                        player.hp -= HEYKEL_SALDIRI_HASAR;
-                        rawDamageText(player.x, player.y, HEYKEL_SALDIRI_HASAR, "#85c1e9");
-                        player.lastHitTime = Date.now();
-                    }
-                }
-                h.x = clampPos(h.x, h.radius + WALL_THICKNESS, canvas.width - h.radius - WALL_THICKNESS);
-                h.y = clampPos(h.y, h.radius + WALL_THICKNESS, canvas.height - h.radius - WALL_THICKNESS);
-                resolveObstacleCollision(h);
-            }
-
-            // ===== ÇAVUŞ UPDATE =====
-            if (cavusBot && !cavusBot.isDead) {
-                if (!player.isDead) {
-                    cavusBot.angle = Math.atan2(safePlayerY - cavusBot.y, safePlayerX - cavusBot.x);
-                    let currentSpeed = cavusAuraActive ? (CAVUS_SPEED * 2) : CAVUS_SPEED;
-                    const dP = getDist(cavusBot, player);
-                    if (dP > CAVUS_STOP_DIST) {
-                        cavusBot.x += Math.cos(cavusBot.angle) * currentSpeed * ts;
-                        cavusBot.y += Math.sin(cavusBot.angle) * currentSpeed * ts;
-                        cavusBot.x = clampPos(cavusBot.x, cavusBot.radius + WALL_THICKNESS, canvas.width - cavusBot.radius - WALL_THICKNESS);
-                        cavusBot.y = clampPos(cavusBot.y, cavusBot.radius + WALL_THICKNESS, canvas.height - cavusBot.radius - WALL_THICKNESS);
-                        resolveObstacleCollision(cavusBot);
-                    }
-                }
-                cavusShootTimer += ts;
-
-                if (cavusAuraActive) {
-                    cavusAuraTimer -= ts; cavusAuraTick += ts;
-                    if (cavusAuraTimer <= 0) {
-                        cavusAuraActive = false; cavusAuraCooldown = CAVUS_AURA_COOLDOWN; cavusBot.shield = 0;
-                    } else if (cavusAuraTick >= 60) {
-                        cavusAuraTick = 0;
-                        cavusBot.hp = Math.min(cavusBot.maxHp, cavusBot.hp + CAVUS_HEAL_PER_TICK);
-                        rawDamageText(cavusBot.x, cavusBot.y - 20, "+" + CAVUS_HEAL_PER_TICK, "#2ecc71");
-                        [...slimeBots, ...buzBotlari, ...ciritciBotlari].forEach(b => {
-                            if (b && !b.isDead && getDist(b, cavusBot) < CAVUS_AURA_RADIUS) {
-                                b.hp = Math.min(b.maxHp, b.hp + CAVUS_HEAL_BOTS);
-                            }
-                        });
-                    }
-                } else {
-                    if (cavusAuraCooldown > 0) cavusAuraCooldown -= ts;
-                    else {
-                        cavusAuraActive = true; cavusAuraTimer = CAVUS_AURA_DURATION;
-                        cavusBot.shield = 500; cavusAuraTick = 0;
-                        rawDamageText(cavusBot.x, cavusBot.y - 30, "KALKAN + AURA!", "#f1c40f");
-                    }
-                }
-
-                const currentInterval = cavusAuraActive ? CAVUS_SHOOT_INTERVAL : (CAVUS_SHOOT_INTERVAL / 2);
-                if (cavusShootTimer >= currentInterval && !player.isDead) {
-                    cavusShootTimer = 0;
-                    botBullets.push({
-                        x: cavusBot.x, y: cavusBot.y, sx: cavusBot.x, sy: cavusBot.y,
-                        vx: Math.cos(cavusBot.angle) * BOT_BULLET_SPEED,
-                        vy: Math.sin(cavusBot.angle) * BOT_BULLET_SPEED,
-                        dmgMod: 1, type: 'stationary_bot_bullet', owner: cavusBot
-                    });
-                }
-            }
-
-            // ===== CİRİTÇİ UPDATE =====
-            for (let i = ciritciBotlari.length - 1; i >= 0; i--) {
-                const c = ciritciBotlari[i];
-                if (c.hp <= 0) {
-                    c.isDead = true; spawnParticles(c.x, c.y, c.color, 'smoke');
-                    triggerBotKill(c.x, c);
-                    ciritciBotlari.splice(i, 1);
-                    continue;
-                }
-                const canSee = !player.isDead && !player.isInvisible;
-                if (canSee) {
-                    c.angle = Math.atan2(safePlayerY - c.y, safePlayerX - c.x);
-                    const dP = getDist(c, player);
-                    if (dP > CIRITCI_SHOOT_RANGE) {
-                        c.x += Math.cos(c.angle) * c.speed * ts;
-                        c.y += Math.sin(c.angle) * c.speed * ts;
-                    } else if (dP < 150) {
-                        c.x -= Math.cos(c.angle) * c.speed * ts;
-                        c.y -= Math.sin(c.angle) * c.speed * ts;
-                    }
-                    if (dP < CIRITCI_SHOOT_RANGE && Date.now() - c.lastShot > CIRITCI_SHOOT_INTERVAL) {
-                        c.lastShot = Date.now();
-                        botBullets.push({
-                            x: c.x, y: c.y, sx: c.x, sy: c.y,
-                            vx: Math.cos(c.angle) * CIRITCI_MERMI_HIZ,
-                            vy: Math.sin(c.angle) * CIRITCI_MERMI_HIZ,
-                            dmgMod: 0, type: 'stationary_bot_bullet', owner: c,
-                            _customDmg: CIRITCI_DAMAGE
-                        });
-                    }
-                }
-                c.x = clampPos(c.x, c.radius + WALL_THICKNESS, canvas.width - c.radius - WALL_THICKNESS);
-                c.y = clampPos(c.y, c.radius + WALL_THICKNESS, canvas.height - c.radius - WALL_THICKNESS);
-                resolveObstacleCollision(c);
-            }
-
-            // ===== BOĞA UPDATE =====
-            if (bogaBot && !bogaBot.isDead) {
-                const canSee = !player.isDead && !player.isInvisible;
-                if (bogaBot.durum === 'takip') {
-                    if (canSee) {
-                        bogaBot.angle = Math.atan2(safePlayerY - bogaBot.y, safePlayerX - bogaBot.x);
-                        const dP = getDist(bogaBot, player);
-                        if (dP > 60) {
-                            bogaBot.x += Math.cos(bogaBot.angle) * bogaBot.speed * ts;
-                            bogaBot.y += Math.sin(bogaBot.angle) * bogaBot.speed * ts;
-                        }
-                    }
-                    bogaBot.beklemeSure -= ts;
-                    if (bogaBot.beklemeSure <= 0) {
-                        bogaBot.durum = 'sarj';
-                        bogaBot.sarjSure = BOGA_SARJ_SURE;
-                    }
-                } else if (bogaBot.durum === 'sarj') {
-                    bogaBot.sarjSure -= ts;
-                    if (canSee) bogaBot.angle = Math.atan2(safePlayerY - bogaBot.y, safePlayerX - bogaBot.x);
-                    if (Math.random() < 0.3) spawnParticles(bogaBot.x + (Math.random() - 0.5) * 20, bogaBot.y + (Math.random() - 0.5) * 20, '#5dade2', 'smoke');
-                    if (bogaBot.sarjSure <= 0) {
-                        bogaBot.durum = 'ofke';
-                        bogaBot.ofkeSure = BOGA_OFKE_SURE;
-                        bogaBot.ofkeAci = canSee ? Math.atan2(safePlayerY - bogaBot.y, safePlayerX - bogaBot.x) : bogaBot.angle;
-                    }
-                } else if (bogaBot.durum === 'ofke') {
-                    bogaBot.ofkeSure -= ts;
-                    bogaBot.x += Math.cos(bogaBot.ofkeAci) * BOGA_KOSMA_HIZ * ts;
-                    bogaBot.y += Math.sin(bogaBot.ofkeAci) * BOGA_KOSMA_HIZ * ts;
-                    bogaBot.angle = bogaBot.ofkeAci;
-
-                    // Siper yık
-                    for (let j = obstacles.length - 1; j >= 0; j--) {
-                        const o = obstacles[j];
-                        if (getDist(bogaBot, o) < bogaBot.radius + o.radius) {
-                            o.hp = 0;
-                            addFloatingNumber(o.x, o.y, "SİPER YIKILDI!", "#e74c3c");
-                        }
-                    }
-
-                    if (bogaBot.x < WALL_THICKNESS + bogaBot.radius || bogaBot.x > canvas.width - WALL_THICKNESS - bogaBot.radius ||
-                        bogaBot.y < WALL_THICKNESS + bogaBot.radius || bogaBot.y > canvas.height - WALL_THICKNESS - bogaBot.radius) {
-                        bogaBot.x = clampPos(bogaBot.x, bogaBot.radius + WALL_THICKNESS, canvas.width - bogaBot.radius - WALL_THICKNESS);
-                        bogaBot.y = clampPos(bogaBot.y, bogaBot.radius + WALL_THICKNESS, canvas.height - bogaBot.radius - WALL_THICKNESS);
-                        bogaBot.durum = 'sersemleme';
-                        bogaBot.sersemleSure = BOGA_SERSEMLE_SURE;
-                        bogaBot.speed = BOGA_NORMAL_HIZ;
-                    }
-
-                    if (!player.isDead && !player.jumpInvulnerable && getDist(bogaBot, player) < bogaBot.radius + player.radius) {
-                        const simdi = Date.now();
-                        if (simdi - bogaBot.sonVurusZamani >= 3000) {
-                            bogaBot.sonVurusZamani = simdi;
-                            player.hp -= BOGA_TEMAS_HASAR;
-                            rawDamageText(player.x, player.y, BOGA_TEMAS_HASAR, "#e74c3c");
-                            player.lastHitTime = Date.now();
-                        }
-                        const itmeAci = getAngle(bogaBot, player);
-                        player.x += Math.cos(itmeAci) * BOGA_ITME_MESAFE;
-                        player.y += Math.sin(itmeAci) * BOGA_ITME_MESAFE;
-                        player.x = clampPos(player.x, player.radius + WALL_THICKNESS, canvas.width - player.radius - WALL_THICKNESS);
-                        player.y = clampPos(player.y, player.radius + WALL_THICKNESS, canvas.height - player.radius - WALL_THICKNESS);
-                    }
-
-                    if (bogaBot.ofkeSure <= 0) {
-                        bogaBot.durum = 'sersemleme';
-                        bogaBot.sersemleSure = Math.floor(BOGA_SERSEMLE_SURE / 2);
-                        bogaBot.speed = BOGA_NORMAL_HIZ;
-                    }
-                } else if (bogaBot.durum === 'sersemleme') {
-                    bogaBot.sersemleSure -= ts;
-                    if (bogaBot.sersemleSure <= 0) {
-                        bogaBot.durum = 'takip';
-                        bogaBot.beklemeSure = BOGA_BEKLEME_SURE;
-                    }
-                }
-                bogaBot.x = clampPos(bogaBot.x, bogaBot.radius + WALL_THICKNESS, canvas.width - bogaBot.radius - WALL_THICKNESS);
-                bogaBot.y = clampPos(bogaBot.y, bogaBot.radius + WALL_THICKNESS, canvas.height - bogaBot.radius - WALL_THICKNESS);
-                resolveObstacleCollision(bogaBot);
-            }
-
-            // ===== BUZ BOTU UPDATE =====
-            for (let i = buzBotlari.length - 1; i >= 0; i--) {
-                const b = buzBotlari[i];
-                if (b.hp <= 0) {
-                    b.isDead = true;
-                    if (!player.isDead && getDist(b, player) < BUZ_BOT_PATLAMA_YARICAP + player.radius) {
-                        player.hp -= BUZ_BOT_PATLAMA_HASAR;
-                        rawDamageText(player.x, player.y, BUZ_BOT_PATLAMA_HASAR, "#e74c3c");
-                        player.lastHitTime = Date.now();
-                    }
-                    spawnParticles(b.x, b.y, '#aed6f1', 'normal');
-                    triggerBotKill(b.x, b);
-                    buzBotlari.splice(i, 1);
-                    continue;
-                }
-                if (b.vurusAnimasyon > 0) b.vurusAnimasyon -= ts;
-                const canSee = !player.isDead && !player.isInvisible;
-                if (canSee) {
-                    b.angle = Math.atan2(safePlayerY - b.y, safePlayerX - b.x);
-                    const dP = getDist(b, player);
-                    if (dP > b.radius + player.radius + 5) {
-                        b.x += Math.cos(b.angle) * b.speed * ts;
-                        b.y += Math.sin(b.angle) * b.speed * ts;
-                    } else {
-                        const simdi = Date.now();
-                        if (simdi - b.lastAttack >= BUZ_BOT_SALDIRI_ARALIK && !player.jumpInvulnerable) {
-                            b.lastAttack = simdi;
-                            player.hp -= BUZ_BOT_TEMAS_HASAR;
-                            rawDamageText(player.x, player.y, BUZ_BOT_TEMAS_HASAR, "#e74c3c");
-                            player.lastHitTime = Date.now();
-                            const itmeAci = getAngle(b, player);
-                            player.x += Math.cos(itmeAci) * BUZ_BOT_ITME_MESAFE;
-                            player.y += Math.sin(itmeAci) * BUZ_BOT_ITME_MESAFE;
-                            player.x = clampPos(player.x, player.radius + WALL_THICKNESS, canvas.width - player.radius - WALL_THICKNESS);
-                            player.y = clampPos(player.y, player.radius + WALL_THICKNESS, canvas.height - player.radius - WALL_THICKNESS);
-                            b.vurusAnimasyon = 12;
-                        }
-                    }
-                }
-                b.x = clampPos(b.x, b.radius + WALL_THICKNESS, canvas.width - b.radius - WALL_THICKNESS);
-                b.y = clampPos(b.y, b.radius + WALL_THICKNESS, canvas.height - b.radius - WALL_THICKNESS);
-                resolveObstacleCollision(b);
-            }
-        },
-
-        onReset: function () {
-            havanBot = null; tirasiBot = null; cavusBot = null; bogaBot = null;
-            heykeller = []; ciritciBotlari = []; buzBotlari = []; havanMermiler = [];
-            havanSpawnTimer = HAVAN_INITIAL; tirasiSpawnTimer = TIRASI_INITIAL;
-            cavusSpawnTimer = CAVUS_INITIAL; bogaSpawnTimer = BOGA_INITIAL;
-            cavusAuraActive = false; cavusAuraTick = 0; cavusAuraTimer = 0;
-            spawnUyarilar = []; obstacleSnapshot.clear(); botPrevHp.clear();
-            rageActive = false; rageTimer = 0;
-            bot.isActive = true; bot.isDead = false; bot.hp = bot.maxHp;
-            bot.x = canvas.width - 150; bot.y = 300; bot.kbX = bot.kbY = 0;
-            bot2.isActive = false; bot2.isDead = true; bot2.hp = bot2.maxHp;
-            bot2.respawnTimer = -9999;
-            botsKilled = 0;
+    // FFA algısı: oyuncuya öncelik veya takım yok. Önce görülen rakipleri değerlendir.
+    function grassAt(p) {
+        return run.grass.find(r=>p.x>=r.x&&p.x<=r.x+r.w&&p.y>=r.y&&p.y<=r.y+r.h) || null;
+    }
+    function visible(e,target) {
+        if (!alive(target) || e===target || guard(target)) return false;
+        const d=dist(e,target);
+        if (d>e.profile.vision || (d>113 && Math.abs(radDiff(e.angle,bearing(e,target)))>1.89)) return false;
+        if (target===player && target.isInvisible && d>65) return false;
+        const inGrass=grassAt(target);
+        const revealed=target===player ? Date.now()-player.lastShotTime<620 : target.revealUntil>run.t;
+        if (inGrass && !revealed && d>95 && grassAt(e)!==inGrass) return false;
+        return clear(e,target,1);
+    }
+    function observed(e,target) {
+        const old=e.intel,steps=old ? run.t-old.t : 0;
+        const same=old?.who===target && steps>0 && steps<43;
+        const ax=same?clamp((target.x-old.x)/steps,-4.8,4.8):0;
+        const ay=same?clamp((target.y-old.y)/steps,-4.8,4.8):0;
+        e.intel={x:target.x,y:target.y,vx:same?old.vx*.38+ax*.62:0,vy:same?old.vy*.38+ay*.62:0,t:run.t,who:target};
+    }
+    function pickTarget(e,roster) {
+        let target=null,best=Infinity;
+        for (const other of roster) {
+            if (!visible(e,other)) continue;
+            const d=dist(e,other),weak=1-other.hp/other.maxHp;
+            let score=d+(d>e.profile.range+45?24:0)-weak*68;
+            if (other===e.target) score-=32;
+            if (other===e.attacker && run.t-e.lastImpact<120) score-=49;
+            if (!outside(e) && dist(other,run.center)>run.radius+90) score+=45;
+            if (score<best) {best=score;target=other;}
         }
+        e.target=target;
+        if (target) observed(e,target);
+        return target;
+    }
+    function immediateDanger(e) {
+        let best=null,closest=Infinity;
+        for (const mine of run.mines) if (mine.owner!==e && run.t>=mine.arm && dist(e,mine)<mine.radius+10) {
+            const d=dist(e,mine);if(d<closest){closest=d;best=mine;}
+        }
+        for (const b of botBullets) if (b._m32 && b.owner!==e && b.lob && b.duration-b.age<28) {
+            const d=dist(e,b.lob);
+            if (d<b.blast+16 && d<closest) {closest=d;best=b.lob;}
+        }
+        return best;
+    }
+    function inward(e) {
+        const s=run,angle=bearing(s.center,e),r=Math.min(s.radius*.71,s.radius-52);
+        for (const d of [0,.36,-.36,.72,-.72,1.13,-1.13]) {
+            const p=off(s.center,angle+d,r);
+            if (free(p,e.radius)) return p;
+        }
+        return s.center;
+    }
+    function fightSpot(e,t) {
+        const distance=dist(t,e), angle=bearing(t,e), ideal=e.profile.ideal;
+        // Uzun menzil mesafeyi korur, yakın tipler yan açıdan arayı kapatır.
+        const strafe=distance>ideal+125 ? .27 : .52;
+        const r=distance>ideal+130?Math.max(ideal,distance-165):ideal;
+        const low=e.hp<e.maxHp*.34;
+        let best=null,score=-Infinity;
+        for (const step of [strafe,1.1,-strafe,-1.06,.12]) {
+            const p=bound(off(t,angle+step*e.side,r),e.radius+2);
+            if (!free(p,e.radius)) continue;
+            const cover=clear(p,t,5),walk=clear(e,p,e.radius+2);
+            const hasCover=run.solids.some(o=>dist(o,p)-o.radius-e.radius<43);
+            let q=-(dist(e,p)*.16) -(Math.abs(dist(p,t)-ideal)*.17) + (walk?26:0) + (step>0?14:0);
+            q+=cover ? (low?17:52) : (low?21:0);
+            if (hasCover) q+=12;
+            if (outside(p)) q-=100;
+            if (q>score) {score=q;best=p;}
+        }
+        return best || (distance>ideal ? off(t,angle,ideal) : off(e,angle,65));
+    }
+    function roamPoint(e) {
+        const s=run;
+        let p=null;
+        for (let i=0;i<12;i++) {
+            const candidate=off(s.center,rand(0,TAU),rand(.20,.78)*s.radius);
+            if (free(candidate,e.radius) && dist(candidate,e)>78) {p=candidate;break;}
+        }
+        return p || s.center;
+    }
+    function think(e,roster) {
+        const s=run,t=pickTarget(e,roster);
+        e.thinkAt=s.t+rand(13,20);
+        if (dist(e,s.center)>s.radius-11) {
+            e.task='gazdan kaçıyor';e.goal=inward(e);return;
+        }
+        const hazard=immediateDanger(e);
+        if (hazard) {
+            const a=dist(e,hazard)>1 ? bearing(hazard,e) : e.angle+1.3;
+            for (const turn of [0,.55,-.55,1.1,-1.1]) {
+                const q=bound(off(e,a+turn,115),e.radius+1);
+                if (free(q,e.radius) && !outside(q)) {e.task='patlamadan kaçıyor';e.goal=q;e.pathAt=0;return;}
+            }
+        }
+        if (t) {e.task='yan açı';e.goal=fightSpot(e,t);return;}
+        if (e.intel && s.t-e.intel.t<150 && alive(e.intel.who) && !outside(e.intel)) {
+            const m=e.intel,d0=dist(e,m);
+            e.task='iz arıyor';
+            e.goal=d0>92 ? m : bound(off(m,bearing(m,e)+.83*e.side,97),e.radius+2);
+            return;
+        }
+        if (!e.roam || s.t>=e.roamAt || dist(e,e.roam)<26 || outside(e.roam)) {
+            e.roam=roamPoint(e);e.roamAt=s.t+rand(105,216);e.side*=-1;
+        }
+        e.task='dolaşıyor';e.goal=e.roam;
+    }
+
+    // Dört sınıf, dört farklı atış davranışı. Aksesuarlar koşula, ultiler gerçek isabet şarjına bağlı.
+    function announce(e,name,ulti=false) {addFloatingNumber(e.x,e.y-e.radius-13,name,ulti?GOLD:'#b6f2ed');}
+    function gadget(e,t) {
+        const s=run;
+        if (s.t<e.gadgetAt || guard(e)) return;
+        const distance=t?dist(e,t):Infinity,ratio=e.hp/e.maxHp;
+        let used=false;
+        if (e.type==='keskin' && t && ratio<.67 && distance<350) {e.shieldUntil=s.t+112;used=true;}
+        if (e.type==='baskinci' && t && distance>=120 && distance<300 && !e.wind) {
+            e.turboUntil=s.t+105;e.fireAt=Math.min(e.fireAt,s.t+22);used=true;
+        }
+        if (e.type==='muhafiz' && ratio<.55 && (t || s.t-e.lastImpact<114)) {e.healAt=s.t+31;used=true;}
+        if (e.type==='bombaci' && t && distance<160 && s.mines.length<12) {
+            const p=off(e,bearing(e,t),29);
+            const q=free(p,7)?p:e;
+            s.mines.push({x:q.x,y:q.y,radius:62,owner:e,arm:s.t+44,expire:s.t+6*FPS});used=true;
+        }
+        if (used) {e.gadgetAt=s.t+rand(650,920);announce(e,e.profile.gadget);}
+    }
+    function rangedLine(e,p) {return clear(e,p,4);}
+    function suitable(e,t,ultimate) {
+        const d=dist(e,t);
+        if (e.type==='muhafiz') return d<=(ultimate?139:e.profile.range+t.radius*.55) && clear(e,t,2);
+        if (e.type==='baskinci' && ultimate && d>184) return false;
+        return d<=e.profile.range && (e.type==='bombaci' || rangedLine(e,t));
+    }
+    function pushAway(target,center,strength) {
+        const a=bearing(center,target),v=target===player ? run.drag : (target.slide||(target.slide=pt(0,0)));
+        v.x+=Math.cos(a)*strength;v.y+=Math.sin(a)*strength;
+    }
+    function applyPush(p,v,dt) {
+        if (!v || Math.hypot(v.x,v.y)<.18) return false;
+        const q=bound(pt(p.x+v.x*dt,p.y+v.y*dt),p.radius);
+        if (free(q,p.radius)) {p.x=q.x;p.y=q.y;}
+        else {v.x*=.32;v.y*=.32;}
+        const damp=Math.pow(.78,dt);v.x*=damp;v.y*=damp;
+        return true;
+    }
+    function ringAt(p,r,c) {run.rings.push({x:p.x,y:p.y,r,c,until:run.t+22});}
+    function area(p,r,amount,owner,{basic=false,blocked=false,push=0}={}) {
+        for (const t of fighters()) if (t!==owner && dist(t,p)<r+t.radius*.65 && (!blocked || clear(p,t,2))) {
+            if (hurt(t,amount,owner,{basic}) && push) pushAway(t,p,push);
+        }
+        for (const o of run.solids) if (o.hp>0 && dist(o,p)<r+o.radius*.65) {
+            o.hp-=amount*.25;
+        }
+        ringAt(p,r,owner?.color||GOLD);
+    }
+    function pew(owner,a,damage,range,basic,speed=9) {
+        const p=off(owner,a,owner.radius*.66);
+        botBullets.push({_m32:true,type:'m32Shot',x:p.x,y:p.y,sx:owner.x,sy:owner.y,vx:Math.cos(a)*speed,vy:Math.sin(a)*speed,
+            owner,damage,dmgMod:1,remain:range,basic,rad:6});
+    }
+    function fan(e,target,amount,range,basic,wide=.185) {
+        const a=bearing(e,target)+rand(-1,1)*(easy() ? .086 : .044);
+        for (const offset of [-wide,0,wide]) pew(e,a+offset,amount,range,basic,9.8);
+    }
+    function toss(e,target,damage,r,duration,basic) {
+        const p=bound(target,15),a=bearing(e,p);
+        botBullets.push({_m32:true,type:'m32Lob',x:e.x,y:e.y,sx:e.x,sy:e.y,vx:Math.cos(a),vy:Math.sin(a),
+            owner:e,damage,basic,dmgMod:1,lob:p,blast:r,duration,age:0});
+    }
+    function slash(e,target,damage,basic) {
+        const a=bearing(e,target),r=e.profile.range;
+        for (const t of fighters()) if (t!==e && dist(e,t)<=r+t.radius*.7 && Math.abs(radDiff(a,bearing(e,t)))<=.67 && clear(e,t,1)) {
+            hurt(t,damage,e,{basic});
+        }
+        for (const o of run.solids) if (o.hp>0 && dist(e,o)<=r+o.radius && Math.abs(radDiff(a,bearing(e,o)))<=.67 && clear(e,o,1,o)) {
+            o.hp-=damage*.24;
+        }
+        ringAt(off(e,a,r*.57),r*.46,e.color);
+    }
+    function fireBot(e,intent) {
+        if (!alive(e) || guard(e)) return;
+        const s=run,t=intent.point,a=bearing(e,t),ulti=intent.kind==='ulti';
+        const k=e.type,p=e.profile;
+        if (!ulti && k!=='bombaci' && k!=='muhafiz' && !rangedLine(e,t)) return;
+        e.revealUntil=s.t+50;e.lastShot=Date.now();
+        if (k==='keskin') {
+            if (ulti) for (const i of [-1,0,1]) pew(e,a+i*.135,522,p.range+18,false,11.9);
+            else pew(e,a+rand(-1,1)*(easy() ? .092 : .055),p.damage,p.range,true,11.0);
+        } else if (k==='baskinci') {
+            if (ulti) {
+                fan(e,t,290,p.range+28,false,.19);
+                s.queued.push({at:s.t+22,owner:e,point:t});
+            } else fan(e,t,p.damage,p.range,true);
+        } else if (k==='muhafiz') {
+            if (ulti) area(e,139,1060,e,{blocked:true,push:12});
+            else slash(e,t,p.damage,true);
+        } else if (ulti) {
+            for (const i of [-1,0,1]) toss(e,off(t,a+Math.PI/2,i*71),660,63,32+(i+1)*9,false);
+        } else toss(e,t,p.damage,62,clamp(26+dist(e,t)*.038,27,45),true);
+    }
+    function combat(e,dt) {
+        const s=run,p=e.profile,t=e.target;
+        if (e.healAt && s.t>=e.healAt) {
+            const amount=Math.min(e.maxHp-e.hp,690);
+            e.hp+=amount;e.healAt=0;
+            if (amount>0) addFloatingNumber(e.x,e.y,'+'+Math.round(amount),'#e74c3c');
+        }
+        if (guard(e)) return;
+        const seen=visible(e,t);
+        if (seen) gadget(e,t);
+        else if (e.type==='muhafiz') gadget(e,null);
+        if (e.wind) {
+            turn(e,bearing(e,e.wind.point),dt);
+            if ((e.wind.left-=dt)>0) return;
+            const intent=e.wind;
+            e.wind=null;e.fireAt=s.t+p.fire*(easy()?1.15:1)+rand(0,15);
+            fireBot(e,intent);return;
+        }
+        if (e.fireAt>s.t || dist(e,run.center)>run.radius+48) return;
+        if (seen) {
+            const ulti=e.charge>=100 && s.t>=e.ultiAt && suitable(e,t,true);
+            if (!ulti && !suitable(e,t,false)) return;
+            const memory=e.intel?.who===t ? e.intel : null;
+            const lead=e.type==='muhafiz'?4:e.type==='bombaci'?31:clamp(dist(e,t)/11*.53,4,18);
+            const a=pt(t.x+(memory?.vx||0)*lead,t.y+(memory?.vy||0)*lead);
+            const aim=bound(e.type==='bombaci'||e.type==='muhafiz'||rangedLine(e,a)?a:t,9);
+            e.wind={left:ulti?29:p.wind,total:ulti?29:p.wind,kind:ulti?'ulti':'normal',point:aim};
+            if (ulti) {e.charge=0;e.ultiAt=s.t+ULT_GAP;announce(e,p.ulti,true);}
+        } else if (e.type==='bombaci' && e.intel && s.t-e.intel.t<39 && alive(e.intel.who) && dist(e,e.intel)<p.range) {
+            e.wind={left:p.wind,total:p.wind,kind:'normal',point:pt(e.intel.x,e.intel.y)};
+        }
+    }
+    function ticksOfBots(dt) {
+        const roster=fighters();
+        for (const e of roster) if (e!==player && alive(e)) {
+            if (run.t>=e.thinkAt) think(e,roster);
+            if (!applyPush(e,e.slide,dt)) locomotion(e,dt,roster);
+            if (!e.wind) {
+                const v=visible(e,e.target) ? e.target : e.path[0];
+                if (v && dist(e,v)>2) turn(e,bearing(e,v),dt);
+                else turn(e,e.angle+e.side*.065,dt);
+            }
+            combat(e,dt);
+        }
+    }
+    function eventTick() {
+        const s=run;
+        for (let i=s.queued.length-1;i>=0;i--) {
+            const q=s.queued[i];if(q.at>s.t)continue;s.queued.splice(i,1);
+            if (alive(q.owner) && rangedLine(q.owner,q.point)) fan(q.owner,q.point,290,q.owner.profile.range+28,false,.18);
+        }
+        for (let i=s.mines.length-1;i>=0;i--) {
+            const m=s.mines[i];
+            if (m.expire<=s.t) {s.mines.splice(i,1);continue;}
+            if (m.arm>s.t) continue;
+            if (fighters().some(t=>t!==m.owner && !guard(t) && dist(t,m)<31+t.radius && clear(m,t,2))) {
+                area(m,m.radius,600,m.owner,{blocked:true,push:5});s.mines.splice(i,1);
+            }
+        }
+        s.rings=s.rings.filter(r=>r.until>s.t);
+    }
+
+    // Atışlar mevcut aksesuarların erişebilmesi için çekirdeğin listesinde görünür,
+    // ama çarpışmaları burada çözülür: ilk temas geçerli, atış sahibine vurmaz.
+    function projectileStep(b,dt) {
+        // Ninja’nın zaman alanı, Hesaplaşma atışlarını da yavaşlatır.
+        const inZone=player.charType==='ninja' && player.ninjaZoneActive &&
+            Math.hypot(b.x-player.ninjaZoneX,b.y-player.ninjaZoneY)<player.ninjaZoneRadius;
+        return inZone ? dt*.35 : dt;
+    }
+    function projectiles(dt) {
+        // Sadece moda ait olanları tüket; mod dışındaki atışları değiştirme.
+        const s=run,roster=fighters();
+        for (let i=botBullets.length-1;i>=0;i--) {
+            const b=botBullets[i];if (!b._m32) continue;
+            const step=projectileStep(b,dt);
+            if (b.lob) {
+                b.age+=step;
+                const f=clamp(b.age/b.duration,0,1);
+                b.x=b.sx+(b.lob.x-b.sx)*f;b.y=b.sy+(b.lob.y-b.sy)*f;
+                if (f<1) continue;
+                area(b.lob,b.blast,b.damage,b.owner,{basic:b.basic});
+                botBullets.splice(i,1);continue;
+            }
+            const a=pt(b.x,b.y),q=pt(b.x+b.vx*step,b.y+b.vy*step);
+            let hit=null,at=1.00001;
+            for (const o of s.solids) if (o.hp>0) {
+                const d=impact(a,q,o,o.radius+b.rad);
+                if (d<at) {hit=o;at=d;}
+            }
+            for (const target of roster) if (target!==b.owner && alive(target) && (target===player ? !target.isDashing&&!target.jumpInvulnerable : !guard(target))) {
+                const d=impact(a,q,target,target.radius+b.rad);
+                if (d<at) {hit=target;at=d;}
+            }
+            if (hit) {
+                b.x=a.x+(q.x-a.x)*at;b.y=a.y+(q.y-a.y)*at;
+                if (hit===player || hit._m32) hurt(hit,b.damage,b.owner,{basic:b.basic});
+                else hit.hp-=b.damage*.29;
+                botBullets.splice(i,1);continue;
+            }
+            b.x=q.x;b.y=q.y;b.remain-=dist(a,q);
+            if (b.remain<=0 || !inside(b,-5)) botBullets.splice(i,1);
+        }
+    }
+    function renderOwnedBullet(b) {
+        ctx.save();
+        if (b.lob) {
+            const f=clamp(b.age/b.duration,0,1), z=Math.sin(Math.PI*f)*57;
+            ctx.fillStyle='#24192249';ctx.beginPath();ctx.ellipse(b.x,b.y+5,7+z*.026,4,0,0,TAU);ctx.fill();
+            ctx.fillStyle=b.owner.color;ctx.strokeStyle='#291c26';ctx.lineWidth=2;
+            ctx.beginPath();ctx.arc(b.x,b.y-z,8,0,TAU);ctx.fill();ctx.stroke();
+            ctx.fillStyle='#fff0a6';ctx.beginPath();ctx.arc(b.x-2,b.y-z-3,2.5,0,TAU);ctx.fill();
+        } else {
+            const len=Math.hypot(b.vx,b.vy)||1;
+            ctx.translate(b.x,b.y);ctx.rotate(Math.atan2(b.vy,b.vx));
+            ctx.globalAlpha=.58;ctx.fillStyle=b.owner.color;ctx.fillRect(-len*1.5,-2,len*1.4,4);
+            ctx.globalAlpha=1;ctx.fillStyle='#fff2cf';ctx.strokeStyle=b.owner.color;ctx.lineWidth=3;
+            ctx.beginPath();ctx.ellipse(0,0,8,4.7,0,0,TAU);ctx.fill();ctx.stroke();
+        }
+        ctx.restore();
+    }
+
+    // Kamera canvası takip ettirir; arayüz ve joystick'ler ekran konumunda kalır.
+    function clearControls() {
+        if (typeof clearArenaInputs==='function') {clearArenaInputs();return;}
+        for (const input of [moveData,aimData,ultAim,gadAim,gadAim2]) {
+            input.active=input.isMouse=false;input.pull=0;
+            if ('keyboard' in input) input.keyboard=false;
+            if ('touchId' in input) input.touchId=null;
+            if ('x' in input) input.x=input.y=0;
+        }
+        for (const id of ['left-knob','right-knob']) {const k=$(id);if (k) k.style.transform='';}
+        for (const key of Object.keys(keysPressed)) delete keysPressed[key];
+    }
+    function follow(dt,snap=false) {
+        const s=run,v=s.view;
+        v.w=innerWidth;v.h=innerHeight;
+        let dx=0,dy=0;
+        if (!snap && s.lead) {
+            if (aimData.active && Math.hypot(aimData.x,aimData.y)>.16) {
+                dx=Math.cos(aimData.angle)*65;dy=Math.sin(aimData.angle)*65;
+            } else if (s.mouse) {
+                dx=clamp((s.mouse.x+v.x-player.x)*.18,-49,49);
+                dy=clamp((s.mouse.y+v.y-player.y)*.18,-49,49);
+            }
+        }
+        const targetX=clamp(player.x+dx-v.w*.5,0,Math.max(0,s.w-v.w));
+        const targetY=clamp(player.y+dy-v.h*.46,0,Math.max(0,s.h-v.h));
+        const k=snap||!s.lead ? 1 : 1-Math.exp(-dt/7);
+        v.x+=(targetX-v.x)*k;v.y+=(targetY-v.y)*k;
+        canvas.style.setProperty('--m32-x',(v.w>s.w?(v.w-s.w)/2:-v.x)+'px');
+        canvas.style.setProperty('--m32-y',(v.h>s.h?(v.h-s.h)/2:-v.y)+'px');
+        correctMouse();
+    }
+    function worldFromScreen(x,y) {
+        const v=run.view;
+        return pt(x+v.x-Math.max(0,(v.w-run.w)/2),y+v.y-Math.max(0,(v.h-run.h)/2));
+    }
+    function correctMouse() {
+        if (!run.mouse) {
+            const q=off(player,player.angle,RANGE*.65);
+            lastMouseX=q.x;lastMouseY=q.y;
+            return;
+        }
+        const q=worldFromScreen(run.mouse.x,run.mouse.y),a=bearing(player,q),d=dist(player,q);
+        lastMouseX=q.x;lastMouseY=q.y;
+        for (const [data,scale] of [[ultAim,1.1],[gadAim,.8],[gadAim2,.65]]) if (data.active && data.isMouse) {
+            data.angle=a;data.pull=Math.min(1,d/(RANGE*scale));
+        }
+        if (!aimData.active && !player.isJumping && !player.isDashing) player.angle=a;
+    }
+    canvas.addEventListener('mousemove',e=>{
+        if (active() && run.phase==='play') {run.mouse=pt(e.clientX,e.clientY);correctMouse();}
     });
-
-    // ===== HOOKS =====
-    window.GAME_EXT.chainHook('getExtraEnemies', function () {
-        if (window.GAME_MODE !== MOD_ID) return undefined;
-        const liste = [];
-        if (havanBot && !havanBot.isDead) liste.push(havanBot);
-        if (tirasiBot && !tirasiBot.isDead) liste.push(tirasiBot);
-        heykeller.forEach(h => { if (!h.isDead) liste.push(h); });
-        if (cavusBot && !cavusBot.isDead) liste.push(cavusBot);
-        ciritciBotlari.forEach(c => { if (!c.isDead) liste.push(c); });
-        if (bogaBot && !bogaBot.isDead) liste.push(bogaBot);
-        buzBotlari.forEach(b => { if (!b.isDead) liste.push(b); });
-        return liste;
+    canvas.addEventListener('click',e=>{
+        if (!active()) return;
+        e.stopImmediatePropagation();
+        if (run.phase!=='play' || player.isDead || !gameStarted) return;
+        const primed=player.charType==='spike' && player.ultiHazirlik;
+        if ((!primed && player.ammo<1) || Date.now()-player.lastShotTime<=200) return;
+        const q=worldFromScreen(e.clientX,e.clientY);
+        const pull=Math.min(1,dist(player,q)/(RANGE*(primed ? .9 : 1)));
+        player.fire(bearing(player,q),pull,{input:'canvas',...q,touch:e.pointerType==='touch'||!!e.sourceCapabilities?.firesTouchEvents});
+    },true);
+    window.addEventListener('resize',()=>{
+        if (active() && run.phase!=='start') {sizeWorld();follow(0,true);}
     });
-
-    window.GAME_EXT.chainHook('onDraw', function (ctx2) {
-        if (window.GAME_MODE !== MOD_ID || !gameStarted) return;
-
-        // Spawn uyarıları
-        spawnUyarilar.forEach(u => {
-            ctx2.save(); ctx2.translate(u.x, u.y);
-            ctx2.globalAlpha = 0.6 + Math.abs(Math.sin(Date.now() / 150)) * 0.4;
-            const colMap = { havan: '#7f1d1d', tirasi: '#8e44ad', cavus: '#b8860b', boga: '#5dade2' };
-            ctx2.beginPath(); ctx2.arc(0, 0, 35, 0, Math.PI * 2);
-            ctx2.strokeStyle = colMap[u.type] || '#fff'; ctx2.lineWidth = 5; ctx2.stroke();
-            ctx2.fillStyle = colMap[u.type] || '#fff';
-            ctx2.font = "bold 26px Arial"; ctx2.textAlign = "center";
-            ctx2.fillText(Math.ceil(u.timer / 60), 0, 9);
-            ctx2.restore();
-        });
-
-        // Çavuş aurasi
-        if (cavusBot && !cavusBot.isDead && cavusAuraActive) {
-            ctx2.save();
-            const grad = ctx2.createRadialGradient(cavusBot.x, cavusBot.y, 0, cavusBot.x, cavusBot.y, CAVUS_AURA_RADIUS);
-            grad.addColorStop(0, 'rgba(255, 215, 0, 0.25)');
-            grad.addColorStop(0.6, 'rgba(255, 215, 0, 0.10)');
-            grad.addColorStop(1, 'rgba(255, 215, 0, 0)');
-            ctx2.beginPath(); ctx2.arc(cavusBot.x, cavusBot.y, CAVUS_AURA_RADIUS, 0, Math.PI * 2);
-            ctx2.fillStyle = grad; ctx2.fill();
-            ctx2.beginPath(); ctx2.arc(cavusBot.x, cavusBot.y, CAVUS_AURA_RADIUS, 0, Math.PI * 2);
-            ctx2.strokeStyle = 'rgba(255, 215, 0, 0.9)'; ctx2.lineWidth = 4; ctx2.stroke();
-            ctx2.restore();
-        }
-
-        // HAVAN
-        if (havanBot && !havanBot.isDead) {
-            const b = havanBot;
-            ctx2.save(); ctx2.translate(b.x, b.y);
-            ctx2.fillStyle = '#7f1d1d'; ctx2.fillRect(-30, -b.radius - 18, 60, 6);
-            ctx2.fillStyle = '#c0392b'; ctx2.fillRect(-30, -b.radius - 18, 60 * (b.hp / b.maxHp), 6);
-            ctx2.fillStyle = '#5d4037'; ctx2.beginPath(); ctx2.arc(0, 0, b.radius, 0, Math.PI * 2); ctx2.fill();
-            ctx2.strokeStyle = '#3e2723'; ctx2.lineWidth = 3; ctx2.stroke();
-            ctx2.fillStyle = '#8d6e63'; ctx2.beginPath(); ctx2.arc(0, 0, b.radius - 8, 0, Math.PI * 2); ctx2.fill();
-            const recoil = (havanMuzzleFlash > 0) ? (havanMuzzleFlash / 15) * 6 : 0;
-            ctx2.fillStyle = '#1a0a00'; ctx2.beginPath(); ctx2.arc(0, -4 + recoil, 10, 0, Math.PI * 2); ctx2.fill();
-            if (havanMuzzleFlash > 0) {
-                ctx2.globalAlpha = havanMuzzleFlash / 15;
-                ctx2.fillStyle = '#ff5500'; ctx2.beginPath(); ctx2.arc(0, -4 + recoil, 16, 0, Math.PI * 2); ctx2.fill();
-                ctx2.globalAlpha = 1;
+    window.addEventListener('keydown',e=>{
+        if (active() && e.code==='Escape') {e.preventDefault();e.stopImmediatePropagation();back();}
+    },true);
+    window.addEventListener('blur',()=>{if (active()) clearControls();});
+    window.addEventListener('touchcancel',e=>{
+        if (!active() || typeof clearArenaInputs==='function') return;
+        for (let i=0;i<e.changedTouches.length;i++) {
+            const t=e.changedTouches[i];
+            for (const [input,id] of [[moveData,'left-knob'],[aimData,'right-knob']]) if (input.touchId===t.identifier) {
+                input.touchId=null;input.active=input.isMouse=false;input.x=input.y=0;
+                const k=$(id);if (k) k.style.transform='';
             }
-            ctx2.restore();
+            const control=t.target?.closest?.('#ulti-btn,#gadget-btn,#gadget-btn-2');
+            const input=control?.id==='ulti-btn'?ultAim:control?.id==='gadget-btn'?gadAim:control?gadAim2:null;
+            if (input && !input.isMouse) input.active=false;
         }
+    },{passive:true});
 
-        // TIRASI
-        if (tirasiBot && !tirasiBot.isDead) {
-            const b = tirasiBot;
-            ctx2.save(); ctx2.translate(b.x, b.y);
-            ctx2.fillStyle = '#e74c3c'; ctx2.fillRect(-18, -b.radius - 15, 36, 5);
-            ctx2.fillStyle = '#2ecc71'; ctx2.fillRect(-18, -b.radius - 15, 36 * (b.hp / b.maxHp), 5);
-            ctx2.rotate(b.angle);
-            ctx2.fillStyle = '#8e44ad'; ctx2.beginPath(); ctx2.arc(0, 0, b.radius, 0, Math.PI * 2); ctx2.fill();
-            ctx2.strokeStyle = '#fff'; ctx2.lineWidth = 2; ctx2.stroke();
-            ctx2.fillStyle = '#85c1e9'; ctx2.fillRect(18, -4, 4, 8);
-            ctx2.restore();
-            if (b.insaatSure > 0) {
-                ctx2.save(); ctx2.translate(b.x, b.y);
-                const ilerleme = 1 - (b.insaatSure / TIRASI_INSAA_SURESI);
-                ctx2.fillStyle = 'rgba(0,0,0,0.5)'; ctx2.fillRect(-20, -b.radius - 30, 40, 6);
-                ctx2.fillStyle = '#85c1e9'; ctx2.fillRect(-20, -b.radius - 30, 40 * ilerleme, 6);
-                ctx2.restore();
+    // Sadece bu modun görünümü: taş zemin, gaz sınırı ve okunabilir saldırı uyarıları.
+    const map=document.createElement('canvas');map.id='m32-map';map.width=168;map.height=130;map.hidden=true;
+    map.setAttribute('aria-hidden','true');document.body.appendChild(map);
+    const mapCtx=map.getContext('2d');
+    function circle(g,p,r) {g.beginPath();g.arc(p.x,p.y,r,0,TAU);}
+    function round(g,x,y,w,h,r) {
+        g.beginPath();(typeof g.roundRect==='function'?g.roundRect:oldRoundRect).call(g,x,y,w,h,r);
+    }
+    function terrain() {
+        const s=run,layer=document.createElement('canvas');layer.width=s.w;layer.height=s.h;
+        const g=layer.getContext('2d'),m=WALL_THICKNESS;
+        const base=g.createRadialGradient(s.center.x,s.center.y,50,s.center.x,s.center.y,s.startRadius*1.5);
+        base.addColorStop(0,'#253b39');base.addColorStop(.72,'#243234');base.addColorStop(1,'#1b282b');
+        g.fillStyle=base;g.fillRect(0,0,s.w,s.h);
+        let seed=87361;
+        const dice=()=>{seed=(Math.imul(1664525,seed)+1013904223)>>>0;return seed/4294967296;};
+        const cell=52;
+        for (let y=m;y<s.h-m;y+=cell) for (let x=m;x<s.w-m;x+=cell) {
+            g.fillStyle=`rgba(171,216,200,${.011+dice()*.031})`;g.fillRect(x+1,y+1,cell-2,cell-2);
+            if(dice()<.37) {g.fillStyle='#a4c7b025';g.fillRect(x+9+dice()*27,y+8+dice()*32,2.5+dice()*4,2);}
+        }
+        g.strokeStyle='#81a7a46e';g.lineWidth=2;g.strokeRect(m+1,m+1,s.w-2*m-2,s.h-2*m-2);
+        g.save();g.strokeStyle='#aad6b130';g.lineWidth=1;g.setLineDash([7,15]);circle(g,s.center,72);g.stroke();g.restore();
+        for (const patch of s.grass) {
+            round(g,patch.x,patch.y,patch.w,patch.h,16);g.fillStyle='#25473e';g.fill();g.strokeStyle='#42715a';g.lineWidth=1.2;g.stroke();
+            for (let i=0;i<83;i++) {
+                const x=patch.x+8+dice()*(patch.w-16),y=patch.y+12+dice()*(patch.h-18),n=3+dice()*9;
+                g.strokeStyle=i%4===0?'#77a87875':i%2===0?'#386750':'#477c5b';g.lineWidth=1.4;
+                g.beginPath();g.moveTo(x-4,y-n*.65);g.lineTo(x,y);g.lineTo(x+1,y-n);g.moveTo(x,y);g.lineTo(x+5,y-n*.57);g.stroke();
             }
         }
-
-        // HEYKELLER
-        heykeller.forEach(h => {
-            if (h.isDead) return;
-            ctx2.save(); ctx2.translate(h.x, h.y);
-            ctx2.fillStyle = '#e74c3c'; ctx2.fillRect(-30, -h.radius - 15, 60, 5);
-            ctx2.fillStyle = '#2ecc71'; ctx2.fillRect(-30, -h.radius - 15, 60 * (h.hp / h.maxHp), 5);
-            ctx2.rotate(h.angle);
-            ctx2.fillStyle = '#85c1e9';
-            ctx2.beginPath();
-            ctx2.moveTo(h.radius, 0); ctx2.lineTo(h.radius * 0.4, -h.radius);
-            ctx2.lineTo(-h.radius * 0.8, -h.radius * 0.7); ctx2.lineTo(-h.radius * 0.8, h.radius * 0.7);
-            ctx2.lineTo(h.radius * 0.4, h.radius); ctx2.closePath(); ctx2.fill();
-            ctx2.strokeStyle = '#5dade2'; ctx2.lineWidth = 4; ctx2.stroke();
-            const hasarOrani = 1 - (h.hp / h.maxHp);
-            if (hasarOrani > 0.3) {
-                ctx2.strokeStyle = `rgba(255,255,255,${Math.min(0.8, hasarOrani)})`;
-                ctx2.lineWidth = 2;
-                ctx2.beginPath(); ctx2.moveTo(5, 0); ctx2.lineTo(15, 10); ctx2.stroke();
-            }
-            ctx2.restore();
-        });
-
-        // ÇAVUŞ
-        if (cavusBot && !cavusBot.isDead) {
-            const b = cavusBot;
-            ctx2.save(); ctx2.translate(b.x, b.y);
-            ctx2.fillStyle = '#e74c3c'; ctx2.fillRect(-30, -b.radius - 18, 60, 6);
-            ctx2.fillStyle = '#2ecc71'; ctx2.fillRect(-30, -b.radius - 18, 60 * (b.hp / b.maxHp), 6);
-            if (b.shield > 0) {
-                ctx2.strokeStyle = '#00ffff'; ctx2.lineWidth = 4;
-                ctx2.globalAlpha = 0.8; ctx2.beginPath(); ctx2.arc(0, 0, b.radius + 6, 0, Math.PI * 2); ctx2.stroke();
-                ctx2.globalAlpha = 0.3; ctx2.fillStyle = '#00ffff'; ctx2.beginPath(); ctx2.arc(0, 0, b.radius + 6, 0, Math.PI * 2); ctx2.fill();
-                ctx2.globalAlpha = 1;
-            }
-            ctx2.rotate(b.angle);
-            ctx2.fillStyle = '#b8860b';
-            ctx2.beginPath();
-            for (let i = 0; i < 6; i++) {
-                const a = (i / 6) * Math.PI * 2;
-                const px = Math.cos(a) * b.radius;
-                const py = Math.sin(a) * b.radius;
-                if (i === 0) ctx2.moveTo(px, py); else ctx2.lineTo(px, py);
-            }
-            ctx2.closePath(); ctx2.fill();
-            ctx2.strokeStyle = '#5d4037'; ctx2.lineWidth = 3; ctx2.stroke();
-            ctx2.fillStyle = '#2c3e50'; ctx2.beginPath(); ctx2.arc(0, 0, b.radius * 0.75, 0, Math.PI * 2); ctx2.fill();
-            ctx2.fillStyle = '#f1c40f'; ctx2.beginPath(); ctx2.arc(0, 0, b.radius * 0.4, 0, Math.PI * 2); ctx2.fill();
-            ctx2.restore();
-        }
-
-        // CİRİTÇİLER
-        ciritciBotlari.forEach(c => {
-            if (c.isDead) return;
-            ctx2.save(); ctx2.translate(c.x, c.y);
-            ctx2.fillStyle = '#e74c3c'; ctx2.fillRect(-20, -c.radius - 15, 40, 5);
-            ctx2.fillStyle = '#2ecc71'; ctx2.fillRect(-20, -c.radius - 15, 40 * (c.hp / c.maxHp), 5);
-            ctx2.rotate(c.angle);
-            ctx2.fillStyle = '#5dade2'; ctx2.beginPath(); ctx2.arc(0, 0, c.radius, 0, Math.PI * 2); ctx2.fill();
-            ctx2.strokeStyle = '#2e86c1'; ctx2.lineWidth = 2; ctx2.stroke();
-            ctx2.fillStyle = '#fff'; ctx2.fillRect(12, -2.5, 22, 5);
-            ctx2.restore();
-        });
-
-        // BOĞA
-        if (bogaBot && !bogaBot.isDead) {
-            const b = bogaBot;
-            ctx2.save(); ctx2.translate(b.x, b.y);
-            ctx2.fillStyle = '#e74c3c'; ctx2.fillRect(-25, -b.radius - 15, 50, 5);
-            ctx2.fillStyle = '#2ecc71'; ctx2.fillRect(-25, -b.radius - 15, 50 * (b.hp / b.maxHp), 5);
-            ctx2.rotate(b.angle);
-            ctx2.fillStyle = '#5dade2'; ctx2.beginPath(); ctx2.arc(0, 0, b.radius, 0, Math.PI * 2); ctx2.fill();
-            ctx2.strokeStyle = '#2e86c1'; ctx2.lineWidth = 3; ctx2.stroke();
-            // Boynuzlar
-            ctx2.fillStyle = '#85c1e9';
-            ctx2.beginPath(); ctx2.moveTo(8, -14); ctx2.quadraticCurveTo(15, -25, 20, -28); ctx2.lineTo(16, -14); ctx2.closePath(); ctx2.fill();
-            ctx2.beginPath(); ctx2.moveTo(8, 14); ctx2.quadraticCurveTo(15, 25, 20, 28); ctx2.lineTo(16, 14); ctx2.closePath(); ctx2.fill();
-            if (b.durum === 'sarj') {
-                ctx2.rotate(-b.angle);
-                const ilerleme = 1 - (b.sarjSure / BOGA_SARJ_SURE);
-                ctx2.strokeStyle = `rgba(255, 107, 53, ${0.5 + ilerleme * 0.5})`;
-                ctx2.lineWidth = 3;
-                ctx2.beginPath(); ctx2.arc(0, 0, b.radius + 8, -Math.PI / 2, -Math.PI / 2 + ilerleme * Math.PI * 2);
-                ctx2.stroke();
-            }
-            if (b.durum === 'sersemleme') {
-                ctx2.rotate(-b.angle);
-                for (let k = 0; k < 3; k++) {
-                    const yildizAci = Date.now() / 150 + (k * Math.PI * 2) / 3;
-                    const yd = 22 + Math.sin(Date.now() / 100 + k) * 4;
-                    ctx2.fillStyle = '#f1c40f'; ctx2.font = "bold 12px Arial"; ctx2.textAlign = "center";
-                    ctx2.fillText("★", Math.cos(yildizAci) * yd, Math.sin(yildizAci) * yd - 15);
+        return layer;
+    }
+    function rock(g,o) {
+        const r=o.radius,x=o.x-r,y=o.y-r,w=2*r,h=w;
+        round(g,x,y,w,h,10);g.fillStyle='#4d636d';g.fill();
+        round(g,x+3,y+2,w-6,h-9,9);g.fillStyle='#728894';g.fill();
+        g.strokeStyle='#a5bac0';g.lineWidth=1.15;g.stroke();
+        g.strokeStyle='#405962';g.lineWidth=1.5;g.beginPath();g.moveTo(x+7,y+h*.63);g.lineTo(x+w*.42,y+h*.55);
+        g.lineTo(x+w*.65,y+h*.75);g.lineTo(x+w-8,y+h*.73);g.stroke();
+        g.fillStyle='#18252b';g.fillRect(o.x-16,y-16,32,6);
+        g.fillStyle='#8facae';g.fillRect(o.x-15,y-15,30*clamp(o.hp/o.maxHp,0,1),4);
+    }
+    function gasDraw(g) {
+        const s=run;
+        g.save();g.fillStyle=s.t<GAS_WAIT?'#78ab4d26':'#79c34c44';
+        g.beginPath();g.rect(0,0,s.w,s.h);g.arc(s.center.x,s.center.y,s.radius,0,TAU,true);g.fill('evenodd');
+        g.strokeStyle='#6fb96364';g.lineWidth=12;circle(g,s.center,s.radius);g.stroke();
+        g.strokeStyle='#b4f079';g.lineWidth=2;g.setLineDash([11,7]);circle(g,s.center,s.radius);g.stroke();g.restore();
+    }
+    function caption(g,p,title,color,dy=0) {
+        g.font='750 10px system-ui,sans-serif';g.textAlign='center';g.textBaseline='middle';
+        g.lineWidth=3;g.strokeStyle='#142127';g.strokeText(title,p.x,p.y+dy);
+        g.fillStyle=color;g.fillText(title,p.x,p.y+dy);
+    }
+    function warnings(g,e) {
+        const wind=e.wind;
+        if (wind) {
+            const ult=wind.kind==='ulti',color=ult?'#ffd177':e.color;
+            g.globalAlpha=.62;g.lineWidth=ult?2.4:1.5;g.strokeStyle=color;g.setLineDash([6,5]);
+            const a=bearing(e,wind.point),p=off(e,a,e.radius+4);
+            if (e.type==='bombaci') {
+                for (const i of (ult?[-1,0,1]:[0])) {
+                    const p=bound(off(wind.point,a+Math.PI/2,i*71),15);
+                    circle(g,p,ult?63:62);g.stroke();
                 }
-            }
-            ctx2.restore();
-        }
-
-        // BUZ BOTLARI
-        buzBotlari.forEach(b => {
-            if (b.isDead) return;
-            ctx2.save(); ctx2.translate(b.x, b.y);
-            ctx2.fillStyle = '#e74c3c'; ctx2.fillRect(-25, -b.radius - 15, 50, 5);
-            ctx2.fillStyle = '#2ecc71'; ctx2.fillRect(-25, -b.radius - 15, 50 * (b.hp / b.maxHp), 5);
-            if (b.vurusAnimasyon > 0) {
-                const animOrani = b.vurusAnimasyon / 12;
-                ctx2.strokeStyle = `rgba(174, 214, 241, ${animOrani})`;
-                ctx2.lineWidth = 3;
-                for (let k = 0; k < 4; k++) {
-                    const ang = Math.random() * Math.PI * 2;
-                    const dist = b.radius + animOrani * 15;
-                    ctx2.beginPath();
-                    ctx2.moveTo(Math.cos(ang) * b.radius * 0.5, Math.sin(ang) * b.radius * 0.5);
-                    ctx2.lineTo(Math.cos(ang) * dist, Math.sin(ang) * dist);
-                    ctx2.stroke();
+            } else if (e.type==='muhafiz') {
+                if (ult) circle(g,e,139);
+                else {g.beginPath();g.moveTo(e.x,e.y);g.arc(e.x,e.y,e.profile.range,a-.67,a+.67);g.closePath();}
+                g.stroke();
+            } else {
+                const fan=e.type==='baskinci' ? [-.185,0,.185] : ult ? [-.135,0,.135] : [0];
+                g.beginPath();
+                for (const d of fan) {
+                    const q=off(e,a+d,Math.min(e.profile.range,dist(e,wind.point)+26));
+                    g.moveTo(p.x,p.y);g.lineTo(q.x,q.y);
                 }
+                g.stroke();
             }
-            ctx2.rotate(b.angle);
-            ctx2.fillStyle = '#2e86c1';
-            ctx2.beginPath();
-            ctx2.moveTo(b.radius, 0); ctx2.lineTo(b.radius * 0.4, -b.radius);
-            ctx2.lineTo(-b.radius * 0.8, -b.radius * 0.7); ctx2.lineTo(-b.radius * 0.8, b.radius * 0.7);
-            ctx2.lineTo(b.radius * 0.4, b.radius); ctx2.closePath(); ctx2.fill();
-            ctx2.strokeStyle = '#1a5276'; ctx2.lineWidth = 3; ctx2.stroke();
-            ctx2.restore();
-        });
-
-        // HAVAN MERMİLERİ
-        havanMermiler.forEach(m => {
-            if (m.isDead) return;
-            const prog = 1 - (m.flightTimer / m.maxFlight);
-            ctx2.save();
-            ctx2.globalAlpha = 0.5 + Math.sin(Date.now() / 100) * 0.3;
-            ctx2.beginPath(); ctx2.arc(m.x, m.y, HAVAN_MERMI_AOE, 0, Math.PI * 2);
-            ctx2.strokeStyle = '#c0392b'; ctx2.lineWidth = 3; ctx2.setLineDash([8, 6]); ctx2.stroke(); ctx2.setLineDash([]);
-            ctx2.restore();
-            const currentX = m.startX + (m.x - m.startX) * prog;
-            const currentY = m.startY + (m.y - m.startY) * prog;
-            const arcHeight = Math.sin(prog * Math.PI) * 120;
-            ctx2.save();
-            ctx2.globalAlpha = 0.3;
-            ctx2.beginPath(); ctx2.ellipse(m.x, m.y, 12 * prog, 5 * prog, 0, 0, Math.PI * 2);
-            ctx2.fillStyle = '#000'; ctx2.fill(); ctx2.globalAlpha = 1;
-            ctx2.beginPath(); ctx2.arc(currentX, currentY - arcHeight, 9, 0, Math.PI * 2);
-            ctx2.fillStyle = '#7f1d1d'; ctx2.fill();
-            ctx2.strokeStyle = '#c0392b'; ctx2.lineWidth = 2; ctx2.stroke();
-            ctx2.restore();
-        });
-
-        // Öfke buharı
-        if (rageActive) {
-            const rageBots = [...slimeBots, ...buzBotlari, ...ciritciBotlari].filter(b => b && !b.isDead && b._rageActive);
-            rageBots.forEach(b => {
-                ctx2.save();
-                ctx2.globalAlpha = 0.4 + Math.sin(Date.now() / 100) * 0.1;
-                const grad = ctx2.createRadialGradient(b.x, b.y, 0, b.x, b.y, b.radius * 2.5);
-                grad.addColorStop(0, 'rgba(255, 0, 0, 0.6)');
-                grad.addColorStop(1, 'rgba(150, 0, 0, 0)');
-                ctx2.beginPath(); ctx2.arc(b.x, b.y, b.radius * 2.5, 0, Math.PI * 2);
-                ctx2.fillStyle = grad; ctx2.fill();
-                ctx2.restore();
-            });
+            g.setLineDash([]);g.globalAlpha=1;
+            circle(g,e,e.radius+4);g.strokeStyle='#24343a';g.stroke();
+            g.strokeStyle=color;g.beginPath();g.arc(e.x,e.y,e.radius+4,-Math.PI/2,-Math.PI/2+TAU*(1-wind.left/wind.total));g.stroke();
         }
+        if (guard(e) || e.shieldUntil>run.t || e.turboUntil>run.t || e.healAt) {
+            g.strokeStyle=guard(e)?'#d6f3fc':e.shieldUntil>run.t?'#8fe4ff':e.turboUntil>run.t?GOLD:LIME;
+            g.lineWidth=2;circle(g,e,e.radius+6);g.stroke();
+        }
+    }
+    function drawMode(g) {
+        const s=run;
+        if (s.phase==='start') return;
+        const isVisible=(p,r=0)=>p.x+r>=s.view.x && p.y+r>=s.view.y && p.x-r<=s.view.x+s.view.w && p.y-r<=s.view.y+s.view.h;
+        g.save();
+        g.globalCompositeOperation='destination-over';
+        g.drawImage(s.ground,0,0);g.globalCompositeOperation='source-over';
+        for (const o of obstacles) if (o.hp>0 && isVisible(o,o.radius+16)) rock(g,o);
+        gasDraw(g);
+        if (s.phase==='play') {
+            if (!player.isJumping && !player.isInvisible) {
+                g.strokeStyle='#fff5c5ad';g.lineWidth=1.5;circle(g,player,player.radius+2);g.stroke();
+            }
+            for (const b of botBullets) if (b._m32 && b.lob && isVisible(b.lob,b.blast)) {
+                g.save();g.globalAlpha=.40+.39*(b.age/b.duration);g.strokeStyle='#ffd177';g.lineWidth=2;g.setLineDash([5,6]);
+                circle(g,b.lob,b.blast);g.stroke();g.restore();
+            }
+            for (const m of s.mines) if (isVisible(m,m.radius)) {
+                g.strokeStyle=s.t<m.arm?'#ffa84f91':'#ffad61';g.lineWidth=1.3;g.setLineDash([4,5]);circle(g,m,m.radius);g.stroke();g.setLineDash([]);
+                g.fillStyle='#1b2229';g.strokeStyle=m.owner.color;circle(g,m,8);g.fill();g.stroke();g.fillStyle='#ffad61';circle(g,m,2);g.fill();
+            }
+            for (const r of s.rings) if (isVisible(r,r.r)) {
+                const f=1-(r.until-s.t)/22;g.globalAlpha=(1-f)*.72;g.lineWidth=3;g.strokeStyle=r.c;
+                circle(g,r,r.r*(.35+.65*f));g.stroke();g.globalAlpha=1;
+            }
+            for (const slot of s.slots) if (slot.warning && isVisible(slot.warning,35)) {
+                const p=slot.warning,c=TYPES[slot.type].color;
+                g.strokeStyle=c;g.lineWidth=2;g.setLineDash([6,4]);circle(g,p,30);g.stroke();g.setLineDash([]);
+                const a=1-clamp((slot.due-s.t)/RETURN_WARNING,0,1);
+                g.beginPath();g.arc(p.x,p.y,25,-Math.PI/2,-Math.PI/2+TAU*a);g.stroke();
+                caption(g,p,'DÖNÜŞ',c,0);
+            }
+            for (const e of onField()) if (isVisible(e,50)) {
+                warnings(g,e);
+                const ready=e.charge>=100 || e.wind?.kind==='ulti';
+                caption(g,e,`${e.profile.name}${ready?'  ◆':''}`,ready?GOLD:'#eef6ee',e.radius+12);
+            }
+        }
+        g.restore();
+    }
+    function mapTick() {
+        if (!mapCtx || run.t<run.miniAt) return;
+        const s=run,g=mapCtx,sx=(map.width-10)/s.w,sy=(map.height-10)/s.h;
+        s.miniAt=s.t+5;
+        g.clearRect(0,0,map.width,map.height);g.save();g.translate(5,5);
+        g.fillStyle='#19292a';g.fillRect(0,0,s.w*sx,s.h*sy);
+        g.strokeStyle='#7aa856';g.lineWidth=2;g.beginPath();g.ellipse(s.center.x*sx,s.center.y*sy,s.radius*sx,s.radius*sy,0,0,TAU);g.stroke();
+        g.strokeStyle='#9fc2b95d';g.lineWidth=1;
+        g.strokeRect(s.view.x*sx,s.view.y*sy,Math.min(s.w,s.view.w)*sx,Math.min(s.h,s.view.h)*sy);
+        for (const e of onField()) if (dist(e,player)<340 && clear(player,e)) {
+            g.fillStyle=e.color;circle(g,pt(e.x*sx,e.y*sy),3.2);g.fill();
+        }
+        g.fillStyle='#fff5c5';circle(g,pt(player.x*sx,player.y*sy),4.7);g.fill();g.restore();
+    }
 
-        // Slime kaskları
-        slimeBots.forEach(s => {
-            if (s.isDead) return;
-            ctx2.save(); ctx2.translate(s.x, s.y);
-            ctx2.fillStyle = '#7f8c8d';
-            ctx2.beginPath(); ctx2.arc(0, 0, s.radius * 0.65, 0, Math.PI * 2); ctx2.fill();
-            ctx2.restore();
-        });
-    });
+    function updateMode(delta) {
+        if (!active()) return;
+        if (run.phase==='start') initField();
+        sizeWorld();suppressCoreSpawns();
+        if (run.phase==='over') return;
+        if (!alive(player)) {endRun();return;}
+        const dt=clamp(Number.isFinite(delta)?delta:0,0,3);
+        run.t+=dt;
+        rebuildSolids();gasTick();
+        if (!alive(player)) {endRun();return;}
+        eventTick();
+        if (!alive(player)) {endRun();return;}
+        applyPush(player,run.drag,dt);
+        if (alive(player)) ticksOfBots(dt);
+        settleDeaths();respawnTick();
+        if (!alive(player)) endRun();
+    }
+    function finishFrame(dt) {
+        if (run.phase!=='play') return;
+        settleDeaths();
+        if (!alive(player)) {endRun();return;}
+        follow(dt);hudTick();mapTick();
+    }
 
-    // Arena dönüşü
-    (function () {
-        const n = document.getElementById('diff-normal');
-        const e = document.getElementById('diff-easy');
-        if (n) { n.addEventListener('click', () => { window.GAME_MODE = 'arena'; }); n.addEventListener('touchstart', () => { window.GAME_MODE = 'arena'; }, { passive: true }); }
-        if (e) { e.addEventListener('click', () => { window.GAME_MODE = 'arena'; }); e.addEventListener('touchstart', () => { window.GAME_MODE = 'arena'; }, { passive: true }); }
-    })();
-
-    window.GAME_EXT.modKartiEkle('agirsikletler', 'Ağır Sıkletler', 'Hardcore: Havan + Tıraşı/Heykel + Çavuş + Boğa');
-    console.log('[MOD YÜKLENDİ] agirsikletler');
+    EXT.modes[ID]={label:'Serbest Hesaplaşma',onStart:startRun,onUpdate:updateMode,onDraw:drawMode,onReset:resetRun};
+    H.getExtraEnemies=function() {
+        return active()?onField():previous.enemies?.apply(this,arguments)||[];
+    };
+    H.getBotTarget=function(e) {
+        // Normal bot döngüsü özel botların gözünü oyuncuya kilitlemesin.
+        return active() && e._m32?off(e,e.angle,90):previous.target?.apply(this,arguments)||null;
+    };
+    H.onReset=function() {
+        const out=previous.reset?.apply(this,arguments);
+        // Çekirdek startGame içinde de onReset çağırır; arena ilk karede kurulur.
+        if (run && (run.phase!=='start' || !active())) resetRun();
+        return out;
+    };
+    H.onDraw=function(g) {
+        const out=previous.draw?.apply(this,arguments);
+        if (active()) drawMode(g);
+        return out;
+    };
+    const drawStockBullet=window.drawBullet;
+    window.drawBullet=function(b) {
+        return active() && b._m32?renderOwnedBullet(b):drawStockBullet.apply(this,arguments);
+    };
+    window.updateBulletLogic=function(list,isBot,dt) {
+        if (!active() || !isBot || list!==botBullets) return previous.projectiles.apply(this,arguments);
+        if (run.phase!=='play') return;
+        rebuildSolids();projectiles(dt);
+        // Diğer eklentilerin standart mermilerini varsa çekirdeğe bırak.
+        if (list.some(b=>!b._m32) && alive(player)) {
+            const stock=list.filter(b=>!b._m32);
+            for (let i=list.length-1;i>=0;i--) if (!list[i]._m32) list.splice(i,1);
+            previous.projectiles.call(this,stock,true,dt);
+            for (const b of stock) list.push(b);
+        }
+        finishFrame(dt);
+    };
 })();
