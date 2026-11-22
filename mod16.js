@@ -1,55 +1,57 @@
 /* ==========================================================================
-   mod38.js  -  İKİ YENİ KARAKTER (TEMA: PRİZMA): "KIRILIM" (yakın) & "SPEKTRUM" (uzak)
+   mod39.js  -  İKİ YENİ KARAKTER (MERMİ ATAN): "BOĞA" (Bull gibi) & "PIRIL" (Bonnie gibi, 2 formlu)
    --------------------------------------------------------------------------
-   mod30 / mod37 ile AYNI yapı. Ana oyuna DOKUNMAZ, tüm saldırılar anlıktır.
-   Hasarlar bilinçli yüksek: yakın menzil vuruşu 1200, uzak menzil ışını 1300.
+   mod30 / mod37 / mod38 ile AYNI yapı. Ana oyuna DOKUNMAZ. Mermiler bu dosyanın KENDİ
+   mermi sistemidir (ana oyunun mermi koduna güvenmez): düşmana, engele ve duvara çarparlar.
    Her karakter: 2 aksesuar (Q/E) + 1 güç (ulti) + 2 pasif.
 
-   KIRILIM (yakın menzil, kristal savaşçı)       HP 4200 / hız 2.9
-     Ana atak   - KRİSTAL KILIÇ   : Önünde geniş yay (100 px), 1200 hasar.
-     Pasif 1    - SPEKTRUM YÜKÜ   : Her isabet +%10 hasar (en çok 4 kat), 3 sn vurmazsan sıfırlanır.
-     Pasif 2    - YANSITMA        : Aldığın hasarın %15'i en yakın düşmana (160 px) geri yansır.
-     Q          - KIRILMA ATILIMI : 150 px atılır, yoldakilere 600 hasar, 1 mühimmat geri. BK 9 sn
-     E          - CAM KALKAN      : 2 sn %70 hasar azaltma; bitince 150 yarıçapta 400 hasar. BK 14 sn
-     Güç        - BEYAZ IŞIK      : 6 sn prizma formu: yay TAM DAİRE (r 120), hasar x1.2, hız x1.15.
+   BOĞA (Bull gibi: yakın menzil pompalı tank)    HP 4600 / hız 3.2
+     Ana atak   - ÇİFTE NAMLU    : 5 saçma, kısa menzil (230 px), her biri 230 hasar (yakında en çok 1150).
+     Pasif 1    - ÇILGIN BOĞA    : Canın %60'ın altındayken mühimmat 2 kat hızlı dolar.
+     Pasif 2    - SERT ADAM      : Canın %40'ın altındayken aldığın hasar %30 azalır.
+     Q          - T-BONE AŞISI   : Anında 1000 can yeniler. BK 17 sn
+     E          - EZİCİ BASIŞ    : 130 yarıçap, 300 hasar + itme, yavaşlatır (1.5 sn). BK 12 sn
+     Güç        - BULDOZER       : 380 px hızlı hücum; yoldaki herkese 1000 hasar, engelleri ezer.
 
-   SPEKTRUM (uzak menzil, ışık nişancısı)        HP 2800 / hız 3.2
-     Ana atak   - IŞIN            : Anlık çizgi, ilk düşmana 1300 hasar.
-     Pasif 1    - ODAK            : 250 px'ten uzak hedefe +%25 hasar.
-     Pasif 2    - KIRINIM         : Işın isabet edince en yakın 2. düşmana (200 px) %40 hasarla sıçrar.
-     Q          - YANSIMA ADIMI   : Nişan yönünde 180 px anında ışınlanır. BK 9 sn
-     E          - KÖR EDİCİ FLAŞ  : 150 yarıçap, 450 hasar + itme, yakındaki mermileri siler. BK 13 sn
-     Güç        - GÖKKUŞAĞI IŞINI : 0.4 sn hedef kilidi, sonra 800 px'lik devasa ışın, hepsine 2400 hasar.
+   PIRIL (Bonnie gibi: iki formlu)                 HP 4400 / hız 3.1
+     PIRIL formu - CEKET SAÇMASI : 3 patlayıcı mermi yelpazesi, her biri 450 hasar (şarj kazandırmaz).
+     TOSUN formu - UZUN DİŞ      : Tek uzun menzilli mermi, 1500 hasar (şarj kazandırır).
+     Pasif 1    - BARUT TOZU     : Güç sıçraması %36 daha uzağa gider.
+     Pasif 2    - BİLGELİK DİŞİ  : Tosun mermisi bitince çapraz 4 küçük mermiye (her biri %25) bölünür.
+     Q          - ŞEKER HIZI     : 5 sn hız +%30 ve mühimmat daha hızlı dolar. BK 14 sn
+     E          - ÇARPMA TESTİ   : 140 px atılır, yoldakilere 300 hasar + itme. BK 11 sn
+     Güç        - YILDIZ FIRLATICI: Havaya fırlar (hasar almaz), inince 140 yarıçapta 900 hasar ve
+                                    FORM DEĞİŞİR (Piril <-> Tosun).
    ========================================================================== */
 (function () {
     'use strict';
 
     if (typeof window === 'undefined' || !window.GAME_EXT) return;
 
-    const KR = 'kirilim', SP = 'spektrum';
+    const BG = 'boga', PR = 'piril';
     const EXT = window.GAME_EXT;
     const CHARGE_PER_FRAME = 100 / 3600; // ~60 sn'de dolar
     const CHARGE_PER_KILL = 25;
 
-    // ---- Kırılım denge sabitleri ----
-    const KR_DMG = 1200, KR_RANGE = 100, KR_HALF = 0.8;
-    const KR_STACK = 0.1, KR_STACK_MAX = 4, KR_STACK_TIME = 180;
-    const KR_REFLECT = 0.15, KR_REFLECT_R = 160;
-    const KR_DASH_DIST = 150, KR_DASH_FRAMES = 9, KR_DASH_DMG = 600, KR_Q_CD = 540;
-    const KR_GLASS_TIME = 120, KR_GLASS_RED = 0.7, KR_GLASS_R = 150, KR_GLASS_DMG = 400, KR_E_CD = 840;
-    const KR_FORM_TIME = 360, KR_FORM_RANGE = 120, KR_FORM_MULT = 1.2, KR_FORM_SPEED = 1.15;
+    // ---- Boğa denge sabitleri ----
+    const BG_PELLETS = 5, BG_PELLET_DMG = 230, BG_SPREAD = 0.46, BG_SPEED = 13, BG_RANGE = 230, BG_PELLET_R = 5;
+    const BG_BERSERK_HP = 0.6, BG_BERSERK_EVERY = 75;
+    const BG_TOUGH_HP = 0.4, BG_TOUGH_RED = 0.3;
+    const BG_HEAL = 1000, BG_Q_CD = 1020;
+    const BG_STOMP_R = 130, BG_STOMP_DMG = 300, BG_SLOW_TIME = 90, BG_SLOW_MULT = 0.55, BG_E_CD = 720;
+    const BG_RUSH_DIST = 380, BG_RUSH_FRAMES = 24, BG_RUSH_DMG = 1000, BG_RUSH_OBST = 900;
 
-    // ---- Spektrum denge sabitleri ----
-    const SP_DMG = 1300, SP_HALF_W = 14, SP_LEN = 620;
-    const SP_FAR = 250, SP_FAR_MULT = 1.25;
-    const SP_JUMP_R = 200, SP_JUMP_MULT = 0.4;
-    const SP_BLINK = 180, SP_Q_CD = 540;
-    const SP_FLASH_R = 150, SP_FLASH_DMG = 450, SP_E_CD = 780;
-    const SP_ULT_LOCK = 24, SP_ULT_LEN = 800, SP_ULT_HALF_W = 34, SP_ULT_DMG = 2400;
+    // ---- Piril denge sabitleri ----
+    const PR_SHELLS = 3, PR_SHELL_DMG = 450, PR_SHELL_SPREAD = 0.3, PR_SHELL_SPEED = 12, PR_SHELL_RANGE = 270, PR_SHELL_R = 7;
+    const PR_TOOTH_DMG = 1500, PR_TOOTH_SPEED = 17, PR_TOOTH_RANGE = 560, PR_TOOTH_R = 8, PR_TOOTH_GAP = 40;
+    const PR_SPLIT_RANGE = 130, PR_SPLIT_FRAC = 0.25;
+    const PR_JUMP_DIST = 300, PR_JUMP_BONUS = 1.36, PR_JUMP_FRAMES = 30, PR_LAND_R = 140, PR_LAND_DMG = 900;
+    const PR_RUSH_TIME = 300, PR_RUSH_SPEED = 1.3, PR_RUSH_EVERY = 45, PR_Q_CD = 840;
+    const PR_CRASH_DIST = 140, PR_CRASH_FRAMES = 9, PR_CRASH_DMG = 300, PR_E_CD = 660;
 
     // ---------------------------------------------------------------- KAYIT
-    EXT.characters[KR] = { color: '#7fd8ff', hp: 4200, speed: 2.9 };
-    EXT.characters[SP] = { color: '#ff7be5', hp: 2800, speed: 3.2 };
+    EXT.characters[BG] = { color: '#c0612b', hp: 4600, speed: 3.2 };
+    EXT.characters[PR] = { color: '#ff9bd2', hp: 4400, speed: 3.1 };
 
     // ---------------------------------------------------------- KARAKTER KARTLARI
     function addCard(id, name, grad, desc) {
@@ -68,36 +70,38 @@
         });
         cont.appendChild(card);
     }
-    addCard(KR, 'Kırılım',
-        'radial-gradient(circle at 35% 30%,#ffffff,#7fd8ff 50%,#2a5fa8)',
-        'Yakın menzil · 1200 hasar<br>Yetenek: Kırılma Atılımı / Cam Kalkan<br>Güç: Beyaz Işık');
-    addCard(SP, 'Spektrum',
-        'radial-gradient(circle at 35% 30%,#fff2fb,#ff7be5 50%,#6a2a9a)',
-        'Uzak menzil · 1300 hasar<br>Yetenek: Yansıma Adımı / Kör Edici Flaş<br>Güç: Gökkuşağı Işını');
+    addCard(BG, 'Boğa',
+        'radial-gradient(circle at 35% 30%,#ffd1a3,#c0612b 55%,#5a230a)',
+        'Yakın menzil · pompalı<br>Yetenek: T-Bone Aşısı / Ezici Basış<br>Güç: Buldozer');
+    addCard(PR, 'Piril',
+        'radial-gradient(circle at 35% 30%,#ffe3f3,#ff9bd2 55%,#8a2a63)',
+        '2 formlu · Piril / Tosun<br>Yetenek: Şeker Hızı / Çarpma Testi<br>Güç: Yıldız Fırlatıcı');
 
     // ------------------------------------------------------------------ DURUM
-    let fx = [], beams = [], knocked = [];
+    let fx = [], beams = [], knocked = [], shots = [], slowed = [];
     let now = 0;
-    const kr = { stacks: 0, stackT: 0, dash: null, glass: 0, form: 0, swing: null };
-    const sp = { cast: null, swing: 0 };
+    const bg = { rush: null, ammoT: 0, swing: 0 };
+    const pr = { cannon: false, air: null, dash: null, sugar: 0, sugarT: 0, lastTooth: -999 };
     const hpw = { last: 0, lastHit: 0 };
     let curChar = null, wasActive = false, last = 0, warned = false, needReset = false;
 
     function resetState() {
-        knocked.forEach(e => { e._m38kx = 0; e._m38ky = 0; });
-        fx = []; beams = []; knocked = [];
-        kr.stacks = 0; kr.stackT = 0; kr.dash = null; kr.glass = 0; kr.form = 0; kr.swing = null;
-        sp.cast = null;
+        knocked.forEach(e => { e._m39kx = 0; e._m39ky = 0; });
+        slowed.forEach(s => { if (s.e && s.base) s.e.speed = s.base; });
+        fx = []; beams = []; knocked = []; shots = []; slowed = [];
+        bg.rush = null; bg.ammoT = 0; bg.swing = 0;
+        pr.cannon = false; pr.air = null; pr.dash = null; pr.sugar = 0; pr.sugarT = 0; pr.lastTooth = -999;
         if (typeof player !== 'undefined') {
+            player.jumpInvulnerable = false;
             hpw.last = player.hp; hpw.lastHit = now;
             if (player.originalSpeed) player.speed = player.originalSpeed;
         }
     }
 
     // ---------------------------------------------------------------- YARDIMCI
-    const isSp = p => p.charType === SP;
-    const isKr = p => p.charType === KR;
-    const isMine = p => isSp(p) || isKr(p);
+    const isPr = p => p.charType === PR;
+    const isBg = p => p.charType === BG;
+    const isMine = p => isPr(p) || isBg(p);
     const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
     const angOf = (a, b) => Math.atan2(b.y - a.y, b.x - a.x);
     function absAngDiff(a, b) {
@@ -127,7 +131,7 @@
         return obstacles.concat(extra);
     }
     function charge(n) {
-        if (player.ultReady || player.isDead || kr.form > 0 || sp.cast) return;
+        if (player.ultReady || player.isDead || bg.rush || pr.air) return;
         player.ultCharge = Math.min(100, player.ultCharge + n);
         if (ultFill) ultFill.style.width = player.ultCharge + '%';
         if (player.ultCharge >= 100) {
@@ -150,8 +154,8 @@
     }
     // Düşmanı itmek için kendi itme sistemimiz (ana kodun alanlarına güvenmez)
     function knock(e, ang, power) {
-        e._m38kx = (e._m38kx || 0) + Math.cos(ang) * power;
-        e._m38ky = (e._m38ky || 0) + Math.sin(ang) * power;
+        e._m39kx = (e._m39kx || 0) + Math.cos(ang) * power;
+        e._m39ky = (e._m39ky || 0) + Math.sin(ang) * power;
         if (knocked.indexOf(e) < 0) knocked.push(e);
     }
     function heal(P, amount) {
@@ -186,323 +190,394 @@
     }
 
 
+    // ---------------------------------------------------------- KENDİ MERMİ SİSTEMİMİZ
+    function addShot(x, y, ang, speed, range, dmg, r, col, kind) {
+        shots.push({ x, y, vx: Math.cos(ang) * speed, vy: Math.sin(ang) * speed, left: range, dmg, r, col, kind: kind || 'pellet', ang });
+    }
+    function shotEnd(b, hitEnemy) { // hitEnemy: çarpılan düşman (bölünen mermiler ona tekrar vurmaz)
+        // Pasif 2 (Piril): Bilgelik Dişi - Tosun mermisi biterken çapraz 4 mermiye bölünür
+        if (b.kind === 'tooth') {
+            for (let i = 0; i < 4; i++) {
+                const a = b.ang + Math.PI / 4 + i * Math.PI / 2;
+                addShot(b.x, b.y, a, 11, PR_SPLIT_RANGE, Math.round(PR_TOOTH_DMG * PR_SPLIT_FRAC), 5, '#ffd2ec', 'split');
+                shots[shots.length - 1].skip = hitEnemy || null;
+            }
+            ring(b.x, b.y, '#ff9bd2', 40, 14);
+        } else if (b.kind === 'shell') {
+            ring(b.x, b.y, '#ffb86a', 34, 14);
+        }
+    }
+    function updateShots(dt) {
+        const en = getActiveEnemies();
+        const obs = allObstacles();
+        for (let i = shots.length - 1; i >= 0; i--) {
+            const b = shots[i];
+            const sp = Math.hypot(b.vx, b.vy) * dt;
+            const steps = Math.max(1, Math.ceil(sp / 8));
+            let dead = false;
+            for (let s = 0; s < steps && !dead; s++) {
+                b.x += b.vx * dt / steps; b.y += b.vy * dt / steps;
+                b.left -= sp / steps;
+                if (b.x < WALL_THICKNESS || b.y < WALL_THICKNESS || b.x > canvas.width - WALL_THICKNESS || b.y > canvas.height - WALL_THICKNESS) {
+                    dead = true; shotEnd(b, false); break;
+                }
+                for (const o of obs) {
+                    if (Math.hypot(b.x - o.x, b.y - o.y) < o.radius + b.r) {
+                        o.hp -= b.kind === 'tooth' ? 200 : 60;
+                        dead = true; shotEnd(b, false); break;
+                    }
+                }
+                if (dead) break;
+                for (const e of en) {
+                    if (!(e.hp > 0) || e === b.skip) continue;
+                    if (Math.hypot(b.x - e.x, b.y - e.y) < e.radius + b.r) {
+                        hurt(e, b.dmg, b.col);
+                        knock(e, Math.atan2(b.vy, b.vx), b.kind === 'tooth' ? 6 : 2.5);
+                        if (isPr(player) && (b.kind === 'tooth' || b.kind === 'split')) charge(b.kind === 'tooth' ? 14 : 2);
+                        else if (isBg(player)) charge(3);
+                        dead = true; shotEnd(b, e); break;
+                    }
+                }
+            }
+            if (!dead && b.left <= 0) { dead = true; shotEnd(b, false); }
+            if (dead) shots.splice(i, 1);
+        }
+        if (shots.length > 160) shots.splice(0, shots.length - 160);
+    }
+
     // ------------------------------------------------- OYUNCU METOTLARI (SARMALAMA)
     function install(p) {
-        if (p.__m38) return;
-        p.__m38 = true;
+        if (p.__m39) return;
+        p.__m39 = true;
         const orig = { fire: p.fire, g1: p.activateGadget, g2: p.activateGadget2, ult: p.fireUlti };
 
         p.fire = function (a, pull) {
-            if (isKr(this)) return krSlash.call(this, a, pull);
-            if (isSp(this)) return spBeam.call(this, a, pull);
+            if (isBg(this)) return bgShot.call(this, a, pull);
+            if (isPr(this)) return prShot.call(this, a, pull);
             return orig.fire.apply(this, arguments);
         };
         p.activateGadget = function (a, pull) {
-            if (isKr(this)) return krDash.call(this, a, pull);
-            if (isSp(this)) return spBlink.call(this, a, pull);
+            if (isBg(this)) return bgHeal.call(this, a, pull);
+            if (isPr(this)) return prSugar.call(this, a, pull);
             return orig.g1.apply(this, arguments);
         };
         p.activateGadget2 = function (a, pull) {
-            if (isKr(this)) return krGlass.call(this, a, pull);
-            if (isSp(this)) return spFlash.call(this, a, pull);
+            if (isBg(this)) return bgStomp.call(this, a, pull);
+            if (isPr(this)) return prCrash.call(this, a, pull);
             return orig.g2.apply(this, arguments);
         };
         p.fireUlti = function (a, pull) {
-            if (isKr(this)) return krForm.call(this, a, pull);
-            if (isSp(this)) return spRainbow.call(this, a, pull);
+            if (isBg(this)) return bgDozer.call(this, a, pull);
+            if (isPr(this)) return prLaunch.call(this, a, pull);
             return orig.ult.apply(this, arguments);
         };
     }
 
     // ========================================================================
-    //  KIRILIM
+    //  BOĞA
     // ========================================================================
-    function krRange() { return kr.form > 0 ? KR_FORM_RANGE : KR_RANGE; }
-    function krHalf() { return kr.form > 0 ? Math.PI : KR_HALF; }
-
-    // Ana atak: KRİSTAL KILIÇ
-    function krSlash(a) {
-        if (this.isDead || this.ammo < 1) return;
+    // Ana atak: ÇİFTE NAMLU (5 saçma)
+    function bgShot(a) {
+        if (this.isDead || this.ammo < 1 || bg.rush) return;
         const ang = a !== undefined ? a : this.angle;
         this.angle = ang;
         this.consumeAmmo();
-        const form = kr.form > 0;
-        const range = krRange(), half = krHalf();
-        const dmg = Math.round(KR_DMG * (1 + kr.stacks * KR_STACK) * (form ? KR_FORM_MULT : 1));
-        kr.swing = { ang, t: 0, dur: form ? 16 : 11, range, half, form };
-        let hits = 0;
-        getActiveEnemies().forEach(e => {
-            if (!(e.hp > 0)) return;
-            if (dist(this, e) > range + e.radius) return;
-            if (!form && absAngDiff(angOf(this, e), ang) > half) return;
-            hurt(e, dmg, form ? '#ffffff' : '#7fd8ff');
-            knock(e, angOf(this, e), form ? 9 : 6);
-            hits++;
-        });
-        allObstacles().forEach(o => {
-            if (dist(this, o) <= range + o.radius && (form || absAngDiff(angOf(this, o), ang) <= half)) o.hp -= 150;
-        });
-        if (hits > 0) {
-            kr.stacks = Math.min(KR_STACK_MAX, kr.stacks + 1); // Pasif 1: Spektrum Yükü
-            kr.stackT = KR_STACK_TIME;
-            charge(6 * hits);
+        for (let i = 0; i < BG_PELLETS; i++) {
+            const f = BG_PELLETS === 1 ? 0 : i / (BG_PELLETS - 1) - 0.5;
+            const aa = ang + f * BG_SPREAD;
+            addShot(this.x + Math.cos(aa) * this.radius, this.y + Math.sin(aa) * this.radius, aa,
+                    BG_SPEED * (0.94 + Math.random() * 0.12), BG_RANGE, BG_PELLET_DMG, BG_PELLET_R, '#ffb86a', 'pellet');
         }
-        puff(this.x + Math.cos(ang) * 44, this.y + Math.sin(ang) * 44, form ? '#ffffff' : '#7fd8ff', form ? 6 : 3);
-        if (form) shake(hits ? 6 : 2);
+        bg.swing = 8;
+        puff(this.x + Math.cos(ang) * 30, this.y + Math.sin(ang) * 30, '#ffb86a', 4);
+        shake(3);
     }
 
-    // Q: KIRILMA ATILIMI
-    function krDash(a) {
-        if (!this.gadgetReady || this.isDead || kr.dash) return;
-        const ang = a !== undefined ? a : this.angle;
-        this.angle = ang;
-        kr.dash = { t: KR_DASH_FRAMES, ang, hit: [] };
-        say(this.x, this.y - 30, 'KIRILMA ATILIMI!', '#7fd8ff');
-        setCd1(this, KR_Q_CD);
-    }
-
-    // E: CAM KALKAN
-    function krGlass() {
-        if (!this.gadget2Ready || this.isDead) return;
-        kr.glass = KR_GLASS_TIME;
-        ring(this.x, this.y, '#bfefff', 60, 24);
-        say(this.x, this.y - 34, 'CAM KALKAN!', '#bfefff');
-        setCd2(this, KR_E_CD);
-    }
-
-    function glassEnd() {
-        const P = player;
-        let hits = 0;
-        getActiveEnemies().forEach(e => {
-            if (e.hp > 0 && dist(P, e) <= KR_GLASS_R + e.radius) { hurt(e, KR_GLASS_DMG, '#bfefff'); knock(e, angOf(P, e), 9); hits++; }
-        });
-        ring(P.x, P.y, '#bfefff', KR_GLASS_R, 26);
-        ring(P.x, P.y, '#ffffff', KR_GLASS_R * 0.6, 20);
-        puff(P.x, P.y, '#bfefff', 12);
-        say(P.x, P.y - 40, 'KIRILDI!', '#bfefff');
-        shake(8);
-        charge(4 + hits * 4);
-    }
-
-    // Güç: BEYAZ IŞIK (form değiştirme)
-    function krForm() {
-        if (!this.ultReady || this.isDead || kr.form > 0) return;
-        kr.form = KR_FORM_TIME;
-        ring(this.x, this.y, '#ffffff', 150, 30);
-        ring(this.x, this.y, '#7fd8ff', 100, 24);
-        puff(this.x, this.y, '#ffffff', 16);
-        say(this.x, this.y - 40, 'BEYAZ IŞIK!', '#ffffff');
-        shake(12);
-        spendUlt();
-    }
-
-    // ========================================================================
-    //  SPEKTRUM
-    // ========================================================================
-    // Ana atak: IŞIN
-    function spBeam(a) {
-        if (this.isDead || this.ammo < 1 || sp.cast) return;
-        const ang = a !== undefined ? a : this.angle;
-        this.angle = ang;
-        this.consumeAmmo();
-        const sc = scanLine(this.x, this.y, ang, SP_LEN, SP_HALF_W);
-        const len = Math.min(SP_LEN, sc.blockD);
-        const first = sc.list[0];
-        let hits = 0, endLen = len;
-        if (first) {
-            const far = first.proj >= SP_FAR; // Pasif 1: Odak
-            const dmg = Math.round(SP_DMG * (far ? SP_FAR_MULT : 1));
-            hurt(first.e, dmg, far ? '#ffb3f0' : '#ff7be5');
-            endLen = first.proj;
-            hits++;
-            // Pasif 2: Kırınım
-            let near = null, nd = Infinity;
-            getActiveEnemies().forEach(e => {
-                if (e === first.e || !(e.hp > 0)) return;
-                const d = dist(first.e, e);
-                if (d <= SP_JUMP_R && d < nd) { nd = d; near = e; }
-            });
-            if (near) {
-                hurt(near, Math.round(dmg * SP_JUMP_MULT), '#ffd2f6');
-                beams.push({ x1: first.e.x, y1: first.e.y, x2: near.x, y2: near.y, life: 10, max: 10, col: '#ffb3f0' });
-                hits++;
-            }
-        }
-        if (sc.blocker) sc.blocker.hp -= 150;
-        beams.push({ x1: this.x + Math.cos(ang) * this.radius, y1: this.y + Math.sin(ang) * this.radius,
-                     x2: this.x + Math.cos(ang) * endLen, y2: this.y + Math.sin(ang) * endLen, life: 10, max: 10, col: '#ff7be5' });
-        if (hits > 0) charge(9 * hits);
-    }
-
-    // Q: YANSIMA ADIMI (anlık ışınlanma)
-    function spBlink(a) {
+    // Q: T-BONE AŞISI
+    function bgHeal() {
         if (!this.gadgetReady || this.isDead) return;
-        const ang = a !== undefined ? a : this.angle;
-        this.angle = ang;
-        let d = SP_BLINK;
-        const sc = scanLine(this.x, this.y, ang, SP_BLINK + this.radius, 1);
-        if (sc.blocker) d = Math.max(0, Math.min(d, sc.blockD - this.radius - 4));
-        const nx = clampRange(this.x + Math.cos(ang) * d, WALL_THICKNESS + this.radius, canvas.width - WALL_THICKNESS - this.radius);
-        const ny = clampRange(this.y + Math.sin(ang) * d, WALL_THICKNESS + this.radius, canvas.height - WALL_THICKNESS - this.radius);
-        ring(this.x, this.y, '#ff7be5', 50, 20);
-        puff(this.x, this.y, '#ffb3f0', 8);
-        this.x = nx; this.y = ny;
-        ring(this.x, this.y, '#ffffff', 50, 20);
-        puff(this.x, this.y, '#ffb3f0', 8);
-        say(this.x, this.y - 30, 'YANSIMA ADIMI!', '#ff7be5');
-        setCd1(this, SP_Q_CD);
+        const before = this.hp;
+        this.hp = Math.min(this.maxHp, this.hp + BG_HEAL);
+        hpw.last = this.hp; // iyileşme hasar sayılmasın
+        say(this.x, this.y - 34, '+' + Math.round(this.hp - before), '#2ecc71');
+        ring(this.x, this.y, '#2ecc71', 60, 22);
+        puff(this.x, this.y, '#8be0a4', 10);
+        setCd1(this, BG_Q_CD);
     }
 
-    // E: KÖR EDİCİ FLAŞ
-    function spFlash() {
+    // E: EZİCİ BASIŞ
+    function bgStomp() {
         if (!this.gadget2Ready || this.isDead) return;
         let hits = 0;
         getActiveEnemies().forEach(e => {
-            if (e.hp > 0 && dist(this, e) <= SP_FLASH_R + e.radius) { hurt(e, SP_FLASH_DMG, '#ffffff'); knock(e, angOf(this, e), 11); hits++; }
+            if (!(e.hp > 0) || dist(this, e) > BG_STOMP_R + e.radius) return;
+            hurt(e, BG_STOMP_DMG, '#ffb86a');
+            knock(e, angOf(this, e), 7);
+            slowEnemy(e, BG_SLOW_TIME, BG_SLOW_MULT);
+            hits++;
         });
-        for (let i = botBullets.length - 1; i >= 0; i--) {
-            const b = botBullets[i];
-            if (b && Math.hypot(b.x - this.x, b.y - this.y) < SP_FLASH_R) botBullets.splice(i, 1);
-        }
-        ring(this.x, this.y, '#ffffff', SP_FLASH_R, 24);
-        ring(this.x, this.y, '#ff7be5', SP_FLASH_R * 0.55, 18);
-        puff(this.x, this.y, '#ffd2f6', 12);
-        say(this.x, this.y - 34, 'KÖR EDİCİ FLAŞ!', '#ffffff');
+        ring(this.x, this.y, '#ffb86a', BG_STOMP_R, 24);
+        ring(this.x, this.y, '#ffffff', BG_STOMP_R * 0.5, 18);
+        puff(this.x, this.y, '#d9a066', 12);
+        say(this.x, this.y - 34, 'EZİCİ BASIŞ!', '#ffb86a');
         shake(8);
         charge(5 + hits * 4);
-        setCd2(this, SP_E_CD);
+        setCd2(this, BG_E_CD);
+    }
+    function slowEnemy(e, frames, mult) {
+        if (typeof e.speed !== 'number') return;
+        let s = slowed.find(x => x.e === e);
+        if (!s) { s = { e, base: e.speed, t: 0 }; slowed.push(s); }
+        s.t = frames;
+        e.speed = s.base * mult;
     }
 
-    // Güç: GÖKKUŞAĞI IŞINI (kısa hedef kilidi, sonra devasa ışın)
-    function spRainbow(a) {
-        if (!this.ultReady || this.isDead || sp.cast) return;
+    // Güç: BULDOZER
+    function bgDozer(a) {
+        if (!this.ultReady || this.isDead || bg.rush) return;
         const ang = a !== undefined ? a : this.angle;
         this.angle = ang;
-        sp.cast = { t: SP_ULT_LOCK, ang };
-        say(this.x, this.y - 40, 'GÖKKUŞAĞI!', '#ffffff');
+        bg.rush = { t: BG_RUSH_FRAMES, ang, hit: [] };
+        this.jumpInvulnerable = false;
+        say(this.x, this.y - 40, 'BULDOZER!', '#ff7a3d');
+        ring(this.x, this.y, '#ff7a3d', 90, 24);
+        shake(10);
         spendUlt();
     }
 
-    function rainbowFire() {
-        const P = player, ang = sp.cast.ang;
-        const sc = scanLine(P.x, P.y, ang, SP_ULT_LEN, SP_ULT_HALF_W);
-        const len = Math.min(SP_ULT_LEN, sc.blockD);
-        sc.list.forEach(h => { hurt(h.e, SP_ULT_DMG, '#ffffff'); knock(h.e, ang, 8); });
-        if (sc.blocker) sc.blocker.hp -= 600;
-        beams.push({ x1: P.x, y1: P.y, x2: P.x + Math.cos(ang) * len, y2: P.y + Math.sin(ang) * len,
-                     life: 22, max: 22, col: '#ff7be5', wide: true });
-        puff(P.x + Math.cos(ang) * 30, P.y + Math.sin(ang) * 30, '#ffffff', 12);
-        shake(14);
-        sp.cast = null;
+    // ========================================================================
+    //  PIRIL
+    // ========================================================================
+    function prShot(a) {
+        if (this.isDead || this.ammo < 1 || pr.air || pr.dash) return;
+        const ang = a !== undefined ? a : this.angle;
+        if (pr.cannon) {
+            if (now - pr.lastTooth < PR_TOOTH_GAP) return;
+            pr.lastTooth = now;
+            this.angle = ang;
+            this.consumeAmmo();
+            addShot(this.x + Math.cos(ang) * this.radius, this.y + Math.sin(ang) * this.radius, ang,
+                    PR_TOOTH_SPEED, PR_TOOTH_RANGE, PR_TOOTH_DMG, PR_TOOTH_R, '#ff9bd2', 'tooth');
+            puff(this.x + Math.cos(ang) * 30, this.y + Math.sin(ang) * 30, '#ffd2ec', 5);
+            shake(5);
+        } else {
+            this.angle = ang;
+            this.consumeAmmo();
+            for (let i = 0; i < PR_SHELLS; i++) {
+                const f = PR_SHELLS === 1 ? 0 : i / (PR_SHELLS - 1) - 0.5;
+                const aa = ang + f * 2 * PR_SHELL_SPREAD;
+                addShot(this.x + Math.cos(aa) * this.radius, this.y + Math.sin(aa) * this.radius, aa,
+                        PR_SHELL_SPEED, PR_SHELL_RANGE, PR_SHELL_DMG, PR_SHELL_R, '#ffb86a', 'shell');
+            }
+            puff(this.x + Math.cos(ang) * 28, this.y + Math.sin(ang) * 28, '#ffb86a', 4);
+            shake(3);
+        }
+    }
+
+    // Q: ŞEKER HIZI
+    function prSugar() {
+        if (!this.gadgetReady || this.isDead) return;
+        pr.sugar = PR_RUSH_TIME; pr.sugarT = 0;
+        ring(this.x, this.y, '#ff9bd2', 70, 22);
+        say(this.x, this.y - 34, 'ŞEKER HIZI!', '#ff9bd2');
+        setCd1(this, PR_Q_CD);
+    }
+
+    // E: ÇARPMA TESTİ
+    function prCrash(a) {
+        if (!this.gadget2Ready || this.isDead || pr.dash || pr.air) return;
+        const ang = a !== undefined ? a : this.angle;
+        this.angle = ang;
+        pr.dash = { t: PR_CRASH_FRAMES, ang, hit: [] };
+        say(this.x, this.y - 30, 'ÇARPMA TESTİ!', '#ffb86a');
+        setCd2(this, PR_E_CD);
+    }
+
+    // Güç: YILDIZ FIRLATICI (havaya fırlama + form değişimi)
+    function prLaunch(a, pull) {
+        if (!this.ultReady || this.isDead || pr.air) return;
+        const ang = a !== undefined ? a : this.angle;
+        this.angle = ang;
+        const dd = PR_JUMP_DIST * PR_JUMP_BONUS; // Pasif 1: Barut Tozu
+        const tx = clampRange(this.x + Math.cos(ang) * dd, WALL_THICKNESS + this.radius, canvas.width - WALL_THICKNESS - this.radius);
+        const ty = clampRange(this.y + Math.sin(ang) * dd, WALL_THICKNESS + this.radius, canvas.height - WALL_THICKNESS - this.radius);
+        pr.air = { t: PR_JUMP_FRAMES, sx: this.x, sy: this.y, tx, ty };
+        this.jumpInvulnerable = true;
+        pr.dash = null;
+        ring(this.x, this.y, '#ffe3f3', 90, 24);
+        say(this.x, this.y - 40, 'YILDIZ FIRLATICI!', '#ffe3f3');
+        spendUlt();
+    }
+    function prLand() {
+        const P = player, A = pr.air;
+        pr.air = null;
+        P.jumpInvulnerable = false;
+        // engelin içine inersek dışarı çıkar
+        for (const o of allObstacles()) {
+            const d = Math.hypot(P.x - o.x, P.y - o.y);
+            if (d < o.radius + P.radius) {
+                const a = d > 0.5 ? Math.atan2(P.y - o.y, P.x - o.x) : 0;
+                P.x = o.x + Math.cos(a) * (o.radius + P.radius + 2);
+                P.y = o.y + Math.sin(a) * (o.radius + P.radius + 2);
+            }
+        }
+        getActiveEnemies().forEach(e => {
+            if (e.hp > 0 && dist(P, e) <= PR_LAND_R + e.radius) { hurt(e, PR_LAND_DMG, '#ffe3f3'); knock(e, angOf(P, e), 10); }
+        });
+        pr.cannon = !pr.cannon; // FORM DEĞİŞİR
+        ring(P.x, P.y, '#ffe3f3', PR_LAND_R, 26);
+        ring(P.x, P.y, '#ff9bd2', PR_LAND_R * 0.6, 20);
+        puff(P.x, P.y, '#ffd2ec', 14);
+        say(P.x, P.y - 40, pr.cannon ? 'TOSUN FORMU!' : 'PIRIL FORMU!', '#ff9bd2');
+        shake(11);
     }
 
     // ------------------------------------------------------------- ARAYÜZ
     function ensureUI() {
         [ultiBtn, gadgetBtn, gadgetBtn2].forEach(el => { if (el.style.display !== 'flex') el.style.display = 'flex'; });
         const tag = player.charType;
-        if (gadgetBtn.dataset.m38 !== tag) {
-            const L = tag === KR ? ['KIRILMA<br>ATILIMI', 'CAM<br>KALKAN'] : ['YANSIMA<br>ADIMI', 'KÖR EDİCİ<br>FLAŞ'];
+        if (gadgetBtn.dataset.m39 !== tag) {
+            const L = tag === BG ? ['T-BONE<br>AŞISI', 'EZİCİ<br>BASIŞ'] : ['ŞEKER<br>HIZI', 'ÇARPMA<br>TESTİ'];
             gadgetBtn.innerHTML = L[0] + '<br><span id="gadget-timer"></span>';
             gadgetBtn2.innerHTML = L[1] + '<br><span id="gadget-timer-2"></span>';
-            gadgetBtn.dataset.m38 = tag;
+            gadgetBtn.dataset.m39 = tag;
             gadgetTimerText = document.getElementById('gadget-timer');
             gadgetTimerText2 = document.getElementById('gadget-timer-2');
         }
     }
 
     // ------------------------------------------------------------- GÜNCELLE
+    function moveWithPush(P, ang, step, plow) {
+        const nx = clampRange(P.x + Math.cos(ang) * step, WALL_THICKNESS + P.radius, canvas.width - WALL_THICKNESS - P.radius);
+        const ny = clampRange(P.y + Math.sin(ang) * step, WALL_THICKNESS + P.radius, canvas.height - WALL_THICKNESS - P.radius);
+        if (!plow) {
+            for (const o of allObstacles()) if (Math.hypot(nx - o.x, ny - o.y) < P.radius + o.radius) return false;
+        }
+        P.x = nx; P.y = ny;
+        return true;
+    }
+
     function tick(dt) {
         const P = player;
         const en = getActiveEnemies();
         now += dt;
         const alive = new Set(en);
 
-        // --- Hasar filtresi (cam kalkan) + Pasif 2: Yansıtma ---
+        // --- Hasar filtresi: Boğa'nın Sert Adam pasifi ---
         if (!P.isDead && P.hp < hpw.last) {
             const d = hpw.last - P.hp;
-            if (isKr(P)) {
-                if (kr.glass > 0 && P.hp > 0) P.hp = Math.min(P.maxHp, P.hp + d * KR_GLASS_RED);
-                let near = null, nd = Infinity;
-                en.forEach(e => {
-                    const dd = dist(P, e);
-                    if (e.hp > 0 && dd <= KR_REFLECT_R + e.radius && dd < nd) { nd = dd; near = e; }
-                });
-                if (near) hurt(near, Math.round(d * KR_REFLECT), '#bfefff');
+            if (isBg(P) && P.hp > 0 && hpw.last < P.maxHp * BG_TOUGH_HP) {
+                P.hp = Math.min(P.maxHp, P.hp + d * BG_TOUGH_RED);
             }
             hpw.lastHit = now;
         }
 
-        if (!P.isDead) charge(CHARGE_PER_FRAME * dt); // pasif şarj
+        if (!P.isDead) charge(CHARGE_PER_FRAME * dt);
 
-        // --- Kırılım: atılım ---
-        if (kr.dash) {
-            const D = kr.dash;
-            const step = (KR_DASH_DIST / KR_DASH_FRAMES) * dt;
-            const nx = clampRange(P.x + Math.cos(D.ang) * step, WALL_THICKNESS + P.radius, canvas.width - WALL_THICKNESS - P.radius);
-            const ny = clampRange(P.y + Math.sin(D.ang) * step, WALL_THICKNESS + P.radius, canvas.height - WALL_THICKNESS - P.radius);
-            let blocked = false;
-            for (const o of allObstacles()) {
-                if (Math.hypot(nx - o.x, ny - o.y) < P.radius + o.radius) { blocked = true; break; }
+        // --- Boğa: Çılgın Boğa (hızlı dolum) ---
+        if (isBg(P) && !P.isDead) {
+            if (P.hp < P.maxHp * BG_BERSERK_HP && P.ammo < P.maxAmmo) {
+                bg.ammoT += dt;
+                if (bg.ammoT >= BG_BERSERK_EVERY) { bg.ammoT = 0; P.ammo = Math.min(P.maxAmmo, P.ammo + 1); }
+            } else bg.ammoT = 0;
+        }
+        if (bg.swing > 0) bg.swing -= dt;
+
+        // --- Boğa: Buldozer hücumu ---
+        if (bg.rush) {
+            const R = bg.rush;
+            const step = (BG_RUSH_DIST / BG_RUSH_FRAMES) * dt;
+            moveWithPush(P, R.ang, step, true);
+            puff(P.x, P.y, '#ff7a3d', 1);
+            en.forEach(e => {
+                if (!(e.hp > 0) || R.hit.indexOf(e) >= 0) return;
+                if (dist(P, e) < P.radius + e.radius + 8) {
+                    R.hit.push(e);
+                    hurt(e, BG_RUSH_DMG, '#ff7a3d');
+                    knock(e, R.ang + (Math.random() < 0.5 ? 0.9 : -0.9), 10);
+                    charge(0);
+                }
+            });
+            allObstacles().forEach(o => {
+                if (R.hit.indexOf(o) >= 0) return;
+                if (Math.hypot(P.x - o.x, P.y - o.y) < P.radius + o.radius + 6) { R.hit.push(o); o.hp -= BG_RUSH_OBST; shake(5); }
+            });
+            R.t -= dt;
+            if (R.t <= 0 || P.isDead) {
+                bg.rush = null;
+                for (const o of allObstacles()) {
+                    const d = Math.hypot(P.x - o.x, P.y - o.y);
+                    if (o.hp > 0 && d < o.radius + P.radius) {
+                        const a = d > 0.5 ? Math.atan2(P.y - o.y, P.x - o.x) : 0;
+                        P.x = o.x + Math.cos(a) * (o.radius + P.radius + 2);
+                        P.y = o.y + Math.sin(a) * (o.radius + P.radius + 2);
+                    }
+                }
+                ring(P.x, P.y, '#ff7a3d', 70, 18);
             }
-            if (blocked || P.isDead) {
-                kr.dash = null;
-            } else {
-                P.x = nx; P.y = ny;
-                puff(P.x, P.y, '#7fd8ff', 1);
-                let any = false;
+        }
+
+        // --- Piril: çarpma testi atılımı ---
+        if (pr.dash) {
+            const D = pr.dash;
+            const step = (PR_CRASH_DIST / PR_CRASH_FRAMES) * dt;
+            if (P.isDead || !moveWithPush(P, D.ang, step, false)) pr.dash = null;
+            else {
+                puff(P.x, P.y, '#ffb86a', 1);
                 en.forEach(e => {
                     if (!(e.hp > 0) || D.hit.indexOf(e) >= 0) return;
-                    if (dist(P, e) < P.radius + e.radius + 6) {
-                        D.hit.push(e);
-                        hurt(e, KR_DASH_DMG, '#7fd8ff');
-                        knock(e, D.ang, 7);
-                        charge(5);
-                        any = true;
-                    }
+                    if (dist(P, e) < P.radius + e.radius + 6) { D.hit.push(e); hurt(e, PR_CRASH_DMG, '#ffb86a'); knock(e, D.ang, 9); charge(4); }
                 });
-                if (any) P.ammo = Math.min(P.maxAmmo, P.ammo + 1);
                 D.t -= dt;
-                if (D.t <= 0) kr.dash = null;
+                if (D.t <= 0) pr.dash = null;
             }
         }
 
-        // --- Kırılım: kalkan, form, yük sönümü ---
-        if (kr.glass > 0) {
-            kr.glass -= dt;
-            if (kr.glass <= 0) { kr.glass = 0; glassEnd(); }
+        // --- Piril: havada uçuş ---
+        if (pr.air) {
+            const A = pr.air;
+            A.t -= dt;
+            const k = 1 - Math.max(0, A.t) / PR_JUMP_FRAMES;
+            P.x = A.sx + (A.tx - A.sx) * k;
+            P.y = A.sy + (A.ty - A.sy) * k;
+            if (Math.random() < 0.6 * dt) puff(P.x, P.y, '#ffe3f3', 1);
+            if (A.t <= 0 || P.isDead) prLand();
         }
-        if (kr.form > 0) {
-            kr.form -= dt;
-            if (Math.random() < 0.3 * dt) puff(P.x, P.y, '#ffffff', 1);
-            if (kr.form <= 0) { kr.form = 0; ring(P.x, P.y, '#ffffff', 100, 24); say(P.x, P.y - 40, 'FORM BİTTİ', '#bfefff'); }
-        }
-        if (kr.stacks > 0) { kr.stackT -= dt; if (kr.stackT <= 0) kr.stacks = 0; }
-        if (kr.swing) { kr.swing.t += dt; if (kr.swing.t >= kr.swing.dur) kr.swing = null; }
 
-        // --- Spektrum: ulti hedef kilidi ---
-        if (sp.cast) {
-            sp.cast.t -= dt;
-            if (P.isDead) sp.cast = null;
-            else if (sp.cast.t <= 0) rainbowFire();
+        // --- Piril: Şeker Hızı ---
+        if (pr.sugar > 0) {
+            pr.sugar -= dt;
+            pr.sugarT += dt;
+            if (pr.sugarT >= PR_RUSH_EVERY) { pr.sugarT = 0; P.ammo = Math.min(P.maxAmmo, P.ammo + 1); }
+            if (Math.random() < 0.4 * dt) puff(P.x, P.y, '#ff9bd2', 1);
+            if (pr.sugar < 0) pr.sugar = 0;
         }
 
         // --- Hız çarpanı ---
         if (P.originalSpeed) {
             let m = 1;
-            if (isKr(P) && kr.form > 0) m *= KR_FORM_SPEED;
-            if (isSp(P) && sp.cast) m *= 0.5;
+            if (isPr(P) && pr.sugar > 0) m *= PR_RUSH_SPEED;
             P.speed = P.originalSpeed * m;
         }
+
+        // --- Yavaşlatma süreleri ---
+        for (let i = slowed.length - 1; i >= 0; i--) {
+            const s = slowed[i];
+            s.t -= dt;
+            if (s.t <= 0 || !alive.has(s.e)) { if (s.e) s.e.speed = s.base; slowed.splice(i, 1); }
+        }
+
+        updateShots(dt);
 
         // --- İtme ---
         for (let i = knocked.length - 1; i >= 0; i--) {
             const e = knocked[i];
-            const vx = e._m38kx || 0, vy = e._m38ky || 0;
-            if (Math.hypot(vx, vy) < 0.3 || !alive.has(e)) { e._m38kx = 0; e._m38ky = 0; knocked.splice(i, 1); continue; }
+            const vx = e._m39kx || 0, vy = e._m39ky || 0;
+            if (Math.hypot(vx, vy) < 0.3 || !alive.has(e)) { e._m39kx = 0; e._m39ky = 0; knocked.splice(i, 1); continue; }
             e.x = clampRange(e.x + vx * dt, WALL_THICKNESS + e.radius, canvas.width - WALL_THICKNESS - e.radius);
             e.y = clampRange(e.y + vy * dt, WALL_THICKNESS + e.radius, canvas.height - WALL_THICKNESS - e.radius);
             const fr = Math.pow(0.82, dt);
-            e._m38kx = vx * fr; e._m38ky = vy * fr;
+            e._m39kx = vx * fr; e._m39ky = vy * fr;
         }
 
         // --- Efektler ---
@@ -538,7 +613,7 @@
             c.save();
             c.globalAlpha = a; c.lineCap = 'round';
             c.shadowColor = col; c.shadowBlur = 14;
-            c.strokeStyle = col; c.lineWidth = (b.wide ? 34 : 12) * a + 3;
+            c.strokeStyle = col; c.lineWidth = 12 * a + 3;
             c.beginPath(); c.moveTo(b.x1, b.y1); c.lineTo(b.x2, b.y2); c.stroke();
             c.shadowBlur = 0;
             c.strokeStyle = '#ffffff'; c.lineWidth = 3 * a + 1; c.stroke();
@@ -564,78 +639,89 @@
     }
 
 
-    function drawKirilim() {
-        const P = player, c = ctx, t = Date.now(), r = P.radius;
-        const form = kr.form > 0;
-        c.save();
-        if (P.isInvisible) c.globalAlpha = 0.4;
-        // kristal çıkıntılar
-        const n = form ? 8 : 5;
-        for (let i = 0; i < n; i++) {
-            const a = (i / n) * Math.PI * 2 + t / (form ? 400 : 1200), rr = r + (form ? 14 : 8);
-            c.save(); c.translate(P.x + Math.cos(a) * rr, P.y + Math.sin(a) * rr); c.rotate(a);
-            c.fillStyle = form ? 'rgba(255,255,255,0.9)' : 'rgba(127,216,255,0.85)';
-            c.beginPath(); c.moveTo(7, 0); c.lineTo(-4, -4); c.lineTo(-4, 4); c.closePath(); c.fill();
-            c.restore();
-        }
-        c.save(); c.translate(P.x, P.y); c.rotate(P.angle || 0);
-        c.fillStyle = '#e8f9ff';
-        c.beginPath(); c.arc(r * 0.5, -r * 0.28, r * 0.14, 0, Math.PI * 2); c.fill();
-        c.beginPath(); c.arc(r * 0.5, r * 0.28, r * 0.14, 0, Math.PI * 2); c.fill();
-        c.fillStyle = '#bfefff'; c.fillRect(r * 0.6, -2, r * 1.0, 4); // kristal kılıç
-        c.restore();
-        if (kr.glass > 0) {
-            const blink = (kr.glass < 30 && Math.floor(kr.glass / 4) % 2 === 0) ? 0.4 : 1;
-            c.save(); c.globalAlpha = blink; c.translate(P.x, P.y); c.rotate(t / 700);
-            c.beginPath();
-            for (let i = 0; i < 6; i++) {
-                const a = i * Math.PI / 3, rr = r + 15;
-                if (i === 0) c.moveTo(Math.cos(a) * rr, Math.sin(a) * rr); else c.lineTo(Math.cos(a) * rr, Math.sin(a) * rr);
+    function drawShots() {
+        const c = ctx;
+        shots.forEach(b => {
+            c.save();
+            c.fillStyle = b.col;
+            c.shadowColor = b.col; c.shadowBlur = b.kind === 'tooth' ? 14 : 6;
+            c.beginPath(); c.arc(b.x, b.y, b.r, 0, Math.PI * 2); c.fill();
+            c.shadowBlur = 0;
+            c.strokeStyle = '#ffffff'; c.lineWidth = 1.2; c.stroke();
+            if (b.kind === 'tooth') {
+                c.globalAlpha = 0.35; c.strokeStyle = b.col; c.lineWidth = b.r;
+                c.beginPath(); c.moveTo(b.x, b.y); c.lineTo(b.x - b.vx * 1.4, b.y - b.vy * 1.4); c.stroke();
             }
-            c.closePath();
-            c.fillStyle = 'rgba(191,239,255,0.25)'; c.fill();
-            c.strokeStyle = '#bfefff'; c.lineWidth = 3; c.stroke();
             c.restore();
-        }
-        for (let i = 0; i < KR_STACK_MAX; i++) {
-            c.beginPath(); c.arc(P.x - 15 + i * 10, P.y + r + 12, 3, 0, Math.PI * 2);
-            c.fillStyle = i < kr.stacks ? '#7fd8ff' : 'rgba(255,255,255,0.18)'; c.fill();
-        }
-        if (kr.swing) {
-            const s = kr.swing, a = 1 - s.t / s.dur;
-            c.beginPath(); c.moveTo(P.x, P.y);
-            if (s.form) c.arc(P.x, P.y, s.range, 0, Math.PI * 2); else c.arc(P.x, P.y, s.range, s.ang - s.half, s.ang + s.half);
-            c.closePath();
-            c.fillStyle = (s.form ? 'rgba(255,255,255,' : 'rgba(127,216,255,') + (0.3 * Math.max(0, a)) + ')'; c.fill();
-            c.strokeStyle = 'rgba(255,255,255,' + (0.6 * Math.max(0, a)) + ')'; c.lineWidth = 2; c.stroke();
-        }
-        c.restore();
-        if (form) drawBar('BEYAZ IŞIK', kr.form / KR_FORM_TIME, '#ffffff');
+        });
     }
 
-    function drawSpektrum() {
+    function drawBoga() {
         const P = player, c = ctx, t = Date.now(), r = P.radius;
+        const low = P.hp < P.maxHp * BG_BERSERK_HP, tough = P.hp < P.maxHp * BG_TOUGH_HP;
         c.save();
         if (P.isInvisible) c.globalAlpha = 0.4;
-        // dönen prizma
-        c.save(); c.translate(P.x, P.y - r - 10); c.rotate(t / 600);
-        c.beginPath(); c.moveTo(0, -8); c.lineTo(7, 5); c.lineTo(-7, 5); c.closePath();
-        c.fillStyle = 'rgba(255,255,255,0.85)'; c.fill();
-        c.strokeStyle = '#ff7be5'; c.lineWidth = 2; c.stroke();
-        c.restore();
+        if (bg.rush) {
+            c.strokeStyle = 'rgba(255,122,61,0.6)'; c.lineWidth = 3;
+            const back = (P.angle || 0) + Math.PI;
+            for (let k = -1; k <= 1; k++) {
+                const ox = Math.cos(back + Math.PI / 2) * k * 9, oy = Math.sin(back + Math.PI / 2) * k * 9;
+                c.beginPath();
+                c.moveTo(P.x + ox + Math.cos(back) * (r + 4), P.y + oy + Math.sin(back) * (r + 4));
+                c.lineTo(P.x + ox + Math.cos(back) * (r + 40), P.y + oy + Math.sin(back) * (r + 40));
+                c.stroke();
+            }
+        }
+        // boynuzlar + gözler + namlu
         c.save(); c.translate(P.x, P.y); c.rotate(P.angle || 0);
-        c.fillStyle = '#ffeefb';
-        c.beginPath(); c.arc(r * 0.5, -r * 0.28, r * 0.14, 0, Math.PI * 2); c.fill();
-        c.beginPath(); c.arc(r * 0.5, r * 0.28, r * 0.14, 0, Math.PI * 2); c.fill();
-        c.fillStyle = '#6a2a9a'; c.fillRect(r * 0.55, -2.5, r * 1.1, 5);
+        c.strokeStyle = '#f1e2c6'; c.lineWidth = 4; c.lineCap = 'round';
+        c.beginPath(); c.moveTo(r * 0.55, -r * 0.55); c.quadraticCurveTo(r * 1.2, -r * 0.9, r * 1.35, -r * 0.35); c.stroke();
+        c.beginPath(); c.moveTo(r * 0.55, r * 0.55); c.quadraticCurveTo(r * 1.2, r * 0.9, r * 1.35, r * 0.35); c.stroke();
+        c.fillStyle = '#ffe9d1';
+        c.beginPath(); c.arc(r * 0.45, -r * 0.28, r * 0.14, 0, Math.PI * 2); c.fill();
+        c.beginPath(); c.arc(r * 0.45, r * 0.28, r * 0.14, 0, Math.PI * 2); c.fill();
+        c.fillStyle = '#3d3a37'; c.fillRect(r * 0.3, -5, r * 1.0 + (bg.swing > 0 ? -3 : 0), 4); c.fillRect(r * 0.3, 1, r * 1.0 + (bg.swing > 0 ? -3 : 0), 4);
         c.restore();
-        if (sp.cast) {
-            const k = 1 - sp.cast.t / SP_ULT_LOCK;
-            c.strokeStyle = 'rgba(255,255,255,' + (0.4 + 0.5 * k) + ')'; c.lineWidth = 2 + 6 * k;
-            c.beginPath(); c.moveTo(P.x, P.y);
-            c.lineTo(P.x + Math.cos(sp.cast.ang) * SP_ULT_LEN, P.y + Math.sin(sp.cast.ang) * SP_ULT_LEN); c.stroke();
+        if (low) { c.beginPath(); c.arc(P.x, P.y, r + 5, 0, Math.PI * 2); c.strokeStyle = 'rgba(255,90,60,' + (0.4 + 0.2 * Math.sin(t / 120)) + ')'; c.lineWidth = 2; c.stroke(); }
+        if (tough) { c.beginPath(); c.arc(P.x, P.y, r + 9, 0, Math.PI * 2); c.strokeStyle = 'rgba(190,200,210,0.7)'; c.lineWidth = 3; c.stroke(); }
+        c.restore();
+    }
+
+    function drawPiril() {
+        const P = player, c = ctx, t = Date.now(), r = P.radius;
+        const air = !!pr.air;
+        const lift = air ? Math.sin((1 - pr.air.t / PR_JUMP_FRAMES) * Math.PI) * 26 : 0;
+        c.save();
+        if (P.isInvisible) c.globalAlpha = 0.4;
+        if (air) {
+            c.save(); c.globalAlpha = 0.3; c.fillStyle = '#000';
+            c.beginPath(); c.ellipse(P.x, P.y + r * 0.6, r * 0.9, r * 0.3, 0, 0, Math.PI * 2); c.fill();
+            c.restore();
+        }
+        c.save(); c.translate(P.x, P.y - lift); c.rotate(P.angle || 0);
+        if (pr.cannon) {
+            c.fillStyle = '#5a4a56'; c.beginPath(); c.arc(0, 0, r + 8, 0, Math.PI * 2); c.fill();
+            c.strokeStyle = '#2c2430'; c.lineWidth = 3; c.stroke();
+            c.fillStyle = '#7a6678'; c.fillRect(4, -8, r + 24, 16);
+            c.strokeStyle = '#2c2430'; c.lineWidth = 2; c.strokeRect(4, -8, r + 24, 16);
+            c.fillStyle = '#ff9bd2'; c.fillRect(r + 24, -5, 4, 10);
+        } else {
+            c.fillStyle = '#ffe3f3';
+            c.beginPath(); c.arc(r * 0.5, -r * 0.28, r * 0.14, 0, Math.PI * 2); c.fill();
+            c.beginPath(); c.arc(r * 0.5, r * 0.28, r * 0.14, 0, Math.PI * 2); c.fill();
+            c.fillStyle = '#6b4a5f'; c.fillRect(r * 0.55, -3, r * 0.9, 6);
         }
         c.restore();
+        if (!pr.cannon) { // küçük yıldız: form göstergesi
+            c.fillStyle = '#ffd2ec'; c.font = 'bold 12px monospace'; c.textAlign = 'center';
+            c.fillText('★', P.x, P.y - r - 8 - lift);
+        }
+        if (pr.sugar > 0) {
+            c.beginPath(); c.arc(P.x, P.y - lift, r + 6, 0, Math.PI * 2);
+            c.strokeStyle = 'rgba(255,155,210,0.6)'; c.lineWidth = 2; c.stroke();
+        }
+        c.restore();
+        if (pr.cannon) drawBar('TOSUN FORMU', 1, '#ff9bd2');
     }
 
     function drawPreviews() {
@@ -645,34 +731,33 @@
         c.save();
         c.setLineDash([8, 6]); c.lineWidth = 2;
         if (aim && P.ammo >= 1) {
-            if (isKr(P)) {
-                c.strokeStyle = 'rgba(127,216,255,0.6)';
-                c.beginPath(); c.moveTo(P.x, P.y);
-                if (kr.form > 0) c.arc(P.x, P.y, KR_FORM_RANGE, 0, Math.PI * 2);
-                else c.arc(P.x, P.y, KR_RANGE, aim.angle - KR_HALF, aim.angle + KR_HALF);
-                c.closePath(); c.stroke();
+            c.strokeStyle = 'rgba(255,184,106,0.6)';
+            c.beginPath(); c.moveTo(P.x, P.y);
+            if (isBg(P)) {
+                c.arc(P.x, P.y, BG_RANGE, aim.angle - BG_SPREAD / 2, aim.angle + BG_SPREAD / 2);
+                c.closePath();
+            } else if (pr.cannon) {
+                c.lineTo(P.x + Math.cos(aim.angle) * PR_TOOTH_RANGE, P.y + Math.sin(aim.angle) * PR_TOOTH_RANGE);
             } else {
-                c.strokeStyle = 'rgba(255,123,229,0.6)';
-                c.beginPath(); c.moveTo(P.x, P.y);
-                c.lineTo(P.x + Math.cos(aim.angle) * SP_LEN, P.y + Math.sin(aim.angle) * SP_LEN); c.stroke();
+                c.arc(P.x, P.y, PR_SHELL_RANGE, aim.angle - PR_SHELL_SPREAD, aim.angle + PR_SHELL_SPREAD);
+                c.closePath();
             }
+            c.stroke();
         }
         if (gadAim.active && P.gadgetReady) {
-            c.strokeStyle = isKr(P) ? 'rgba(127,216,255,0.8)' : 'rgba(255,123,229,0.8)'; c.lineWidth = 6;
-            const L = isKr(P) ? KR_DASH_DIST : SP_BLINK;
-            c.beginPath(); c.moveTo(P.x, P.y);
-            c.lineTo(P.x + Math.cos(gadAim.angle) * L, P.y + Math.sin(gadAim.angle) * L); c.stroke();
+            c.strokeStyle = 'rgba(46,204,113,0.7)';
+            c.beginPath(); c.arc(P.x, P.y, 50, 0, Math.PI * 2); c.stroke();
         }
         if (gadAim2.active && P.gadget2Ready) {
-            c.strokeStyle = isKr(P) ? 'rgba(191,239,255,0.8)' : 'rgba(255,255,255,0.8)';
-            c.beginPath(); c.arc(P.x, P.y, isKr(P) ? KR_GLASS_R : SP_FLASH_R, 0, Math.PI * 2); c.stroke();
+            c.strokeStyle = 'rgba(255,184,106,0.8)';
+            if (isBg(P)) { c.beginPath(); c.arc(P.x, P.y, BG_STOMP_R, 0, Math.PI * 2); c.stroke(); }
+            else { c.lineWidth = 6; c.beginPath(); c.moveTo(P.x, P.y); c.lineTo(P.x + Math.cos(gadAim2.angle) * PR_CRASH_DIST, P.y + Math.sin(gadAim2.angle) * PR_CRASH_DIST); c.stroke(); }
         }
         if (ultAim.active && P.ultReady) {
-            c.strokeStyle = 'rgba(241,196,15,0.8)';
-            if (isSp(P)) {
-                c.lineWidth = 4; c.beginPath(); c.moveTo(P.x, P.y);
-                c.lineTo(P.x + Math.cos(ultAim.angle) * SP_ULT_LEN, P.y + Math.sin(ultAim.angle) * SP_ULT_LEN); c.stroke();
-            } else { c.beginPath(); c.arc(P.x, P.y, KR_FORM_RANGE, 0, Math.PI * 2); c.stroke(); }
+            c.strokeStyle = 'rgba(241,196,15,0.8)'; c.lineWidth = 4;
+            const L = isBg(P) ? BG_RUSH_DIST : PR_JUMP_DIST * PR_JUMP_BONUS;
+            c.beginPath(); c.moveTo(P.x, P.y); c.lineTo(P.x + Math.cos(ultAim.angle) * L, P.y + Math.sin(ultAim.angle) * L); c.stroke();
+            if (isPr(P)) { c.beginPath(); c.arc(P.x + Math.cos(ultAim.angle) * L, P.y + Math.sin(ultAim.angle) * L, PR_LAND_R, 0, Math.PI * 2); c.stroke(); }
         }
         c.restore();
     }
@@ -680,9 +765,10 @@
     function drawWorld() {
         drawBeams();
         drawFx();
+        drawShots();
         drawPreviews();
         if (player.isDead) return;
-        if (isKr(player)) drawKirilim(); else drawSpektrum();
+        if (isBg(player)) drawBoga(); else drawPiril();
     }
 
     // ----------------------------------------------------- HOOK'LAR (varsa)
@@ -712,7 +798,7 @@
         const mine = gameStarted && isMine(player);
         if (!mine) {
             if (wasActive) { resetState(); wasActive = false; curChar = null; }
-            if (gameStarted && gadgetBtn.dataset.m38) delete gadgetBtn.dataset.m38;
+            if (gameStarted && gadgetBtn.dataset.m39) delete gadgetBtn.dataset.m39;
             return;
         }
         try {
@@ -723,7 +809,7 @@
             tick(dt);
             drawWorld();
         } catch (err) {
-            if (!warned) { warned = true; console.warn('[mod38] hata:', err); }
+            if (!warned) { warned = true; console.warn('[mod39] hata:', err); }
         }
     }
     requestAnimationFrame(loop);
