@@ -34,7 +34,7 @@
     const CHARGE_PER_KILL = 25;
 
     // ---- Boğa denge sabitleri ----
-    const BG_PELLETS = 5, BG_PELLET_DMG = 230, BG_SPREAD = 0.46, BG_SPEED = 13, BG_RANGE = 230, BG_PELLET_R = 5;
+    const BG_PELLETS = 8, BG_PELLET_DMG = 500, BG_SPREAD = 0.46, BG_SPEED = 13, BG_RANGE = 230, BG_PELLET_R = 5;
     const BG_BERSERK_HP = 0.6, BG_BERSERK_EVERY = 75;
     const BG_TOUGH_HP = 0.4, BG_TOUGH_RED = 0.3;
     const BG_HEAL = 1000, BG_Q_CD = 1020;
@@ -43,11 +43,11 @@
 
     // ---- Piril denge sabitleri ----
     const PR_SHELLS = 3, PR_SHELL_DMG = 750, PR_SHELL_SPREAD = 0.3, PR_SHELL_SPEED = 12, PR_SHELL_RANGE = 270, PR_SHELL_R = 7;
-    const PR_TOOTH_DMG = 2500, PR_TOOTH_SPEED = 17, PR_TOOTH_RANGE = 360, PR_TOOTH_R = 8, PR_TOOTH_GAP = 40;
+    const PR_TOOTH_DMG = 3500, PR_TOOTH_SPEED = 17, PR_TOOTH_RANGE = 360, PR_TOOTH_R = 8, PR_TOOTH_GAP = 40;
     const PR_SPLIT_RANGE = 130, PR_SPLIT_FRAC = 0.25;
     const PR_JUMP_DIST = 300, PR_JUMP_BONUS = 1.36, PR_JUMP_FRAMES = 30, PR_LAND_R = 140, PR_LAND_DMG = 900;
     const PR_RUSH_TIME = 300, PR_RUSH_SPEED = 1.3, PR_RUSH_EVERY = 45, PR_Q_CD = 840;
-    const PR_CRASH_DIST = 140, PR_CRASH_FRAMES = 9, PR_CRASH_DMG = 300, PR_E_CD = 660;
+    const PR_CRASH_DIST = 140, PR_CRASH_FRAMES = 9, PR_CRASH_DMG = 900, PR_E_CD = 660;
 
     // ---------------------------------------------------------------- KAYIT
     EXT.characters[BG] = { color: '#c0612b', hp: 4600, speed: 3.2 };
